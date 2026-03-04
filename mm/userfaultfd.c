@@ -1278,10 +1278,10 @@ static long move_present_ptes(struct mm_struct *mm,
 		orig_dst_pte = pte_mkwrite(orig_dst_pte, dst_vma);
 		set_pte_at(mm, dst_addr, dst_pte, orig_dst_pte);
 
-		src_addr += PAGE_SIZE;
+		src_addr += MMUPAGE_SIZE;
 		if (src_addr == src_end)
 			break;
-		dst_addr += PAGE_SIZE;
+		dst_addr += MMUPAGE_SIZE;
 		dst_pte++;
 		src_pte++;
 
@@ -1360,7 +1360,7 @@ static int move_swap_pte(struct mm_struct *mm, struct vm_area_struct *dst_vma,
 	set_pte_at(mm, dst_addr, dst_pte, orig_src_pte);
 	double_pt_unlock(dst_ptl, src_ptl);
 
-	return PAGE_SIZE;
+	return MMUPAGE_SIZE;
 }
 
 static int move_zeropage_pte(struct mm_struct *mm,
@@ -1387,7 +1387,7 @@ static int move_zeropage_pte(struct mm_struct *mm,
 	set_pte_at(mm, dst_addr, dst_pte, zero_pte);
 	double_pt_unlock(dst_ptl, src_ptl);
 
-	return PAGE_SIZE;
+	return MMUPAGE_SIZE;
 }
 
 
@@ -1474,7 +1474,7 @@ retry:
 		if (!(mode & UFFDIO_MOVE_MODE_ALLOW_SRC_HOLES))
 			ret = -ENOENT;
 		else /* nothing to do to move a hole */
-			ret = PAGE_SIZE;
+			ret = MMUPAGE_SIZE;
 		goto out;
 	}
 

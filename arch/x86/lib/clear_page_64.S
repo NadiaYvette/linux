@@ -4,6 +4,7 @@
 #include <linux/cfi_types.h>
 #include <linux/objtool.h>
 #include <asm/asm.h>
+#include <asm/page_types.h>
 
 /*
  * Zero page aligned region.

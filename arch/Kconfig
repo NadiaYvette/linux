@@ -1369,6 +1369,29 @@ config PAGE_SHIFT
 	default	16 if PAGE_SIZE_64KB
 	default	18 if PAGE_SIZE_256KB
 
+config PAGE_MMUSHIFT
+	int "Extra PAGE_SIZE shift over MMU page size (page clustering)"
+	default 0
+	help
+	  This specifies the additional shift of the kernel's internal
+	  PAGE_SIZE over the hardware MMU page size (MMUPAGE_SIZE).
+	  The kernel allocates physical memory in PAGE_SIZE chunks
+	  (= 2^PAGE_MMUSHIFT * MMUPAGE_SIZE) but maps individual
+	  MMUPAGE_SIZE PTEs to userspace, preserving the standard
+	  TLB/MMU base page ABI.
+
+	  When set to 0 (the default), PAGE_SIZE equals MMUPAGE_SIZE
+	  and the kernel behaves identically to a stock configuration.
+
+	  When set to N > 0, the kernel page size is 2^N times the
+	  hardware page size. For example, on x86 with PAGE_MMUSHIFT=2,
+	  the kernel uses 16KB pages internally while userspace still
+	  sees 4KB pages via the MMU.
+
+	  This is based on Hugh Dickins' "larpage" work (2001).
+
+	  If unsure, leave this at 0.
+
 # This allows to use a set of generic functions to determine mmap base
 # address by giving priority to top-down scheme only if the process
 # is not in legacy mode (compat task, unlimited stack size or

@@ -38,7 +38,7 @@ static vm_fault_t relay_buf_fault(struct vm_fault *vmf)
 	if (!buf)
 		return VM_FAULT_OOM;
 
-	page = vmalloc_to_page(buf->start + (pgoff << PAGE_SHIFT));
+	page = vmalloc_to_page(buf->start + (pgoff << MMUPAGE_SHIFT));
 	if (!page)
 		return VM_FAULT_SIGBUS;
 	get_page(page);

@@ -1144,8 +1144,9 @@ static inline bool
 folio_within_range(struct folio *folio, struct vm_area_struct *vma,
 		unsigned long start, unsigned long end)
 {
-	pgoff_t pgoff, addr;
-	unsigned long vma_pglen = vma_pages(vma);
+	pgoff_t pgoff;
+	unsigned long addr;
+	unsigned long vma_mmupagelen = (vma->vm_end - vma->vm_start) >> MMUPAGE_SHIFT;
 
 	VM_WARN_ON_FOLIO(folio_test_ksm(folio), folio);
 	if (start > end)
@@ -1159,11 +1160,11 @@ folio_within_range(struct folio *folio, struct vm_area_struct *vma,
 
 	pgoff = folio_pgoff(folio);
 
-	/* if folio start address is not in vma range */
-	if (!in_range(pgoff, vma->vm_pgoff, vma_pglen))
+	/* if folio start address is not in vma range (MMUPAGE units) */
+	if (!in_range(pgoff_page_to_mmu(pgoff), vma->vm_pgoff, vma_mmupagelen))
 		return false;
 
-	addr = vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
+	addr = pgoff_to_vma_addr(vma, pgoff);
 
 	return !(addr < start || end - addr < folio_size(folio));
 }
@@ -1236,14 +1237,15 @@ static inline unsigned long vma_address(const struct vm_area_struct *vma,
 		pgoff_t pgoff, unsigned long nr_pages)
 {
 	unsigned long address;
+	pgoff_t pgoff_mmu = pgoff_page_to_mmu(pgoff);
+	pgoff_t nr_mmupages = nr_pages << PAGE_MMUSHIFT;
 
-	if (pgoff >= vma->vm_pgoff) {
-		address = vma->vm_start +
-			((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
+	if (pgoff_mmu >= vma->vm_pgoff) {
+		address = pgoff_to_vma_addr(vma, pgoff);
 		/* Check for address beyond vma (or wrapped through 0?) */
 		if (address < vma->vm_start || address >= vma->vm_end)
 			address = -EFAULT;
-	} else if (pgoff + nr_pages - 1 >= vma->vm_pgoff) {
+	} else if (pgoff_mmu + nr_mmupages - 1 >= vma->vm_pgoff) {
 		/* Test above avoids possibility of wrap to 0 on 32-bit */
 		address = vma->vm_start;
 	} else {
@@ -1267,7 +1269,7 @@ static inline unsigned long vma_address_end(struct page_vma_mapped_walk *pvmw)
 		return pvmw->address + PAGE_SIZE;
 
 	pgoff = pvmw->pgoff + pvmw->nr_pages;
-	address = vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
+	address = pgoff_to_vma_addr(vma, pgoff);
 	/* Check for address beyond vma (or wrapped through 0?) */
 	if (address < vma->vm_start || address > vma->vm_end)
 		address = vma->vm_end;

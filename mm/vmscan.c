@@ -3495,7 +3495,7 @@ static bool walk_pte_range(pmd_t *pmd, unsigned long start, unsigned long end,
 
 	lazy_mmu_mode_enable();
 restart:
-	for (i = pte_index(start), addr = start; addr != end; i += nr, addr += nr * PAGE_SIZE) {
+	for (i = pte_index(start), addr = start; addr != end; i += nr, addr += nr * MMUPAGE_SIZE) {
 		unsigned long pfn;
 		struct folio *folio;
 		pte_t *cur_pte = pte + i;
@@ -4241,10 +4241,10 @@ bool lru_gen_look_around(struct page_vma_mapped_walk *pvmw, unsigned int nr)
 
 	lazy_mmu_mode_enable();
 
-	pte -= (addr - start) / PAGE_SIZE;
+	pte -= (addr - start) / MMUPAGE_SIZE;
 
 	for (i = 0, addr = start; addr != end;
-	     i += nr, pte += nr, addr += nr * PAGE_SIZE) {
+	     i += nr, pte += nr, addr += nr * MMUPAGE_SIZE) {
 		unsigned long pfn;
 		pte_t ptent = ptep_get(pte);
 
