@@ -1956,7 +1956,7 @@ static inline unsigned int folio_unmap_pte_batch(struct folio *folio,
 
 	/* We may only batch within a single VMA and a single page table. */
 	end_addr = pmd_addr_end(addr, vma->vm_end);
-	max_nr = (end_addr - addr) >> PAGE_SHIFT;
+	max_nr = (end_addr - addr) >> MMUPAGE_SHIFT;
 
 	/* We only support lazyfree or file folios batching for now ... */
 	if (folio_test_anon(folio) && folio_test_swapbacked(folio))
@@ -2165,7 +2165,7 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 				folio_mark_dirty(folio);
 		} else if (likely(pte_present(pteval))) {
 			nr_pages = folio_unmap_pte_batch(folio, &pvmw, flags, pteval);
-			end_addr = address + nr_pages * PAGE_SIZE;
+			end_addr = address + nr_pages * MMUPAGE_SIZE;
 			flush_cache_range(vma, address, end_addr);
 
 			/* Nuke the page table entry. */
@@ -2584,7 +2584,7 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 				 */
 				pteval = ptep_get_and_clear(mm, address, pvmw.pte);
 
-				set_tlb_ubc_flush_pending(mm, pteval, address, address + PAGE_SIZE);
+				set_tlb_ubc_flush_pending(mm, pteval, address, address + MMUPAGE_SIZE);
 			} else {
 				pteval = ptep_clear_flush(vma, address, pvmw.pte);
 			}
@@ -2860,7 +2860,7 @@ retry:
 	 * caller must filter this event out to prevent livelocks.
 	 */
 	mmu_notifier_range_init_owner(&range, MMU_NOTIFY_EXCLUSIVE, 0,
-				      mm, addr, addr + PAGE_SIZE, owner);
+				      mm, addr, addr + MMUPAGE_SIZE, owner);
 	mmu_notifier_invalidate_range_start(&range);
 
 	/*

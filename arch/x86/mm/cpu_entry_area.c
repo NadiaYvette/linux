@@ -79,7 +79,7 @@ EXPORT_SYMBOL(get_cpu_entry_area);
 void cea_set_pte(void *cea_vaddr, phys_addr_t pa, pgprot_t flags)
 {
 	unsigned long va = (unsigned long) cea_vaddr;
-	pte_t pte = pfn_pte(pa >> PAGE_SHIFT, flags);
+	pte_t pte = __pte((pa & MMUPAGE_MASK) | pgprot_val(flags));
 
 	/*
 	 * The cpu_entry_area is shared between the user and kernel
@@ -98,7 +98,9 @@ void cea_set_pte(void *cea_vaddr, phys_addr_t pa, pgprot_t flags)
 static void __init
 cea_map_percpu_pages(void *cea_vaddr, void *ptr, int pages, pgprot_t prot)
 {
-	for ( ; pages; pages--, cea_vaddr+= PAGE_SIZE, ptr += PAGE_SIZE)
+	int mmupages = pages * PAGE_MMUCOUNT;
+
+	for ( ; mmupages; mmupages--, cea_vaddr += MMUPAGE_SIZE, ptr += MMUPAGE_SIZE)
 		cea_set_pte(cea_vaddr, per_cpu_ptr_to_phys(ptr), prot);
 }
 
@@ -122,8 +124,8 @@ static void __init percpu_setup_debug_store(unsigned int cpu)
 	 * Force the population of PMDs for not yet allocated per cpu
 	 * memory like debug store buffers.
 	 */
-	npages = sizeof(struct debug_store_buffers) / PAGE_SIZE;
-	for (; npages; npages--, cea += PAGE_SIZE)
+	npages = sizeof(struct debug_store_buffers) / MMUPAGE_SIZE;
+	for (; npages; npages--, cea += MMUPAGE_SIZE)
 		cea_set_pte(cea, 0, PAGE_NONE);
 #endif
 }

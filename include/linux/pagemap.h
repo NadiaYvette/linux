@@ -1065,13 +1065,34 @@ static inline pgoff_t folio_pgoff(const struct folio *folio)
 	return folio->index;
 }
 
+/*
+ * With PAGE_MMUSHIFT > 0 (larpage), vm_pgoff is in MMUPAGE-sized units
+ * so that file-backed mappings preserve sub-PAGE offset granularity.
+ * This function returns the MMUPAGE-unit pgoff for a given address.
+ */
 static inline pgoff_t linear_page_index(const struct vm_area_struct *vma,
 					const unsigned long address)
 {
 	pgoff_t pgoff;
-	pgoff = (address - vma->vm_start) >> PAGE_SHIFT;
+	pgoff = (address - vma->vm_start) >> MMUPAGE_SHIFT;
 	pgoff += vma->vm_pgoff;
 	return pgoff;
+}
+
+/*
+ * Convert MMUPAGE-unit pgoff to page cache index (PAGE-sized units).
+ */
+static inline pgoff_t pgoff_to_page_cache_index(pgoff_t pgoff)
+{
+	return pgoff >> PAGE_MMUSHIFT;
+}
+
+/*
+ * Return the sub-MMUPAGE index within a PAGE for a given MMUPAGE pgoff.
+ */
+static inline unsigned int pgoff_sub_page_index(pgoff_t pgoff)
+{
+	return pgoff & (PAGE_MMUCOUNT - 1);
 }
 
 struct wait_page_key {

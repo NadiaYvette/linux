@@ -151,8 +151,8 @@ SYSCALL_DEFINE1(brk, unsigned long, brk)
 			      mm->end_data, mm->start_data))
 		goto out;
 
-	newbrk = PAGE_ALIGN(brk);
-	oldbrk = PAGE_ALIGN(mm->brk);
+	newbrk = MMUPAGE_ALIGN(brk);
+	oldbrk = MMUPAGE_ALIGN(mm->brk);
 	if (oldbrk == newbrk) {
 		mm->brk = brk;
 		goto success;
@@ -220,10 +220,10 @@ out:
  */
 static inline unsigned long round_hint_to_min(unsigned long hint)
 {
-	hint &= PAGE_MASK;
+	hint &= MMUPAGE_MASK;
 	if (((void *)hint != NULL) &&
 	    (hint < mmap_min_addr))
-		return PAGE_ALIGN(mmap_min_addr);
+		return MMUPAGE_ALIGN(mmap_min_addr);
 	return hint;
 }
 
@@ -271,7 +271,7 @@ static inline bool file_mmap_ok(struct file *file, struct inode *inode,
 	if (maxsize && len > maxsize)
 		return false;
 	maxsize -= len;
-	if (pgoff > maxsize >> PAGE_SHIFT)
+	if (pgoff > maxsize >> MMUPAGE_SHIFT)
 		return false;
 	return true;
 }
@@ -367,12 +367,12 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 		addr = round_hint_to_min(addr);
 
 	/* Careful about overflows.. */
-	len = PAGE_ALIGN(len);
+	len = ALIGN(len, MMUPAGE_SIZE);
 	if (!len)
 		return -ENOMEM;
 
-	/* offset overflow? */
-	if ((pgoff + (len >> PAGE_SHIFT)) < pgoff)
+	/* offset overflow? pgoff is in MMUPAGE units */
+	if ((pgoff + (len >> MMUPAGE_SHIFT)) < pgoff)
 		return -EOVERFLOW;
 
 	/* Too many mappings? */
@@ -536,7 +536,7 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 			/*
 			 * Set pgoff according to addr for anon_vma.
 			 */
-			pgoff = addr >> PAGE_SHIFT;
+			pgoff = addr >> MMUPAGE_SHIFT;
 			break;
 		default:
 			return -EINVAL;
@@ -633,11 +633,11 @@ SYSCALL_DEFINE1(old_mmap, struct mmap_arg_struct __user *, arg)
 
 	if (copy_from_user(&a, arg, sizeof(a)))
 		return -EFAULT;
-	if (offset_in_page(a.offset))
+	if (a.offset & ~MMUPAGE_MASK)
 		return -EINVAL;
 
 	return ksys_mmap_pgoff(a.addr, a.len, a.prot, a.flags, a.fd,
-			       a.offset >> PAGE_SHIFT);
+			       a.offset >> MMUPAGE_SHIFT);
 }
 #endif /* __ARCH_WANT_SYS_OLD_MMAP */
 
@@ -703,7 +703,7 @@ generic_get_unmapped_area(struct file *filp, unsigned long addr,
 		return addr;
 
 	if (addr) {
-		addr = PAGE_ALIGN(addr);
+		addr = MMUPAGE_ALIGN(addr);
 		vma = find_vma_prev(mm, addr, &prev);
 		if (mmap_end - len >= addr && addr >= mmap_min_addr &&
 		    (!vma || addr + len <= vm_start_gap(vma)) &&
@@ -754,7 +754,7 @@ generic_get_unmapped_area_topdown(struct file *filp, unsigned long addr,
 
 	/* requesting a specific address */
 	if (addr) {
-		addr = PAGE_ALIGN(addr);
+		addr = MMUPAGE_ALIGN(addr);
 		vma = find_vma_prev(mm, addr, &prev);
 		if (mmap_end - len >= addr && addr >= mmap_min_addr &&
 				(!vma || addr + len <= vm_start_gap(vma)) &&
@@ -777,7 +777,7 @@ generic_get_unmapped_area_topdown(struct file *filp, unsigned long addr,
 	 * can happen with large stack limits and large mmap()
 	 * allocations.
 	 */
-	if (offset_in_page(addr)) {
+	if (addr & ~MMUPAGE_MASK) {
 		VM_BUG_ON(addr != -ENOMEM);
 		info.flags = 0;
 		info.low_limit = TASK_UNMAPPED_BASE;
@@ -857,7 +857,7 @@ __get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
 
 	if (addr > TASK_SIZE - len)
 		return -ENOMEM;
-	if (offset_in_page(addr))
+	if (addr & ~MMUPAGE_MASK)
 		return -EINVAL;
 
 	error = security_mmap_addr(addr);
@@ -962,7 +962,7 @@ struct vm_area_struct *find_extend_vma_locked(struct mm_struct *mm, unsigned lon
 {
 	struct vm_area_struct *vma, *prev;
 
-	addr &= PAGE_MASK;
+	addr &= MMUPAGE_MASK;
 	vma = find_vma_prev(mm, addr, &prev);
 	if (vma && (vma->vm_start <= addr))
 		return vma;
@@ -985,7 +985,7 @@ struct vm_area_struct *find_extend_vma_locked(struct mm_struct *mm, unsigned lon
 	struct vm_area_struct *vma;
 	unsigned long start;
 
-	addr &= PAGE_MASK;
+	addr &= MMUPAGE_MASK;
 	vma = find_vma(mm, addr);
 	if (!vma)
 		return NULL;
@@ -1099,14 +1099,14 @@ SYSCALL_DEFINE5(remap_file_pages, unsigned long, start, unsigned long, size,
 
 	if (prot)
 		return ret;
-	start = start & PAGE_MASK;
-	size = size & PAGE_MASK;
+	start = start & MMUPAGE_MASK;
+	size = size & MMUPAGE_MASK;
 
 	if (start + size <= start)
 		return ret;
 
 	/* Does pgoff wrap? */
-	if (pgoff + (size >> PAGE_SHIFT) < pgoff)
+	if (pgoff + (size >> MMUPAGE_SHIFT) < pgoff)
 		return ret;
 
 	if (mmap_read_lock_killable(mm))
@@ -1214,7 +1214,7 @@ int vm_brk_flags(unsigned long addr, unsigned long request, bool is_exec)
 	LIST_HEAD(uf);
 	VMA_ITERATOR(vmi, mm, addr);
 
-	len = PAGE_ALIGN(request);
+	len = ALIGN(request, MMUPAGE_SIZE);
 	if (len < request)
 		return -ENOMEM;
 	if (!len)

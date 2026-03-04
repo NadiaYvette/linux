@@ -194,16 +194,23 @@ static void __init set_real_mode_permissions(void)
 		PAGE_ALIGN(real_mode_header->ro_end) -
 		__pa(base);
 
+	/*
+	 * With PAGE_MMUSHIFT > 0, text_start may be MMUPAGE-aligned
+	 * rather than PAGE-aligned.  Round down to PAGE boundary so
+	 * the CPA code gets a page-aligned address.
+	 */
+	unsigned long text_start_phys =
+		PAGE_ALIGN_DOWN(real_mode_header->text_start);
+
 	size_t text_size =
-		PAGE_ALIGN(real_mode_header->ro_end) -
-		real_mode_header->text_start;
+		PAGE_ALIGN(real_mode_header->ro_end) - text_start_phys;
 
 	unsigned long text_start =
-		(unsigned long) __va(real_mode_header->text_start);
+		(unsigned long) __va(text_start_phys);
 
 	set_memory_nx((unsigned long) base, size >> PAGE_SHIFT);
 	set_memory_ro((unsigned long) base, ro_size >> PAGE_SHIFT);
-	set_memory_x((unsigned long) text_start, text_size >> PAGE_SHIFT);
+	set_memory_x(text_start, text_size >> PAGE_SHIFT);
 }
 
 void __init init_real_mode(void)

@@ -521,7 +521,7 @@ __split_vma(struct vma_iterator *vmi, struct vm_area_struct *vma,
 		new->vm_end = addr;
 	} else {
 		new->vm_start = addr;
-		new->vm_pgoff += ((addr - vma->vm_start) >> PAGE_SHIFT);
+		new->vm_pgoff += ((addr - vma->vm_start) >> MMUPAGE_SHIFT);
 	}
 
 	err = -ENOMEM;
@@ -560,7 +560,7 @@ __split_vma(struct vma_iterator *vmi, struct vm_area_struct *vma,
 
 	if (new_below) {
 		vma->vm_start = addr;
-		vma->vm_pgoff += (addr - new->vm_start) >> PAGE_SHIFT;
+		vma->vm_pgoff += (addr - new->vm_start) >> MMUPAGE_SHIFT;
 	} else {
 		vma->vm_end = addr;
 	}
@@ -709,10 +709,10 @@ static void vmg_adjust_set_range(struct vma_merge_struct *vmg)
 
 	if (vmg->__adjust_middle_start) {
 		adjust = vmg->middle;
-		pgoff = adjust->vm_pgoff + PHYS_PFN(vmg->end - adjust->vm_start);
+		pgoff = adjust->vm_pgoff + ((vmg->end - adjust->vm_start) >> MMUPAGE_SHIFT);
 	} else if (vmg->__adjust_next_start) {
 		adjust = vmg->next;
-		pgoff = adjust->vm_pgoff - PHYS_PFN(adjust->vm_start - vmg->end);
+		pgoff = adjust->vm_pgoff - ((adjust->vm_start - vmg->end) >> MMUPAGE_SHIFT);
 	} else {
 		return;
 	}
@@ -1634,10 +1634,10 @@ int do_vmi_munmap(struct vma_iterator *vmi, struct mm_struct *mm,
 	unsigned long end;
 	struct vm_area_struct *vma;
 
-	if ((offset_in_page(start)) || start > TASK_SIZE || len > TASK_SIZE-start)
+	if ((start & ~MMUPAGE_MASK) || start > TASK_SIZE || len > TASK_SIZE-start)
 		return -EINVAL;
 
-	end = start + PAGE_ALIGN(len);
+	end = start + ALIGN(len, MMUPAGE_SIZE);
 	if (end == start)
 		return -EINVAL;
 
@@ -1979,7 +1979,7 @@ static int anon_vma_compatible(struct vm_area_struct *a, struct vm_area_struct *
 		mpol_equal(vma_policy(a), vma_policy(b)) &&
 		a->vm_file == b->vm_file &&
 		vma_flags_empty(&diff) &&
-		b->vm_pgoff == a->vm_pgoff + ((b->vm_start - a->vm_start) >> PAGE_SHIFT);
+		b->vm_pgoff == a->vm_pgoff + ((b->vm_start - a->vm_start) >> MMUPAGE_SHIFT);
 }
 
 /*
@@ -3166,10 +3166,10 @@ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
 		unsigned long size, grow;
 
 		size = address - vma->vm_start;
-		grow = (address - vma->vm_end) >> PAGE_SHIFT;
+		grow = (address - vma->vm_end) >> MMUPAGE_SHIFT;
 
 		error = -ENOMEM;
-		if (vma->vm_pgoff + (size >> PAGE_SHIFT) >= vma->vm_pgoff) {
+		if (vma->vm_pgoff + (size >> MMUPAGE_SHIFT) >= vma->vm_pgoff) {
 			error = acct_stack_growth(vma, size, grow);
 			if (!error) {
 				if (vma_test(vma, VMA_LOCKED_BIT))
@@ -3245,7 +3245,7 @@ int expand_downwards(struct vm_area_struct *vma, unsigned long address)
 		unsigned long size, grow;
 
 		size = vma->vm_end - address;
-		grow = (vma->vm_start - address) >> PAGE_SHIFT;
+		grow = (vma->vm_start - address) >> MMUPAGE_SHIFT;
 
 		error = -ENOMEM;
 		if (grow <= vma->vm_pgoff) {
@@ -3318,7 +3318,7 @@ int insert_vm_struct(struct mm_struct *mm, struct vm_area_struct *vma)
 	 */
 	if (vma_is_anonymous(vma)) {
 		BUG_ON(vma->anon_vma);
-		vma->vm_pgoff = vma->vm_start >> PAGE_SHIFT;
+		vma->vm_pgoff = vma->vm_start >> MMUPAGE_SHIFT;
 	}
 
 	if (vma_link(mm, vma)) {
