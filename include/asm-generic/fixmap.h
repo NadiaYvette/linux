@@ -18,8 +18,14 @@
 #include <linux/bug.h>
 #include <linux/mm_types.h>
 
-#define __fix_to_virt(x)	(FIXADDR_TOP - ((x) << PAGE_SHIFT))
-#define __virt_to_fix(x)	((FIXADDR_TOP - ((x)&PAGE_MASK)) >> PAGE_SHIFT)
+/*
+ * Fixmap slots are spaced at MMUPAGE_SIZE (the hardware MMU page size),
+ * not PAGE_SIZE, because each slot maps a single PTE which addresses
+ * one MMU page.  When PAGE_MMUSHIFT == 0, this is identical to the
+ * original PAGE_SHIFT spacing.
+ */
+#define __fix_to_virt(x)	(FIXADDR_TOP - ((x) << MMUPAGE_SHIFT))
+#define __virt_to_fix(x)	((FIXADDR_TOP - ((x)&MMUPAGE_MASK)) >> MMUPAGE_SHIFT)
 
 #ifndef __ASSEMBLY__
 /*
@@ -75,7 +81,7 @@ static inline unsigned long virt_to_fix(const unsigned long vaddr)
 ({									\
 	unsigned long ________addr;					\
 	__set_fixmap(idx, phys, flags);					\
-	________addr = fix_to_virt(idx) + ((phys) & (PAGE_SIZE - 1));	\
+	________addr = fix_to_virt(idx) + ((phys) & (MMUPAGE_SIZE - 1));\
 	________addr;							\
 })
 

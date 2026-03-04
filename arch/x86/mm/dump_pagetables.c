@@ -149,7 +149,7 @@ static struct addr_marker address_markers[] = {
 #endif /* !CONFIG_X86_64 */
 
 /* Multipliers for offsets within the PTEs */
-#define PTE_LEVEL_MULT (PAGE_SIZE)
+#define PTE_LEVEL_MULT (MMUPAGE_SIZE)
 #define PMD_LEVEL_MULT (PTRS_PER_PTE * PTE_LEVEL_MULT)
 #define PUD_LEVEL_MULT (PTRS_PER_PMD * PMD_LEVEL_MULT)
 #define P4D_LEVEL_MULT (PTRS_PER_PUD * PUD_LEVEL_MULT)
@@ -228,7 +228,7 @@ static void note_wx(struct pg_state *st, unsigned long addr)
 {
 	unsigned long npages;
 
-	npages = (addr - st->start_address) / PAGE_SIZE;
+	npages = (addr - st->start_address) / MMUPAGE_SIZE;
 
 #ifdef CONFIG_PCI_BIOS
 	/*

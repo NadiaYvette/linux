@@ -89,6 +89,7 @@
 #include "pgalloc-track.h"
 #include "internal.h"
 #include "swap.h"
+#include <linux/pte_cluster.h>
 
 #if defined(LAST_CPUPID_NOT_IN_PAGE_FLAGS) && !defined(CONFIG_COMPILE_TEST)
 #warning Unfortunate NUMA and NUMA Balancing config, growing page-frame for last_cpupid.
@@ -1087,6 +1088,16 @@ copy_present_page(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 
 	/* All done, just insert the new page copy in the child */
 	pte = folio_mk_pte(new_folio, dst_vma->vm_page_prot);
+	/*
+	 * With PAGE_MMUSHIFT > 0, adjust PTE to the correct MMUPAGE
+	 * within the copied page.
+	 */
+	if (PAGE_MMUSHIFT > 0) {
+		pgoff_t pgoff = dst_vma->vm_pgoff +
+			((addr - dst_vma->vm_start) >> MMUPAGE_SHIFT);
+		unsigned int sub = pgoff_sub_page_index(pgoff);
+		pte = __pte(pte_val(pte) + sub * MMUPAGE_SIZE);
+	}
 	pte = maybe_mkwrite(pte_mkdirty(pte), dst_vma);
 	if (userfaultfd_pte_wp(dst_vma, ptep_get(src_pte)))
 		/* Uffd-wp needs to be delivered to dest pte as well */
@@ -1316,7 +1327,7 @@ again:
 			WARN_ON_ONCE(ret != -ENOENT);
 		}
 		/* copy_present_ptes() will clear `*prealloc' if consumed */
-		max_nr = (end - addr) / PAGE_SIZE;
+		max_nr = (end - addr) / MMUPAGE_SIZE;
 		ret = copy_present_ptes(dst_vma, src_vma, dst_pte, src_pte,
 					ptent, addr, max_nr, rss, &prealloc);
 		/*
@@ -1338,7 +1349,7 @@ again:
 		}
 		nr = ret;
 		progress += 8 * nr;
-	} while (dst_pte += nr, src_pte += nr, addr += PAGE_SIZE * nr,
+	} while (dst_pte += nr, src_pte += nr, addr += MMUPAGE_SIZE * nr,
 		 addr != end);
 
 	lazy_mmu_mode_disable();
@@ -1629,7 +1640,7 @@ zap_install_uffd_wp_if_needed(struct vm_area_struct *vma,
 		if (--nr == 0)
 			break;
 		pte++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 	}
 
 	return was_installed;
@@ -1811,7 +1822,7 @@ static inline int do_zap_pte_range(struct mmu_gather *tlb,
 				   bool *any_skipped)
 {
 	pte_t ptent = ptep_get(pte);
-	int max_nr = (end - addr) / PAGE_SIZE;
+	int max_nr = (end - addr) / MMUPAGE_SIZE;
 	int nr = 0;
 
 	/* Skip all consecutive none ptes */
@@ -1825,7 +1836,7 @@ static inline int do_zap_pte_range(struct mmu_gather *tlb,
 		if (!max_nr)
 			return nr;
 		pte += nr;
-		addr += nr * PAGE_SIZE;
+		addr += nr * MMUPAGE_SIZE;
 	}
 
 	if (pte_present(ptent))
@@ -1915,7 +1926,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 	int nr;
 
 retry:
-	tlb_change_page_size(tlb, PAGE_SIZE);
+	tlb_change_page_size(tlb, MMUPAGE_SIZE);
 	init_rss_vec(rss);
 	start_pte = pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
 	if (!pte)
@@ -1936,11 +1947,11 @@ retry:
 		if (any_skipped)
 			can_reclaim_pt = false;
 		if (unlikely(force_break)) {
-			addr += nr * PAGE_SIZE;
+			addr += nr * MMUPAGE_SIZE;
 			direct_reclaim = false;
 			break;
 		}
-	} while (pte += nr, addr += PAGE_SIZE * nr, addr != end);
+	} while (pte += nr, addr += MMUPAGE_SIZE * nr, addr != end);
 
 	/*
 	 * Fast path: try to hold the pmd lock and unmap the PTE page.
@@ -3339,7 +3350,7 @@ static int apply_to_pte_range(struct mm_struct *mm, pmd_t *pmd,
 				if (err)
 					break;
 			}
-		} while (pte++, addr += PAGE_SIZE, addr != end);
+		} while (pte++, addr += MMUPAGE_SIZE, addr != end);
 	}
 	*mask |= PGTBL_PTE_MODIFIED;
 
@@ -3921,6 +3932,17 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 		}
 		flush_cache_page(vma, vmf->address, pte_pfn(vmf->orig_pte));
 		entry = folio_mk_pte(new_folio, vma->vm_page_prot);
+		/*
+		 * With PAGE_MMUSHIFT > 0, adjust PTE to point to the correct
+		 * MMUPAGE within the new page (same sub-page offset as the
+		 * original mapping).
+		 */
+		if (PAGE_MMUSHIFT > 0) {
+			pgoff_t pgoff = vma->vm_pgoff +
+				((vmf->address - vma->vm_start) >> MMUPAGE_SHIFT);
+			unsigned int sub = pgoff_sub_page_index(pgoff);
+			entry = __pte(pte_val(entry) + sub * MMUPAGE_SIZE);
+		}
 		entry = pte_sw_mkyoung(entry);
 		if (unlikely(unshare)) {
 			if (pte_soft_dirty(vmf->orig_pte))
@@ -5396,7 +5418,10 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		goto oom;
 
 	nr_pages = folio_nr_pages(folio);
-	addr = ALIGN_DOWN(vmf->address, nr_pages * PAGE_SIZE);
+	if (nr_pages == 1)
+		addr = ALIGN_DOWN(vmf->address, MMUPAGE_SIZE);
+	else
+		addr = ALIGN_DOWN(vmf->address, nr_pages * PAGE_SIZE);
 
 	/*
 	 * The memory barrier inside __folio_mark_uptodate makes sure that
@@ -5614,6 +5639,20 @@ void set_pte_range(struct vm_fault *vmf, struct folio *folio,
 
 	flush_icache_pages(vma, page, nr);
 	entry = mk_pte(page, vma->vm_page_prot);
+
+	/*
+	 * With PAGE_MMUSHIFT > 0, each PTE maps one MMUPAGE (sub-page).
+	 * Adjust the PTE to point to the correct MMUPAGE within the page.
+	 * Compute the effective pgoff from the actual address being mapped,
+	 * not vmf->pgoff, because during fault-around multiple pages are
+	 * mapped with different sub-page offsets.
+	 */
+	if (PAGE_MMUSHIFT > 0) {
+		pgoff_t effective_pgoff = vma->vm_pgoff +
+			((addr - vma->vm_start) >> MMUPAGE_SHIFT);
+		unsigned int sub = pgoff_sub_page_index(effective_pgoff);
+		entry = __pte(pte_val(entry) + sub * MMUPAGE_SIZE);
+	}
 
 	if (prefault && arch_wants_old_prefaulted_pte())
 		entry = pte_mkold(entry);
@@ -5882,6 +5921,15 @@ static inline bool should_fault_around(struct vm_fault *vmf)
 	if (uffd_disable_fault_around(vmf->vma))
 		return false;
 
+	/*
+	 * Disable fault-around with PAGE_MMUSHIFT > 0 for now.
+	 * filemap_map_pages mixes MMUPAGE-unit pgoffs with PAGE-unit
+	 * page cache indices, causing wrong PTE mappings.  TODO: fix
+	 * filemap_map_pages to handle MMUPAGE-unit pgoffs properly.
+	 */
+	if (PAGE_MMUSHIFT > 0)
+		return false;
+
 	/* A single page implies no faulting 'around' at all. */
 	return fault_around_pages > 1;
 }
@@ -6130,10 +6178,10 @@ static void numa_rebuild_large_mapping(struct vm_fault *vmf, struct vm_area_stru
 	start = max3(addr_start, pt_start, vma->vm_start);
 	end = min3(addr_start + folio_size(folio), pt_start + PMD_SIZE,
 		   vma->vm_end);
-	start_ptep = vmf->pte - ((addr - start) >> PAGE_SHIFT);
+	start_ptep = vmf->pte - ((addr - start) >> MMUPAGE_SHIFT);
 
 	/* Restore all PTEs' mapping of the large folio */
-	for (addr = start; addr != end; start_ptep++, addr += PAGE_SIZE) {
+	for (addr = start; addr != end; start_ptep++, addr += MMUPAGE_SIZE) {
 		pte_t ptent = ptep_get(start_ptep);
 		bool writable = false;
 
@@ -6467,7 +6515,7 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 {
 	struct vm_fault vmf = {
 		.vma = vma,
-		.address = address & PAGE_MASK,
+		.address = address & MMUPAGE_MASK,
 		.real_address = address,
 		.flags = flags,
 		.pgoff = linear_page_index(vma, address),
@@ -7322,7 +7370,7 @@ void print_vma_addr(char *prefix, unsigned long ip)
 	if (vma && vma->vm_file) {
 		struct file *f = vma->vm_file;
 		ip -= vma->vm_start;
-		ip += vma->vm_pgoff << PAGE_SHIFT;
+		ip += vma->vm_pgoff << MMUPAGE_SHIFT;
 		printk("%s%pD[%lx,%lx+%lx]", prefix, f, ip,
 				vma->vm_start,
 				vma->vm_end - vma->vm_start);
