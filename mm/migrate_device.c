@@ -272,9 +272,9 @@ again:
 	if (!ptep)
 		goto again;
 	lazy_mmu_mode_enable();
-	ptep += (addr - start) / PAGE_SIZE;
+	ptep += (addr - start) / MMUPAGE_SIZE;
 
-	for (; addr < end; addr += PAGE_SIZE, ptep++) {
+	for (; addr < end; addr += MMUPAGE_SIZE, ptep++) {
 		struct dev_pagemap *pgmap;
 		unsigned long mpfn = 0, pfn;
 		struct folio *folio;

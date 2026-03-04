@@ -172,8 +172,8 @@ extern struct vdso_time_data *vdso_k_time_data;
 extern struct vdso_rng_data *vdso_k_rng_data;
 extern struct vdso_arch_data *vdso_k_arch_data;
 
-#define VDSO_ARCH_DATA_SIZE ALIGN(sizeof(struct vdso_arch_data), PAGE_SIZE)
-#define VDSO_ARCH_DATA_PAGES (VDSO_ARCH_DATA_SIZE >> PAGE_SHIFT)
+#define VDSO_ARCH_DATA_SIZE ALIGN(sizeof(struct vdso_arch_data), MMUPAGE_SIZE)
+#define VDSO_ARCH_DATA_PAGES (VDSO_ARCH_DATA_SIZE >> MMUPAGE_SHIFT)
 
 enum vdso_pages {
 	VDSO_TIME_PAGE_OFFSET,

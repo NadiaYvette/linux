@@ -33,7 +33,7 @@ SECTIONS
 		video_cards_end = .;
 	}
 
-	. = ALIGN(PAGE_SIZE);
+	. = ALIGN(MMUPAGE_SIZE);
 	pa_text_start = .;
 	.text : {
 		*(.text)
@@ -51,7 +51,7 @@ SECTIONS
 	}
 	pa_ro_end = .;
 
-	. = ALIGN(PAGE_SIZE);
+	. = ALIGN(MMUPAGE_SIZE);
 	.data : {
 		*(.data)
 		*(.data.*)

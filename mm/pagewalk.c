@@ -37,8 +37,8 @@ static int walk_pte_range_inner(pte_t *pte, unsigned long addr,
 		if (ops->install_pte && pte_none(ptep_get(pte))) {
 			pte_t new_pte;
 
-			err = ops->install_pte(addr, addr + PAGE_SIZE, &new_pte,
-					       walk);
+			err = ops->install_pte(addr, addr + MMUPAGE_SIZE,
+					       &new_pte, walk);
 			if (err)
 				break;
 
@@ -47,13 +47,13 @@ static int walk_pte_range_inner(pte_t *pte, unsigned long addr,
 			if (!WARN_ON_ONCE(walk->no_vma))
 				update_mmu_cache(walk->vma, addr, pte);
 		} else {
-			err = ops->pte_entry(pte, addr, addr + PAGE_SIZE, walk);
+			err = ops->pte_entry(pte, addr, addr + MMUPAGE_SIZE, walk);
 			if (err)
 				break;
 		}
-		if (addr >= end - PAGE_SIZE)
+		if (addr >= end - MMUPAGE_SIZE)
 			break;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 		pte++;
 	}
 	return err;

@@ -79,10 +79,10 @@ static int elf_core_dump(struct coredump_params *cprm);
 #define elf_core_dump	NULL
 #endif
 
-#if ELF_EXEC_PAGESIZE > PAGE_SIZE
+#if ELF_EXEC_PAGESIZE > MMUPAGE_SIZE
 #define ELF_MIN_ALIGN	ELF_EXEC_PAGESIZE
 #else
-#define ELF_MIN_ALIGN	PAGE_SIZE
+#define ELF_MIN_ALIGN	MMUPAGE_SIZE
 #endif
 
 #ifndef ELF_CORE_EFLAGS
@@ -1336,7 +1336,7 @@ out_free_interp:
 		 * leave a gap between .bss and brk.
 		 */
 		if (!brk_moved)
-			mm->brk = mm->start_brk = mm->brk + PAGE_SIZE;
+			mm->brk = mm->start_brk = mm->brk + MMUPAGE_SIZE;
 
 		mm->brk = mm->start_brk = arch_randomize_brk(mm);
 		brk_moved = true;
@@ -1659,7 +1659,7 @@ static int fill_files_note(struct memelfnote *note, struct coredump_params *cprm
 
 	/* Now we know exact count of files, can store it */
 	data[0] = count;
-	data[1] = PAGE_SIZE;
+	data[1] = ELF_EXEC_PAGESIZE;
 	/*
 	 * Count usually is less than mm->map_count,
 	 * we need to move filenames down.

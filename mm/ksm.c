@@ -625,7 +625,7 @@ static int break_ksm_pmd_entry(pmd_t *pmdp, unsigned long addr, unsigned long en
 	if (!start_ptep)
 		return 0;
 
-	for (ptep = start_ptep; addr < end; ptep++, addr += PAGE_SIZE) {
+	for (ptep = start_ptep; addr < end; ptep++, addr += MMUPAGE_SIZE) {
 		pte_t pte = ptep_get(ptep);
 		struct folio *folio = NULL;
 
@@ -2534,7 +2534,7 @@ static int ksm_next_page_pmd_entry(pmd_t *pmdp, unsigned long addr, unsigned lon
 	if (!start_ptep)
 		return 0;
 
-	for (ptep = start_ptep; addr < end; ptep++, addr += PAGE_SIZE) {
+	for (ptep = start_ptep; addr < end; ptep++, addr += MMUPAGE_SIZE) {
 		pte = ptep_get(ptep);
 
 		if (!pte_present(pte))

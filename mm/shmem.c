@@ -2751,6 +2751,11 @@ static vm_fault_t shmem_fault(struct vm_fault *vmf)
 	struct inode *inode = file_inode(vmf->vma->vm_file);
 	gfp_t gfp = mapping_gfp_mask(inode->i_mapping);
 	struct folio *folio = NULL;
+	/*
+	 * vmf->pgoff is in MMUPAGE units.  Convert to PAGE units for
+	 * page cache lookups.
+	 */
+	pgoff_t index = vmf->pgoff >> PAGE_MMUSHIFT;
 	vm_fault_t ret = 0;
 	int err;
 
@@ -2765,12 +2770,12 @@ static vm_fault_t shmem_fault(struct vm_fault *vmf)
 	}
 
 	WARN_ON_ONCE(vmf->page != NULL);
-	err = shmem_get_folio_gfp(inode, vmf->pgoff, 0, &folio, SGP_CACHE,
+	err = shmem_get_folio_gfp(inode, index, 0, &folio, SGP_CACHE,
 				  gfp, vmf, &ret);
 	if (err)
 		return vmf_error(err);
 	if (folio) {
-		vmf->page = folio_file_page(folio, vmf->pgoff);
+		vmf->page = folio_file_page(folio, index);
 		ret |= VM_FAULT_LOCKED;
 	}
 	return ret;
@@ -2904,7 +2909,7 @@ static struct mempolicy *shmem_get_policy(struct vm_area_struct *vma,
 	 * by page order, as in shmem_get_pgoff_policy() and get_vma_policy()).
 	 */
 	*ilx = inode->i_ino;
-	index = ((addr - vma->vm_start) >> PAGE_SHIFT) + vma->vm_pgoff;
+	index = ((addr - vma->vm_start) >> MMUPAGE_SHIFT) + vma->vm_pgoff;
 	return mpol_shared_policy_lookup(&SHMEM_I(inode)->policy, index);
 }
 

@@ -58,7 +58,7 @@ static vm_fault_t secretmem_fault(struct vm_fault *vmf)
 	vm_fault_t ret;
 	int err;
 
-	if (((loff_t)vmf->pgoff << PAGE_SHIFT) >= i_size_read(inode))
+	if (((loff_t)vmf->pgoff << MMUPAGE_SHIFT) >= i_size_read(inode))
 		return vmf_error(-EINVAL);
 
 	filemap_invalidate_lock_shared(mapping);
