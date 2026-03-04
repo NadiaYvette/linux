@@ -836,11 +836,11 @@ void __init poking_init(void)
 	 */
 	text_poke_mm_addr = TASK_UNMAPPED_BASE;
 	if (IS_ENABLED(CONFIG_RANDOMIZE_BASE))
-		text_poke_mm_addr += (kaslr_get_random_long("Poking") & PAGE_MASK) %
-			(TASK_SIZE - TASK_UNMAPPED_BASE - 3 * PAGE_SIZE);
+		text_poke_mm_addr += (kaslr_get_random_long("Poking") & MMUPAGE_MASK) %
+			(TASK_SIZE - TASK_UNMAPPED_BASE - 3 * MMUPAGE_SIZE);
 
-	if (((text_poke_mm_addr + PAGE_SIZE) & ~PMD_MASK) == 0)
-		text_poke_mm_addr += PAGE_SIZE;
+	if (((text_poke_mm_addr + MMUPAGE_SIZE) & ~PMD_MASK) == 0)
+		text_poke_mm_addr += MMUPAGE_SIZE;
 
 	/*
 	 * We need to trigger the allocation of the page-tables that will be

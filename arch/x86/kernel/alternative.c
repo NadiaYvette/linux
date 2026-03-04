@@ -2545,13 +2545,19 @@ typedef void text_poke_f(void *dst, const void *src, size_t len);
 
 static void *__text_poke(text_poke_f func, void *addr, const void *src, size_t len)
 {
-	bool cross_page_boundary = offset_in_page(addr) + len > PAGE_SIZE;
+	/*
+	 * Use MMUPAGE (hardware page) granularity for offset and boundary
+	 * calculations, since each PTE maps one MMUPAGE, not one PAGE.
+	 */
+	unsigned long mmu_offset = (unsigned long)addr & ~MMUPAGE_MASK;
+	bool cross_page_boundary = mmu_offset + len > MMUPAGE_SIZE;
 	struct page *pages[2] = {NULL};
 	struct mm_struct *prev_mm;
 	unsigned long flags;
 	pte_t pte, *ptep;
 	spinlock_t *ptl;
 	pgprot_t pgprot;
+	phys_addr_t phys;
 
 	/*
 	 * While boot memory allocator is running we cannot use struct pages as
@@ -2562,12 +2568,12 @@ static void *__text_poke(text_poke_f func, void *addr, const void *src, size_t l
 	if (!core_kernel_text((unsigned long)addr)) {
 		pages[0] = vmalloc_to_page(addr);
 		if (cross_page_boundary)
-			pages[1] = vmalloc_to_page(addr + PAGE_SIZE);
+			pages[1] = vmalloc_to_page(addr + MMUPAGE_SIZE);
 	} else {
 		pages[0] = virt_to_page(addr);
 		WARN_ON(!PageReserved(pages[0]));
 		if (cross_page_boundary)
-			pages[1] = virt_to_page(addr + PAGE_SIZE);
+			pages[1] = virt_to_page(addr + MMUPAGE_SIZE);
 	}
 	/*
 	 * If something went wrong, crash and burn since recovery paths are not
@@ -2593,12 +2599,19 @@ static void *__text_poke(text_poke_f func, void *addr, const void *src, size_t l
 
 	local_irq_save(flags);
 
-	pte = mk_pte(pages[0], pgprot);
+	/*
+	 * Map the MMUPAGE containing addr. Use the physical address directly
+	 * to correctly handle sub-PAGE_SIZE offsets within a kernel page.
+	 */
+	phys = __pa((unsigned long)addr & MMUPAGE_MASK);
+	pte = __pte((phys & PTE_PFN_MASK) | pgprot_val(pgprot));
 	set_pte_at(text_poke_mm, text_poke_mm_addr, ptep, pte);
 
 	if (cross_page_boundary) {
-		pte = mk_pte(pages[1], pgprot);
-		set_pte_at(text_poke_mm, text_poke_mm_addr + PAGE_SIZE, ptep + 1, pte);
+		phys = __pa(((unsigned long)addr & MMUPAGE_MASK) + MMUPAGE_SIZE);
+		pte = __pte((phys & PTE_PFN_MASK) | pgprot_val(pgprot));
+		set_pte_at(text_poke_mm, text_poke_mm_addr + MMUPAGE_SIZE,
+			   ptep + 1, pte);
 	}
 
 	/*
@@ -2608,7 +2621,7 @@ static void *__text_poke(text_poke_f func, void *addr, const void *src, size_t l
 	prev_mm = use_temporary_mm(text_poke_mm);
 
 	kasan_disable_current();
-	func((u8 *)text_poke_mm_addr + offset_in_page(addr), src, len);
+	func((u8 *)text_poke_mm_addr + mmu_offset, src, len);
 	kasan_enable_current();
 
 	/*
@@ -2619,7 +2632,7 @@ static void *__text_poke(text_poke_f func, void *addr, const void *src, size_t l
 
 	pte_clear(text_poke_mm, text_poke_mm_addr, ptep);
 	if (cross_page_boundary)
-		pte_clear(text_poke_mm, text_poke_mm_addr + PAGE_SIZE, ptep + 1);
+		pte_clear(text_poke_mm, text_poke_mm_addr + MMUPAGE_SIZE, ptep + 1);
 
 	/*
 	 * Loading the previous page-table hierarchy requires a serializing
@@ -2633,8 +2646,8 @@ static void *__text_poke(text_poke_f func, void *addr, const void *src, size_t l
 	 * IRQs, but not if the mm is not used, as it is in this point.
 	 */
 	flush_tlb_mm_range(text_poke_mm, text_poke_mm_addr, text_poke_mm_addr +
-			   (cross_page_boundary ? 2 : 1) * PAGE_SIZE,
-			   PAGE_SHIFT, false);
+			   (cross_page_boundary ? 2 : 1) * MMUPAGE_SIZE,
+			   MMUPAGE_SHIFT, false);
 
 	if (func == text_poke_memcpy) {
 		/*

@@ -224,7 +224,7 @@ extern int force_personality32;
 #endif /* !CONFIG_X86_32 */
 
 #define CORE_DUMP_USE_REGSET
-#define ELF_EXEC_PAGESIZE	4096
+#define ELF_EXEC_PAGESIZE	MMUPAGE_SIZE
 
 /*
  * This is the base location for PIE (ET_DYN with INTERP) loads. On

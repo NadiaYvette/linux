@@ -96,14 +96,10 @@ static int vmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 			unsigned int max_page_shift, pgtbl_mod_mask *mask)
 {
 	pte_t *pte;
-	u64 pfn;
 	struct page *page;
-	unsigned long size = PAGE_SIZE;
+	unsigned long size = MMUPAGE_SIZE;
+	phys_addr_t paddr = phys_addr;
 
-	if (WARN_ON_ONCE(!PAGE_ALIGNED(end - addr)))
-		return -EINVAL;
-
-	pfn = phys_addr >> PAGE_SHIFT;
 	pte = pte_alloc_kernel_track(pmd, addr, mask);
 	if (!pte)
 		return -ENOMEM;
@@ -112,6 +108,8 @@ static int vmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 
 	do {
 		if (unlikely(!pte_none(ptep_get(pte)))) {
+			u64 pfn = paddr >> PAGE_SHIFT;
+
 			if (pfn_valid(pfn)) {
 				page = pfn_to_page(pfn);
 				dump_page(page, "remapping already mapped page");
@@ -120,19 +118,28 @@ static int vmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 		}
 
 #ifdef CONFIG_HUGETLB_PAGE
-		size = arch_vmap_pte_range_map_size(addr, end, pfn, max_page_shift);
-		if (size != PAGE_SIZE) {
-			pte_t entry = pfn_pte(pfn, prot);
+		{
+			u64 pfn = paddr >> PAGE_SHIFT;
 
-			entry = arch_make_huge_pte(entry, ilog2(size), 0);
-			set_huge_pte_at(&init_mm, addr, pte, entry, size);
-			pfn += PFN_DOWN(size);
-			continue;
+			size = arch_vmap_pte_range_map_size(addr, end, pfn,
+							    max_page_shift);
+			if (size != PAGE_SIZE && size != MMUPAGE_SIZE) {
+				pte_t entry = pfn_pte(pfn, prot);
+
+				entry = arch_make_huge_pte(entry, ilog2(size),
+							   0);
+				set_huge_pte_at(&init_mm, addr, pte, entry,
+						size);
+				paddr += size;
+				continue;
+			}
+			size = MMUPAGE_SIZE;
 		}
 #endif
-		set_pte_at(&init_mm, addr, pte, pfn_pte(pfn, prot));
-		pfn++;
-	} while (pte += PFN_DOWN(size), addr += size, addr != end);
+		set_pte_at(&init_mm, addr, pte,
+			   __pte((paddr & PTE_PFN_MASK) | pgprot_val(prot)));
+		paddr += MMUPAGE_SIZE;
+	} while (pte++, addr += MMUPAGE_SIZE, addr != end);
 
 	lazy_mmu_mode_disable();
 	*mask |= PGTBL_PTE_MODIFIED;
@@ -368,7 +375,7 @@ static void vunmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 {
 	pte_t *pte;
 	pte_t ptent;
-	unsigned long size = PAGE_SIZE;
+	unsigned long size = MMUPAGE_SIZE;
 
 	pte = pte_offset_kernel(pmd, addr);
 	lazy_mmu_mode_enable();
@@ -376,19 +383,22 @@ static void vunmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 	do {
 #ifdef CONFIG_HUGETLB_PAGE
 		size = arch_vmap_pte_range_unmap_size(addr, pte);
-		if (size != PAGE_SIZE) {
+		if (size != PAGE_SIZE && size != MMUPAGE_SIZE) {
 			if (WARN_ON(!IS_ALIGNED(addr, size))) {
 				addr = ALIGN_DOWN(addr, size);
-				pte = PTR_ALIGN_DOWN(pte, sizeof(*pte) * (size >> PAGE_SHIFT));
+				pte = PTR_ALIGN_DOWN(pte, sizeof(*pte) * (size >> MMUPAGE_SHIFT));
 			}
 			ptent = huge_ptep_get_and_clear(&init_mm, addr, pte, size);
 			if (WARN_ON(end - addr < size))
 				size = end - addr;
 		} else
 #endif
+		{
+			size = MMUPAGE_SIZE;
 			ptent = ptep_get_and_clear(&init_mm, addr, pte);
+		}
 		WARN_ON(!pte_none(ptent) && !pte_present(ptent));
-	} while (pte += (size >> PAGE_SHIFT), addr += size, addr != end);
+	} while (pte += (size >> MMUPAGE_SHIFT), addr += size, addr != end);
 
 	lazy_mmu_mode_disable();
 	*mask |= PGTBL_PTE_MODIFIED;
@@ -542,6 +552,7 @@ static int vmap_pages_pte_range(pmd_t *pmd, unsigned long addr,
 
 	do {
 		struct page *page = pages[*nr];
+		int sub;
 
 		if (WARN_ON(!pte_none(ptep_get(pte)))) {
 			err = -EBUSY;
@@ -556,9 +567,18 @@ static int vmap_pages_pte_range(pmd_t *pmd, unsigned long addr,
 			break;
 		}
 
-		set_pte_at(&init_mm, addr, pte, mk_pte(page, prot));
+		for (sub = 0; sub < PAGE_MMUCOUNT; sub++) {
+			phys_addr_t pa = page_to_phys(page) + sub * MMUPAGE_SIZE;
+
+			set_pte_at(&init_mm, addr, pte,
+				   __pte((pa & PTE_PFN_MASK) | pgprot_val(prot)));
+			pte++;
+			addr += MMUPAGE_SIZE;
+			if (addr == end)
+				break;
+		}
 		(*nr)++;
-	} while (pte++, addr += PAGE_SIZE, addr != end);
+	} while (addr != end);
 
 	lazy_mmu_mode_disable();
 	*mask |= PGTBL_PTE_MODIFIED;

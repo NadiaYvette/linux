@@ -188,7 +188,7 @@ extern unsigned int ptrs_per_p4d;
 
 #define EARLY_DYNAMIC_PAGE_TABLES	64
 
-#define PGD_KERNEL_START	((PAGE_SIZE / 2) / sizeof(pgd_t))
+#define PGD_KERNEL_START	((MMUPAGE_SIZE / 2) / sizeof(pgd_t))
 
 /*
  * We borrow bit 3 to remember PG_anon_exclusive.

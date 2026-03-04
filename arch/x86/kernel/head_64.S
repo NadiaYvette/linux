@@ -590,7 +590,7 @@ SYM_PIC_ALIAS(vc_no_ghcb);
 #define PTI_USER_PGD_FILL	512
 /* This ensures they are 8k-aligned: */
 #define SYM_DATA_START_PTI_ALIGNED(name) \
-	SYM_START(name, SYM_L_GLOBAL, .balign 2 * PAGE_SIZE)
+	SYM_START(name, SYM_L_GLOBAL, .balign 2 * MMUPAGE_SIZE)
 #else
 #define SYM_DATA_START_PTI_ALIGNED(name) \
 	SYM_DATA_START_PAGE_ALIGNED(name)
@@ -657,7 +657,7 @@ SYM_DATA_START_PAGE_ALIGNED(level2_fixmap_pgt)
 	.fill	(512 - 4 - FIXMAP_PMD_NUM),8,0
 	pgtno = 0
 	.rept (FIXMAP_PMD_NUM)
-	.quad level1_fixmap_pgt + (pgtno << PAGE_SHIFT) - __START_KERNEL_map \
+	.quad level1_fixmap_pgt + (pgtno << MMUPAGE_SHIFT) - __START_KERNEL_map \
 		+ _PAGE_TABLE_NOENC;
 	pgtno = pgtno + 1
 	.endr
