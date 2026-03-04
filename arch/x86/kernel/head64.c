@@ -252,7 +252,12 @@ asmlinkage __visible void __init __noreturn x86_64_start_kernel(char * real_mode
 	 * This needs to happen *before* kasan_early_init() because latter maps stuff
 	 * into that page.
 	 */
-	clear_page(init_top_pgt);
+	/*
+	 * init_top_pgt is a PGD (MMUPAGE_SIZE, not PAGE_SIZE).
+	 * Use memset to avoid overwriting adjacent data when
+	 * PAGE_MMUSHIFT > 0.
+	 */
+	memset(init_top_pgt, 0, PTRS_PER_PGD * sizeof(pgd_t));
 
 	/*
 	 * SME support may update early_pmd_flags to include the memory

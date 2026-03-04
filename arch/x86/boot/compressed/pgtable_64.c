@@ -61,7 +61,7 @@ static unsigned long find_trampoline_placement(void)
 	if (ebda_start > BIOS_START_MIN && ebda_start < bios_start)
 		bios_start = ebda_start;
 
-	bios_start = round_down(bios_start, PAGE_SIZE);
+	bios_start = round_down(bios_start, MMUPAGE_SIZE);
 
 	/* Find the first usable memory region under bios_start. */
 	for (i = boot_params_ptr->e820_entries - 1; i >= 0; i--) {
@@ -82,7 +82,7 @@ static unsigned long find_trampoline_placement(void)
 			new = entry->addr + entry->size;
 
 		/* Keep bios_start page-aligned. */
-		new = round_down(new, PAGE_SIZE);
+		new = round_down(new, MMUPAGE_SIZE);
 
 		/* Skip the entry if it's too small. */
 		if (new - TRAMPOLINE_32BIT_SIZE < entry->addr)
@@ -184,7 +184,7 @@ asmlinkage void configure_5level_paging(struct boot_params *bp, void *pgtable)
 		 */
 		pgdp = (pgd_t *)native_read_cr3_pa();
 		new_cr3 = (u64 *)(native_pgd_val(pgdp[0]) & PTE_PFN_MASK);
-		memcpy(trampoline_32bit, new_cr3, PAGE_SIZE);
+		memcpy(trampoline_32bit, new_cr3, MMUPAGE_SIZE);
 	}
 
 	toggle_la57(trampoline_32bit);

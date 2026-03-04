@@ -475,7 +475,7 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
 
 		dev = inode->i_sb->s_dev;
 		ino = inode->i_ino;
-		pgoff = ((loff_t)vma->vm_pgoff) << PAGE_SHIFT;
+		pgoff = ((loff_t)vma->vm_pgoff) << MMUPAGE_SHIFT;
 	}
 
 	start = vma->vm_start;
@@ -717,7 +717,7 @@ static int do_procmap_query(struct mm_struct *mm, void __user *uarg)
 	if (vma->vm_file) {
 		const struct inode *inode = file_user_inode(vma->vm_file);
 
-		karg.vma_offset = ((__u64)vma->vm_pgoff) << PAGE_SHIFT;
+		karg.vma_offset = ((__u64)vma->vm_pgoff) << MMUPAGE_SHIFT;
 		karg.dev_major = MAJOR(inode->i_sb->s_dev);
 		karg.dev_minor = MINOR(inode->i_sb->s_dev);
 		karg.inode = inode->i_ino;
@@ -974,7 +974,7 @@ static void smaps_account(struct mem_size_stats *mss, struct page *page,
 	 * mapcount atomically.
 	 */
 	for (i = 0; i < nr; i++, page++) {
-		unsigned long pss = PAGE_SIZE << PSS_SHIFT;
+		unsigned long pss = MMUPAGE_SIZE << PSS_SHIFT;
 
 		if (IS_ENABLED(CONFIG_PAGE_MAPCOUNT)) {
 			mapcount = folio_precise_page_mapcount(folio, page);
@@ -983,7 +983,7 @@ static void smaps_account(struct mem_size_stats *mss, struct page *page,
 
 		if (mapcount >= 2)
 			pss /= mapcount;
-		smaps_page_accumulate(mss, folio, PAGE_SIZE, pss,
+		smaps_page_accumulate(mss, folio, MMUPAGE_SIZE, pss,
 				dirty, locked, exclusive);
 	}
 }
@@ -1010,7 +1010,7 @@ static void smaps_pte_hole_lookup(unsigned long addr, struct mm_walk *walk)
 #ifdef CONFIG_SHMEM
 	if (walk->ops->pte_hole) {
 		/* depth is not used */
-		smaps_pte_hole(addr, addr + PAGE_SIZE, 0, walk);
+		smaps_pte_hole(addr, addr + MMUPAGE_SIZE, 0, walk);
 	}
 #endif
 }
@@ -1038,15 +1038,15 @@ static void smaps_pte_entry(pte_t *pte, unsigned long addr,
 		if (softleaf_is_swap(entry)) {
 			int mapcount;
 
-			mss->swap += PAGE_SIZE;
+			mss->swap += MMUPAGE_SIZE;
 			mapcount = swp_swapcount(entry);
 			if (mapcount >= 2) {
-				u64 pss_delta = (u64)PAGE_SIZE << PSS_SHIFT;
+				u64 pss_delta = (u64)MMUPAGE_SIZE << PSS_SHIFT;
 
 				do_div(pss_delta, mapcount);
 				mss->swap_pss += pss_delta;
 			} else {
-				mss->swap_pss += (u64)PAGE_SIZE << PSS_SHIFT;
+				mss->swap_pss += (u64)MMUPAGE_SIZE << PSS_SHIFT;
 			}
 		} else if (softleaf_has_pfn(entry)) {
 			if (softleaf_is_device_private(entry))
@@ -1124,7 +1124,7 @@ static int smaps_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 		walk->action = ACTION_AGAIN;
 		return 0;
 	}
-	for (; addr != end; pte++, addr += PAGE_SIZE)
+	for (; addr != end; pte++, addr += MMUPAGE_SIZE)
 		smaps_pte_entry(pte, addr, walk);
 	pte_unmap_unlock(pte - 1, ptl);
 out:
@@ -1712,7 +1712,7 @@ out:
 		walk->action = ACTION_AGAIN;
 		return 0;
 	}
-	for (; addr != end; pte++, addr += PAGE_SIZE) {
+	for (; addr != end; pte++, addr += MMUPAGE_SIZE) {
 		ptent = ptep_get(pte);
 
 		if (cp->type == CLEAR_REFS_SOFT_DIRTY) {
@@ -1909,7 +1909,7 @@ static int pagemap_pte_hole(unsigned long start, unsigned long end,
 		else
 			hole_end = end;
 
-		for (; addr < hole_end; addr += PAGE_SIZE) {
+		for (; addr < hole_end; addr += MMUPAGE_SIZE) {
 			err = add_to_pagemap(&pme, pm);
 			if (err)
 				goto out;
@@ -1921,7 +1921,7 @@ static int pagemap_pte_hole(unsigned long start, unsigned long end,
 		/* Addresses in the VMA. */
 		if (vma->vm_flags & VM_SOFTDIRTY)
 			pme = make_pme(0, PM_SOFT_DIRTY);
-		for (; addr < min(end, vma->vm_end); addr += PAGE_SIZE) {
+		for (; addr < min(end, vma->vm_end); addr += MMUPAGE_SIZE) {
 			err = add_to_pagemap(&pme, pm);
 			if (err)
 				goto out;
@@ -2002,7 +2002,7 @@ static int pagemap_pmd_range_thp(pmd_t *pmdp, unsigned long addr,
 		unsigned long end, struct vm_area_struct *vma,
 		struct pagemapread *pm)
 {
-	unsigned int idx = (addr & ~PMD_MASK) >> PAGE_SHIFT;
+	unsigned int idx = (addr & ~PMD_MASK) >> MMUPAGE_SHIFT;
 	u64 flags = 0, frame = 0;
 	pmd_t pmd = *pmdp;
 	struct page *page = NULL;
@@ -2053,7 +2053,7 @@ static int pagemap_pmd_range_thp(pmd_t *pmdp, unsigned long addr,
 	}
 
 populate_pagemap:
-	for (; addr != end; addr += PAGE_SIZE, idx++) {
+	for (; addr != end; addr += MMUPAGE_SIZE, idx++) {
 		u64 cur_flags = flags;
 		pagemap_entry_t pme;
 
@@ -2103,7 +2103,7 @@ static int pagemap_pmd_range(pmd_t *pmdp, unsigned long addr, unsigned long end,
 		walk->action = ACTION_AGAIN;
 		return err;
 	}
-	for (; addr < end; pte++, addr += PAGE_SIZE) {
+	for (; addr < end; pte++, addr += MMUPAGE_SIZE) {
 		pagemap_entry_t pme;
 
 		pme = pte_to_pagemap_entry(pm, vma, addr, ptep_get(pte));
@@ -2157,7 +2157,7 @@ static int pagemap_hugetlb_range(pte_t *ptep, unsigned long hmask,
 		flags |= PM_UFFD_WP;
 	}
 
-	for (; addr != end; addr += PAGE_SIZE) {
+	for (; addr != end; addr += MMUPAGE_SIZE) {
 		pagemap_entry_t pme = make_pme(frame, flags);
 
 		err = add_to_pagemap(&pme, pm);
@@ -2237,7 +2237,7 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
 	/* do not disclose physical addresses: attack vector */
 	pm.show_pfn = file_ns_capable(file, &init_user_ns, CAP_SYS_ADMIN);
 
-	pm.len = (PAGEMAP_WALK_SIZE >> PAGE_SHIFT);
+	pm.len = (PAGEMAP_WALK_SIZE >> MMUPAGE_SHIFT);
 	pm.buffer = kmalloc_array(pm.len, PM_ENTRY_BYTES, GFP_KERNEL);
 	ret = -ENOMEM;
 	if (!pm.buffer)
@@ -2249,16 +2249,16 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
 
 	/* watch out for wraparound */
 	start_vaddr = end_vaddr;
-	if (svpfn <= (ULONG_MAX >> PAGE_SHIFT)) {
+	if (svpfn <= (ULONG_MAX >> MMUPAGE_SHIFT)) {
 		unsigned long end;
 
 		ret = mmap_read_lock_killable(mm);
 		if (ret)
 			goto out_free;
-		start_vaddr = untagged_addr_remote(mm, svpfn << PAGE_SHIFT);
+		start_vaddr = untagged_addr_remote(mm, svpfn << MMUPAGE_SHIFT);
 		mmap_read_unlock(mm);
 
-		end = start_vaddr + ((count / PM_ENTRY_BYTES) << PAGE_SHIFT);
+		end = start_vaddr + ((count / PM_ENTRY_BYTES) << MMUPAGE_SHIFT);
 		if (end >= start_vaddr && end < mm->task_size)
 			end_vaddr = end;
 	}
@@ -2979,7 +2979,7 @@ static int pagemap_scan_init_bounce_buffer(struct pagemap_scan_private *p)
 	if (!p->arg.vec_len)
 		return 0;
 
-	p->vec_buf_len = min_t(size_t, PAGEMAP_WALK_SIZE >> PAGE_SHIFT,
+	p->vec_buf_len = min_t(size_t, PAGEMAP_WALK_SIZE >> MMUPAGE_SHIFT,
 			       p->arg.vec_len);
 	p->vec_buf = kmalloc_objs(*p->vec_buf, p->vec_buf_len);
 	if (!p->vec_buf)
@@ -3249,7 +3249,7 @@ static int gather_pte_stats(pmd_t *pmd, unsigned long addr,
 			continue;
 		gather_stats(page, md, pte_dirty(ptent), 1);
 
-	} while (pte++, addr += PAGE_SIZE, addr != end);
+	} while (pte++, addr += MMUPAGE_SIZE, addr != end);
 	pte_unmap_unlock(orig_pte, ptl);
 	cond_resched();
 	return 0;

@@ -57,7 +57,7 @@
 	movl	$rm_stack_end, %esp
 .endm
 
-	.balign	PAGE_SIZE
+	.balign	MMUPAGE_SIZE
 SYM_CODE_START(trampoline_start)
 	cli			# We should be safe anyway
 	wbinvd
@@ -279,8 +279,8 @@ SYM_DATA_START(tr_compat)
 SYM_DATA_END(tr_compat)
 
 	.bss
-	.balign	PAGE_SIZE
-SYM_DATA(trampoline_pgd, .space PAGE_SIZE)
+	.balign	MMUPAGE_SIZE
+SYM_DATA(trampoline_pgd, .space MMUPAGE_SIZE)
 
 	.balign	8
 SYM_DATA_START(trampoline_header)

@@ -55,8 +55,8 @@
 extern unsigned long __FIXADDR_TOP;
 #define FIXADDR_TOP	((unsigned long)__FIXADDR_TOP)
 #else
-#define FIXADDR_TOP	(round_up(VSYSCALL_ADDR + PAGE_SIZE, 1<<PMD_SHIFT) - \
-			 PAGE_SIZE)
+#define FIXADDR_TOP	(round_up(VSYSCALL_ADDR + MMUPAGE_SIZE, 1<<PMD_SHIFT) - \
+			 MMUPAGE_SIZE)
 #endif
 
 /*
@@ -83,7 +83,7 @@ enum fixed_addresses {
 	FIX_HOLE,
 #else
 #ifdef CONFIG_X86_VSYSCALL_EMULATION
-	VSYSCALL_PAGE = (FIXADDR_TOP - VSYSCALL_ADDR) >> PAGE_SHIFT,
+	VSYSCALL_PAGE = (FIXADDR_TOP - VSYSCALL_ADDR) >> MMUPAGE_SHIFT,
 #endif
 #endif
 	FIX_DBGP_BASE,
@@ -147,9 +147,9 @@ enum fixed_addresses {
 
 extern void reserve_top_address(unsigned long reserve);
 
-#define FIXADDR_SIZE		(__end_of_permanent_fixed_addresses << PAGE_SHIFT)
+#define FIXADDR_SIZE		(__end_of_permanent_fixed_addresses << MMUPAGE_SHIFT)
 #define FIXADDR_START		(FIXADDR_TOP - FIXADDR_SIZE)
-#define FIXADDR_TOT_SIZE	(__end_of_fixed_addresses << PAGE_SHIFT)
+#define FIXADDR_TOT_SIZE	(__end_of_fixed_addresses << MMUPAGE_SHIFT)
 #define FIXADDR_TOT_START	(FIXADDR_TOP - FIXADDR_TOT_SIZE)
 
 extern int fixmaps_set;

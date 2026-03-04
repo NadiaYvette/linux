@@ -759,8 +759,8 @@ static int hwpoison_pte_range(pmd_t *pmdp, unsigned long addr,
 	if (!ptep)
 		goto out;
 
-	for (; addr != end; ptep++, addr += PAGE_SIZE) {
-		ret = check_hwpoisoned_entry(ptep_get(ptep), addr, PAGE_SHIFT,
+	for (; addr != end; ptep++, addr += MMUPAGE_SIZE) {
+		ret = check_hwpoisoned_entry(ptep_get(ptep), addr, MMUPAGE_SHIFT,
 					     hwp->pfn, &hwp->tk);
 		if (ret == 1)
 			break;

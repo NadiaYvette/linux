@@ -775,6 +775,7 @@ void __init lapic_assign_system_vectors(void)
 {
 	unsigned int i, vector;
 
+	pr_info("lapic_assign_system_vectors: vector_matrix=%px\n", vector_matrix);
 	for_each_set_bit(vector, system_vectors, NR_VECTORS)
 		irq_matrix_assign_system(vector_matrix, vector, false);
 
@@ -815,8 +816,10 @@ int __init arch_early_irq_init(void)
 	 */
 	vector_matrix = irq_alloc_matrix(NR_VECTORS, FIRST_EXTERNAL_VECTOR,
 					 FIRST_SYSTEM_VECTOR);
+	pr_info("arch_early_irq_init: vector_matrix=%px at &=%px\n", vector_matrix, &vector_matrix);
 	BUG_ON(!vector_matrix);
 
+	pr_info("arch_early_irq_init: calling arch_early_ioapic_init\n");
 	return arch_early_ioapic_init();
 }
 

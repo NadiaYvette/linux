@@ -6,6 +6,7 @@
 #include <linux/cfi_types.h>
 #include <asm/cpufeatures.h>
 #include <asm/alternative.h>
+#include <asm/page_types.h>
 
 /*
  * Some CPUs run faster using the string copy instructions (sane microcode).
@@ -16,7 +17,7 @@
 	ALIGN
 SYM_TYPED_FUNC_START(copy_page)
 	ALTERNATIVE "jmp copy_page_regs", "", X86_FEATURE_REP_GOOD
-	movl	$4096/8, %ecx
+	movl	$PAGE_SIZE/8, %ecx
 	rep	movsq
 	RET
 SYM_FUNC_END(copy_page)
@@ -27,7 +28,7 @@ SYM_FUNC_START_LOCAL(copy_page_regs)
 	movq	%rbx,	(%rsp)
 	movq	%r12,	1*8(%rsp)
 
-	movl	$(4096/64)-5,	%ecx
+	movl	$(PAGE_SIZE/64)-5,	%ecx
 	.p2align 4
 .Loop64:
 	dec	%rcx

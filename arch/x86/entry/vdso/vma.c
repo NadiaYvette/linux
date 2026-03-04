@@ -38,7 +38,7 @@ unsigned int __read_mostly vdso64_enabled = 1;
 int __init init_vdso_image(const struct vdso_image *image)
 {
 	BUILD_BUG_ON(VDSO_CLOCKMODE_MAX >= 32);
-	BUG_ON(image->size % PAGE_SIZE != 0);
+	BUG_ON(image->size % MMUPAGE_SIZE != 0);
 
 	apply_alternatives((struct alt_instr *)(image->data + image->alt),
 			   (struct alt_instr *)(image->data + image->alt +
@@ -54,10 +54,10 @@ static vm_fault_t vdso_fault(const struct vm_special_mapping *sm,
 {
 	const struct vdso_image *image = vma->vm_mm->context.vdso_image;
 
-	if (!image || (vmf->pgoff << PAGE_SHIFT) >= image->size)
+	if (!image || (vmf->pgoff << MMUPAGE_SHIFT) >= image->size)
 		return VM_FAULT_SIGBUS;
 
-	vmf->page = virt_to_page(image->data + (vmf->pgoff << PAGE_SHIFT));
+	vmf->page = virt_to_page(image->data + (vmf->pgoff << MMUPAGE_SHIFT));
 	get_page(vmf->page);
 	return 0;
 }
@@ -141,13 +141,13 @@ static int map_vdso(const struct vdso_image *image, unsigned long addr)
 		return -EINTR;
 
 	addr = get_unmapped_area(NULL, addr,
-				 image->size + __VDSO_PAGES * PAGE_SIZE, 0, 0);
+				 image->size + __VDSO_PAGES * MMUPAGE_SIZE, 0, 0);
 	if (IS_ERR_VALUE(addr)) {
 		ret = addr;
 		goto up_fail;
 	}
 
-	text_start = addr + __VDSO_PAGES * PAGE_SIZE;
+	text_start = addr + __VDSO_PAGES * MMUPAGE_SIZE;
 
 	/*
 	 * MAYWRITE to allow gdb to COW and set breakpoints
@@ -174,7 +174,7 @@ static int map_vdso(const struct vdso_image *image, unsigned long addr)
 
 	vma = _install_special_mapping(mm,
 				       VDSO_VCLOCK_PAGES_START(addr),
-				       VDSO_NR_VCLOCK_PAGES * PAGE_SIZE,
+				       VDSO_NR_VCLOCK_PAGES * MMUPAGE_SIZE,
 				       VM_READ|VM_MAYREAD|VM_IO|VM_DONTDUMP|
 				       VM_PFNMAP|VM_SEALED_SYSMAP,
 				       &vvar_vclock_mapping);

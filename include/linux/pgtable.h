@@ -47,7 +47,7 @@
 
 static inline unsigned long pte_index(unsigned long address)
 {
-	return (address >> PAGE_SHIFT) & (PTRS_PER_PTE - 1);
+	return (address >> MMUPAGE_SHIFT) & (PTRS_PER_PTE - 1);
 }
 
 #ifndef pmd_index
@@ -1019,6 +1019,42 @@ static inline pte_t pte_mkwrite(pte_t pte, struct vm_area_struct *vma)
 {
 	return pte_mkwrite_novma(pte);
 }
+#endif
+
+/*
+ * pte_mksub - adjust a PTE to address a sub-page (MMU page) within a
+ * kernel page.  offset is in bytes, always a multiple of MMUPAGE_SIZE.
+ * When PAGE_MMUSHIFT == 0, this is a no-op (offset is always 0).
+ * Architectures should override this if their PTE format requires
+ * special handling.
+ */
+#ifndef pte_mksub
+static inline pte_t pte_mksub(pte_t pte, unsigned long offset)
+{
+#if PAGE_MMUSHIFT
+	return __pte(pte_val(pte) + offset);
+#else
+	return pte;
+#endif
+}
+#define pte_mksub pte_mksub
+#endif
+
+/*
+ * pte_suboffset - extract the sub-page byte offset from a PTE.
+ * Returns the offset of the addressed MMU page within its kernel page.
+ * When PAGE_MMUSHIFT == 0, always returns 0.
+ */
+#ifndef pte_suboffset
+static inline unsigned long pte_suboffset(pte_t pte)
+{
+#if PAGE_MMUSHIFT
+	return (pte_val(pte) & (PAGE_SIZE - 1)) & MMUPAGE_MASK;
+#else
+	return 0;
+#endif
+}
+#define pte_suboffset pte_suboffset
 #endif
 
 #if defined(CONFIG_ARCH_WANT_PMD_MKWRITE) && !defined(pmd_mkwrite)

@@ -152,7 +152,7 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr, unsigned long len,
 	info.low_limit = begin;
 	info.high_limit = end;
 	if (!(filp && is_file_hugepages(filp))) {
-		info.align_offset = pgoff << PAGE_SHIFT;
+		info.align_offset = pgoff << MMUPAGE_SHIFT;
 		info.start_gap = stack_guard_placement(vm_flags);
 	}
 	if (filp) {
@@ -207,7 +207,7 @@ get_unmapped_area:
 	info.high_limit = get_mmap_base(0);
 	if (!(filp && is_file_hugepages(filp))) {
 		info.start_gap = stack_guard_placement(vm_flags);
-		info.align_offset = pgoff << PAGE_SHIFT;
+		info.align_offset = pgoff << MMUPAGE_SHIFT;
 	}
 
 	/*
