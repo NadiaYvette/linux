@@ -48,7 +48,7 @@ static int mincore_hugetlb(pte_t *pte, unsigned long hmask, unsigned long addr,
 			present = 1;
 	}
 
-	for (; addr != end; vec++, addr += PAGE_SIZE)
+	for (; addr != end; vec++, addr += MMUPAGE_SIZE)
 		*vec = present;
 	walk->private = vec;
 	spin_unlock(ptl);
@@ -167,7 +167,7 @@ static int mincore_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 	struct vm_area_struct *vma = walk->vma;
 	pte_t *ptep;
 	unsigned char *vec = walk->private;
-	int nr = (end - addr) >> PAGE_SHIFT;
+	int nr = (end - addr) >> MMUPAGE_SHIFT;
 	int step, i;
 
 	ptl = pmd_trans_huge_lock(pmd, vma);
@@ -182,19 +182,19 @@ static int mincore_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 		walk->action = ACTION_AGAIN;
 		return 0;
 	}
-	for (; addr != end; ptep += step, addr += step * PAGE_SIZE) {
+	for (; addr != end; ptep += step, addr += step * MMUPAGE_SIZE) {
 		pte_t pte = ptep_get(ptep);
 
 		step = 1;
 		/* We need to do cache lookup too for markers */
 		if (pte_none(pte) || pte_is_marker(pte))
-			__mincore_unmapped_range(addr, addr + PAGE_SIZE,
+			__mincore_unmapped_range(addr, addr + MMUPAGE_SIZE,
 						 vma, vec);
 		else if (pte_present(pte)) {
 			unsigned int batch = pte_batch_hint(ptep, pte);
 
 			if (batch > 1) {
-				unsigned int max_nr = (end - addr) >> PAGE_SHIFT;
+				unsigned int max_nr = (end - addr) >> MMUPAGE_SHIFT;
 
 				step = min_t(unsigned int, batch, max_nr);
 			}

@@ -536,4 +536,4 @@ SYM_DATA_LOCAL(pgtable,		.fill BOOT_PGT_SIZE, 1, 0)
  * The page table is going to be used instead of page table in the trampoline
  * memory.
  */
-SYM_DATA_LOCAL(top_pgtable,	.fill PAGE_SIZE, 1, 0)
+SYM_DATA_LOCAL(top_pgtable,	.fill MMUPAGE_SIZE, 1, 0)

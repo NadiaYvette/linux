@@ -1470,7 +1470,7 @@ static inline void clone_pgd_range(pgd_t *dst, pgd_t *src, int count)
 #define PTE_SHIFT ilog2(PTRS_PER_PTE)
 static inline int page_level_shift(enum pg_level level)
 {
-	return (PAGE_SHIFT - PTE_SHIFT) + level * PTE_SHIFT;
+	return (MMUPAGE_SHIFT - PTE_SHIFT) + level * PTE_SHIFT;
 }
 static inline unsigned long page_level_size(enum pg_level level)
 {

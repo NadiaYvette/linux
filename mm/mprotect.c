@@ -125,7 +125,7 @@ static __always_inline void prot_commit_flush_ptes(struct vm_area_struct *vma,
 	 * Advance the position in the batch by idx; note that if idx > 0,
 	 * then the nr_ptes passed here is <= batch size - idx.
 	 */
-	addr += idx * PAGE_SIZE;
+	addr += idx * MMUPAGE_SIZE;
 	ptep += idx;
 	oldpte = pte_advance_pfn(oldpte, idx);
 	ptent = pte_advance_pfn(ptent, idx);
@@ -135,7 +135,7 @@ static __always_inline void prot_commit_flush_ptes(struct vm_area_struct *vma,
 
 	modify_prot_commit_ptes(vma, addr, ptep, oldpte, ptent, nr_ptes);
 	if (pte_needs_flush(oldpte, ptent))
-		tlb_flush_pte_range(tlb, addr, nr_ptes * PAGE_SIZE);
+		tlb_flush_pte_range(tlb, addr, nr_ptes * MMUPAGE_SIZE);
 }
 
 /*
@@ -328,7 +328,7 @@ static long change_pte_range(struct mmu_gather *tlb,
 	bool uffd_wp = cp_flags & MM_CP_UFFD_WP;
 	int nr_ptes;
 
-	tlb_change_page_size(tlb, PAGE_SIZE);
+	tlb_change_page_size(tlb, MMUPAGE_SIZE);
 	pte = pte_offset_map_lock(vma->vm_mm, pmd, addr, &ptl);
 	if (!pte)
 		return -EAGAIN;
@@ -343,7 +343,7 @@ static long change_pte_range(struct mmu_gather *tlb,
 		oldpte = ptep_get(pte);
 		if (pte_present(oldpte)) {
 			const fpb_t flags = FPB_RESPECT_SOFT_DIRTY | FPB_RESPECT_WRITE;
-			int max_nr_ptes = (end - addr) >> PAGE_SHIFT;
+			int max_nr_ptes = (end - addr) >> MMUPAGE_SHIFT;
 			struct folio *folio = NULL;
 			struct page *page;
 
@@ -408,7 +408,7 @@ static long change_pte_range(struct mmu_gather *tlb,
 		} else  {
 			pages += change_softleaf_pte(vma, addr, pte, oldpte, cp_flags);
 		}
-	} while (pte += nr_ptes, addr += nr_ptes * PAGE_SIZE, addr != end);
+	} while (pte += nr_ptes, addr += nr_ptes * MMUPAGE_SIZE, addr != end);
 	lazy_mmu_mode_disable();
 	pte_unmap_unlock(pte - 1, ptl);
 
@@ -851,11 +851,11 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 	if (grows == (PROT_GROWSDOWN|PROT_GROWSUP)) /* can't be both */
 		return -EINVAL;
 
-	if (start & ~PAGE_MASK)
+	if (start & ~MMUPAGE_MASK)
 		return -EINVAL;
 	if (!len)
 		return 0;
-	len = PAGE_ALIGN(len);
+	len = MMUPAGE_ALIGN(len);
 	end = start + len;
 	if (end <= start)
 		return -ENOMEM;
