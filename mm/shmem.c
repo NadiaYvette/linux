@@ -2858,13 +2858,13 @@ unsigned long shmem_get_unmapped_area(struct file *file,
 	if (len < hpage_size)
 		return addr;
 
-	offset = (pgoff << PAGE_SHIFT) & (hpage_size - 1);
+	offset = (pgoff << MMUPAGE_SHIFT) & (hpage_size - 1);
 	if (offset && offset + len < 2 * hpage_size)
 		return addr;
 	if ((addr & (hpage_size - 1)) == offset)
 		return addr;
 
-	inflated_len = len + hpage_size - PAGE_SIZE;
+	inflated_len = len + hpage_size - MMUPAGE_SIZE;
 	if (inflated_len > TASK_SIZE)
 		return addr;
 	if (inflated_len < len)
@@ -3188,7 +3188,7 @@ static struct folio *shmem_mfill_folio_alloc(struct vm_area_struct *vma,
 	struct inode *inode = file_inode(vma->vm_file);
 	struct address_space *mapping = inode->i_mapping;
 	struct shmem_inode_info *info = SHMEM_I(inode);
-	pgoff_t pgoff = linear_page_index(vma, addr);
+	pgoff_t pgoff = pgoff_mmu_to_page(linear_page_index(vma, addr));
 	gfp_t gfp = mapping_gfp_mask(mapping);
 	struct folio *folio;
 
