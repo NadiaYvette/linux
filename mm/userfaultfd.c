@@ -326,7 +326,7 @@ static bool mfill_file_over_size(struct vm_area_struct *dst_vma,
 
 	inode = dst_vma->vm_file->f_inode;
 	offset = linear_page_index(dst_vma, dst_addr);
-	max_off = DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE);
+	max_off = DIV_ROUND_UP(i_size_read(inode), MMUPAGE_SIZE);
 	return offset >= max_off;
 }
 
@@ -612,6 +612,7 @@ static int mfill_atomic_pte_continue(struct mfill_state *state)
 	const struct vm_uffd_ops *ops = vma_uffd_ops(dst_vma);
 	unsigned long dst_addr = state->dst_addr;
 	pgoff_t pgoff = linear_page_index(dst_vma, dst_addr);
+	pgoff_t cache_pgoff = pgoff_mmu_to_page(pgoff);
 	struct inode *inode = file_inode(dst_vma->vm_file);
 	uffd_flags_t flags = state->flags;
 	pmd_t *dst_pmd = state->pmd;
@@ -624,12 +625,12 @@ static int mfill_atomic_pte_continue(struct mfill_state *state)
 		return -EOPNOTSUPP;
 	}
 
-	folio = ops->get_folio_noalloc(inode, pgoff);
+	folio = ops->get_folio_noalloc(inode, cache_pgoff);
 	/* Our caller expects us to return -EFAULT if we failed to find folio */
 	if (IS_ERR_OR_NULL(folio))
 		return -EFAULT;
 
-	page = folio_file_page(folio, pgoff);
+	page = folio_file_page(folio, cache_pgoff);
 	if (PageHWPoison(page)) {
 		ret = -EIO;
 		goto out_release;
@@ -1201,7 +1202,7 @@ static long move_present_ptes(struct mm_struct *mm,
 		}
 
 		folio_move_anon_rmap(src_folio, dst_vma);
-		src_folio->index = linear_page_index(dst_vma, dst_addr);
+		src_folio->index = pgoff_mmu_to_page(linear_page_index(dst_vma, dst_addr));
 
 		orig_dst_pte = folio_mk_pte(src_folio, dst_vma->vm_page_prot);
 		/* Set soft dirty bit so userspace can notice the pte was moved */
@@ -1270,7 +1271,7 @@ static int move_swap_pte(struct mm_struct *mm, struct vm_area_struct *dst_vma,
 	 */
 	if (src_folio) {
 		folio_move_anon_rmap(src_folio, dst_vma);
-		src_folio->index = linear_page_index(dst_vma, dst_addr);
+		src_folio->index = pgoff_mmu_to_page(linear_page_index(dst_vma, dst_addr));
 	} else {
 		/*
 		 * Check if the swap entry is cached after acquiring the src_pte

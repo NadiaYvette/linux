@@ -1537,7 +1537,7 @@ static enum scan_result try_collapse_pte_mapped_thp(struct mm_struct *mm, unsign
 		return SCAN_PTE_UFFD_WP;
 
 	folio = filemap_lock_folio(vma->vm_file->f_mapping,
-			       linear_page_index(vma, haddr));
+			       pgoff_mmu_to_page(linear_page_index(vma, haddr)));
 	if (IS_ERR(folio))
 		return SCAN_PAGE_NULL;
 
@@ -1785,7 +1785,7 @@ static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
 		spinlock_t *ptl;
 		bool success = false;
 
-		addr = vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
+		addr = pgoff_to_vma_addr(vma, pgoff);
 		if (addr & ~HPAGE_PMD_MASK ||
 		    vma->vm_end < addr + HPAGE_PMD_SIZE)
 			continue;
