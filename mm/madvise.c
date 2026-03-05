@@ -235,8 +235,8 @@ static void shmem_swapin_range(struct vm_area_struct *vma,
 		unsigned long start, unsigned long end,
 		struct address_space *mapping)
 {
-	XA_STATE(xas, &mapping->i_pages, linear_page_index(vma, start));
-	pgoff_t end_index = linear_page_index(vma, end) - 1;
+	XA_STATE(xas, &mapping->i_pages, pgoff_mmu_to_page(linear_page_index(vma, start)));
+	pgoff_t end_index = pgoff_mmu_to_page(linear_page_index(vma, end)) - 1;
 	struct folio *folio;
 	struct swap_iocb *splug = NULL;
 
@@ -252,8 +252,7 @@ static void shmem_swapin_range(struct vm_area_struct *vma,
 		if (!softleaf_is_swap(entry))
 			continue;
 
-		addr = vma->vm_start +
-			((xas.xa_index - vma->vm_pgoff) << PAGE_SHIFT);
+		addr = pgoff_to_vma_addr(vma, xas.xa_index);
 		xas_pause(&xas);
 		rcu_read_unlock();
 
