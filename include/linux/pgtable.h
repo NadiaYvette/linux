@@ -410,6 +410,34 @@ static inline pte_t pte_advance_pfn(pte_t pte, unsigned long nr)
 static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 		pte_t *ptep, pte_t pte, unsigned int nr)
 {
+#if PAGE_MMUSHIFT > 0
+	page_table_check_ptes_set(mm, addr, ptep, pte, nr);
+
+	if (nr == 1) {
+		/* Single PTE: caller already set up sub-page offset */
+		set_pte(ptep, pte);
+	} else {
+		unsigned int i;
+
+		/*
+		 * With page clustering, nr is in kernel pages but each
+		 * kernel page spans PAGE_MMUCOUNT MMUPAGEs.  Fill
+		 * nr * PAGE_MMUCOUNT PTEs, using sub-page offsets
+		 * within each kernel page.
+		 */
+		for (i = 0; i < nr; i++) {
+			unsigned int j;
+
+			for (j = 0; j < PAGE_MMUCOUNT; j++) {
+				set_pte(ptep, __pte(pte_val(pte) +
+						    j * MMUPAGE_SIZE));
+				ptep++;
+			}
+			if (i + 1 < nr)
+				pte = pte_next_pfn(pte);
+		}
+	}
+#else
 	page_table_check_ptes_set(mm, addr, ptep, pte, nr);
 
 	for (;;) {
@@ -419,6 +447,7 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 		ptep++;
 		pte = pte_next_pfn(pte);
 	}
+#endif
 }
 #endif
 #define set_pte_at(mm, addr, ptep, pte) set_ptes(mm, addr, ptep, pte, 1)
@@ -846,7 +875,7 @@ static inline pte_t get_and_clear_full_ptes(struct mm_struct *mm,
 	pte = ptep_get_and_clear_full(mm, addr, ptep, full);
 	while (--nr) {
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 		tmp_pte = ptep_get_and_clear_full(mm, addr, ptep, full);
 		if (pte_dirty(tmp_pte))
 			pte = pte_mkdirty(pte);
@@ -907,7 +936,7 @@ static inline void clear_full_ptes(struct mm_struct *mm, unsigned long addr,
 		if (--nr == 0)
 			break;
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 	}
 }
 #endif
@@ -1653,7 +1682,7 @@ static inline void modify_prot_commit_ptes(struct vm_area_struct *vma, unsigned 
 {
 	int i;
 
-	for (i = 0; i < nr; ++i, ++ptep, addr += PAGE_SIZE) {
+	for (i = 0; i < nr; ++i, ++ptep, addr += MMUPAGE_SIZE) {
 		ptep_modify_prot_commit(vma, addr, ptep, old_pte, pte);
 
 		/* Advance PFN only, set same prot */
