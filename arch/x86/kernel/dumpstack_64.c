@@ -64,7 +64,7 @@ const char *stack_type_name(enum stack_type type)
  */
 struct estack_pages {
 	u32	offs;
-	u16	size;
+	u32	size;
 	u16	type;
 };
 
