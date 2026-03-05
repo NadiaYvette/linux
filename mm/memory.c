@@ -2910,20 +2910,26 @@ static int remap_pte_range(struct mm_struct *mm, pmd_t *pmd,
 	pte_t *pte, *mapped_pte;
 	spinlock_t *ptl;
 	int err = 0;
+	unsigned long phys = (unsigned long)pfn << PAGE_SHIFT;
 
 	mapped_pte = pte = pte_alloc_map_lock(mm, pmd, addr, &ptl);
 	if (!pte)
 		return -ENOMEM;
 	lazy_mmu_mode_enable();
 	do {
+		pte_t entry;
+
 		BUG_ON(!pte_none(ptep_get(pte)));
-		if (!pfn_modify_allowed(pfn, prot)) {
+		if (!pfn_modify_allowed(phys >> PAGE_SHIFT, prot)) {
 			err = -EACCES;
 			break;
 		}
-		set_pte_at(mm, addr, pte, pte_mkspecial(pfn_pte(pfn, prot)));
-		pfn++;
-	} while (pte++, addr += PAGE_SIZE, addr != end);
+		entry = pfn_pte(phys >> PAGE_SHIFT, prot);
+		if (PAGE_MMUSHIFT > 0)
+			entry = pte_mksub(entry, phys & (PAGE_SIZE - 1));
+		set_pte_at(mm, addr, pte, pte_mkspecial(entry));
+		phys += MMUPAGE_SIZE;
+	} while (pte++, addr += MMUPAGE_SIZE, addr != end);
 	lazy_mmu_mode_disable();
 	pte_unmap_unlock(mapped_pte, ptl);
 	return err;
@@ -5865,20 +5871,24 @@ late_initcall(fault_around_debugfs);
  */
 static vm_fault_t do_fault_around(struct vm_fault *vmf)
 {
-	pgoff_t nr_pages = READ_ONCE(fault_around_pages);
+	/* Convert fault_around_pages (PAGE units) to PTE count (MMUPAGE units) */
+	pgoff_t nr_ptes = READ_ONCE(fault_around_pages) << PAGE_MMUSHIFT;
 	pgoff_t pte_off = pte_index(vmf->address);
-	/* The page offset of vmf->address within the VMA. */
+	/* The MMUPAGE offset of vmf->address within the VMA. */
 	pgoff_t vma_off = vmf->pgoff - vmf->vma->vm_pgoff;
+	/* VMA size in MMUPAGE units */
+	pgoff_t vma_mmupages = (vmf->vma->vm_end - vmf->vma->vm_start)
+				>> MMUPAGE_SHIFT;
 	pgoff_t from_pte, to_pte;
 	vm_fault_t ret;
 
 	/* The PTE offset of the start address, clamped to the VMA. */
-	from_pte = max(ALIGN_DOWN(pte_off, nr_pages),
+	from_pte = max(ALIGN_DOWN(pte_off, nr_ptes),
 		       pte_off - min(pte_off, vma_off));
 
 	/* The PTE offset of the end address, clamped to the VMA and PTE. */
-	to_pte = min3(from_pte + nr_pages, (pgoff_t)PTRS_PER_PTE,
-		      pte_off + vma_pages(vmf->vma) - vma_off) - 1;
+	to_pte = min3(from_pte + nr_ptes, (pgoff_t)PTRS_PER_PTE,
+		      pte_off + vma_mmupages - vma_off) - 1;
 
 	if (pmd_none(*vmf->pmd)) {
 		vmf->prealloc_pte = pte_alloc_one(vmf->vma->vm_mm);
@@ -5903,15 +5913,6 @@ static inline bool should_fault_around(struct vm_fault *vmf)
 		return false;
 
 	if (uffd_disable_fault_around(vmf->vma))
-		return false;
-
-	/*
-	 * Disable fault-around with PAGE_MMUSHIFT > 0 for now.
-	 * filemap_map_pages mixes MMUPAGE-unit pgoffs with PAGE-unit
-	 * page cache indices, causing wrong PTE mappings.  TODO: fix
-	 * filemap_map_pages to handle MMUPAGE-unit pgoffs properly.
-	 */
-	if (PAGE_MMUSHIFT > 0)
 		return false;
 
 	/* A single page implies no faulting 'around' at all. */
