@@ -1476,7 +1476,7 @@ static void __folio_set_anon(struct folio *folio, struct vm_area_struct *vma,
 	 */
 	anon_vma = (void *) anon_vma + FOLIO_MAPPING_ANON;
 	WRITE_ONCE(folio->mapping, (struct address_space *) anon_vma);
-	folio->index = linear_page_index(vma, address);
+	folio->index = pgoff_mmu_to_page(linear_page_index(vma, address));
 }
 
 /**
@@ -1503,7 +1503,7 @@ static void __page_check_anon_rmap(const struct folio *folio,
 	 */
 	VM_BUG_ON_FOLIO(folio_anon_vma(folio)->root != vma->anon_vma->root,
 			folio);
-	VM_BUG_ON_PAGE(page_pgoff(folio, page) != linear_page_index(vma, address),
+	VM_BUG_ON_PAGE(page_pgoff(folio, page) != pgoff_mmu_to_page(linear_page_index(vma, address)),
 		       page);
 }
 

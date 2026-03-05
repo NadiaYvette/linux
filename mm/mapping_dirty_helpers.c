@@ -45,7 +45,7 @@ static int wp_pte(pte_t *pte, unsigned long addr, unsigned long end,
 		wpwalk->total++;
 		wpwalk->tlbflush_start = min(wpwalk->tlbflush_start, addr);
 		wpwalk->tlbflush_end = max(wpwalk->tlbflush_end,
-					   addr + PAGE_SIZE);
+					   addr + MMUPAGE_SIZE);
 	}
 
 	return 0;
@@ -94,8 +94,9 @@ static int clean_record_pte(pte_t *pte, unsigned long addr,
 	pte_t ptent = ptep_get(pte);
 
 	if (pte_dirty(ptent)) {
-		pgoff_t pgoff = ((addr - walk->vma->vm_start) >> PAGE_SHIFT) +
-			walk->vma->vm_pgoff - cwalk->bitmap_pgoff;
+		pgoff_t pgoff = pgoff_mmu_to_page(
+			((addr - walk->vma->vm_start) >> MMUPAGE_SHIFT) +
+			walk->vma->vm_pgoff) - cwalk->bitmap_pgoff;
 		pte_t old_pte = ptep_modify_prot_start(walk->vma, addr, pte);
 
 		ptent = pte_mkclean(old_pte);
@@ -104,7 +105,7 @@ static int clean_record_pte(pte_t *pte, unsigned long addr,
 		wpwalk->total++;
 		wpwalk->tlbflush_start = min(wpwalk->tlbflush_start, addr);
 		wpwalk->tlbflush_end = max(wpwalk->tlbflush_end,
-					   addr + PAGE_SIZE);
+					   addr + MMUPAGE_SIZE);
 
 		__set_bit(pgoff, cwalk->bitmap);
 		cwalk->start = min(cwalk->start, pgoff);

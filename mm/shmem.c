@@ -2861,13 +2861,13 @@ unsigned long shmem_get_unmapped_area(struct file *file,
 	if (len < hpage_size)
 		return addr;
 
-	offset = (pgoff << PAGE_SHIFT) & (hpage_size - 1);
+	offset = (pgoff << MMUPAGE_SHIFT) & (hpage_size - 1);
 	if (offset && offset + len < 2 * hpage_size)
 		return addr;
 	if ((addr & (hpage_size - 1)) == offset)
 		return addr;
 
-	inflated_len = len + hpage_size - PAGE_SIZE;
+	inflated_len = len + hpage_size - MMUPAGE_SIZE;
 	if (inflated_len > TASK_SIZE)
 		return addr;
 	if (inflated_len < len)
@@ -3197,7 +3197,7 @@ int shmem_mfill_atomic_pte(pmd_t *dst_pmd,
 	struct shmem_inode_info *info = SHMEM_I(inode);
 	struct address_space *mapping = inode->i_mapping;
 	gfp_t gfp = mapping_gfp_mask(mapping);
-	pgoff_t pgoff = linear_page_index(dst_vma, dst_addr);
+	pgoff_t pgoff = pgoff_mmu_to_page(linear_page_index(dst_vma, dst_addr));
 	void *page_kaddr;
 	struct folio *folio;
 	int ret;

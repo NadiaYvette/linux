@@ -135,7 +135,7 @@ static unsigned char mincore_page(struct address_space *mapping, pgoff_t index)
 static int __mincore_unmapped_range(unsigned long addr, unsigned long end,
 				struct vm_area_struct *vma, unsigned char *vec)
 {
-	unsigned long nr = (end - addr) >> PAGE_SHIFT;
+	unsigned long nr = (end - addr) >> MMUPAGE_SHIFT;
 	int i;
 
 	if (vma->vm_file) {
@@ -143,7 +143,8 @@ static int __mincore_unmapped_range(unsigned long addr, unsigned long end,
 
 		pgoff = linear_page_index(vma, addr);
 		for (i = 0; i < nr; i++, pgoff++)
-			vec[i] = mincore_page(vma->vm_file->f_mapping, pgoff);
+			vec[i] = mincore_page(vma->vm_file->f_mapping,
+					      pgoff_mmu_to_page(pgoff));
 	} else {
 		for (i = 0; i < nr; i++)
 			vec[i] = 0;

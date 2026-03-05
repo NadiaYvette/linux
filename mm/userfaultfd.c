@@ -155,7 +155,7 @@ static bool mfill_file_over_size(struct vm_area_struct *dst_vma,
 
 	inode = dst_vma->vm_file->f_inode;
 	offset = linear_page_index(dst_vma, dst_addr);
-	max_off = DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE);
+	max_off = DIV_ROUND_UP(i_size_read(inode), MMUPAGE_SIZE);
 	return offset >= max_off;
 }
 
@@ -388,11 +388,12 @@ static int mfill_atomic_pte_continue(pmd_t *dst_pmd,
 {
 	struct inode *inode = file_inode(dst_vma->vm_file);
 	pgoff_t pgoff = linear_page_index(dst_vma, dst_addr);
+	pgoff_t cache_pgoff = pgoff_mmu_to_page(pgoff);
 	struct folio *folio;
 	struct page *page;
 	int ret;
 
-	ret = shmem_get_folio(inode, pgoff, 0, &folio, SGP_NOALLOC);
+	ret = shmem_get_folio(inode, cache_pgoff, 0, &folio, SGP_NOALLOC);
 	/* Our caller expects us to return -EFAULT if we failed to find folio */
 	if (ret == -ENOENT)
 		ret = -EFAULT;
@@ -403,7 +404,7 @@ static int mfill_atomic_pte_continue(pmd_t *dst_pmd,
 		goto out;
 	}
 
-	page = folio_file_page(folio, pgoff);
+	page = folio_file_page(folio, cache_pgoff);
 	if (PageHWPoison(page)) {
 		ret = -EIO;
 		goto out_release;
@@ -1115,7 +1116,7 @@ static long move_present_ptes(struct mm_struct *mm,
 		}
 
 		folio_move_anon_rmap(src_folio, dst_vma);
-		src_folio->index = linear_page_index(dst_vma, dst_addr);
+		src_folio->index = pgoff_mmu_to_page(linear_page_index(dst_vma, dst_addr));
 
 		orig_dst_pte = folio_mk_pte(src_folio, dst_vma->vm_page_prot);
 		/* Set soft dirty bit so userspace can notice the pte was moved */
@@ -1184,7 +1185,7 @@ static int move_swap_pte(struct mm_struct *mm, struct vm_area_struct *dst_vma,
 	 */
 	if (src_folio) {
 		folio_move_anon_rmap(src_folio, dst_vma);
-		src_folio->index = linear_page_index(dst_vma, dst_addr);
+		src_folio->index = pgoff_mmu_to_page(linear_page_index(dst_vma, dst_addr));
 	} else {
 		/*
 		 * Check if the swap entry is cached after acquiring the src_pte
