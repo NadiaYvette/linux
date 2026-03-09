@@ -490,11 +490,11 @@ gen8_ppgtt_insert_pte(struct i915_ppgtt *ppgtt,
 				pd = pdp->entry[gen8_pd_index(idx, 2)];
 			}
 
-			drm_clflush_virt_range(vaddr, PAGE_SIZE);
+			drm_clflush_virt_range(vaddr, I915_GTT_PAGE_SIZE);
 			vaddr = px_vaddr(i915_pt_entry(pd, gen8_pd_index(idx, 1)));
 		}
 	} while (1);
-	drm_clflush_virt_range(vaddr, PAGE_SIZE);
+	drm_clflush_virt_range(vaddr, I915_GTT_PAGE_SIZE);
 
 	return idx;
 }
@@ -603,7 +603,7 @@ xehp_ppgtt_insert_huge(struct i915_address_space *vm,
 			}
 		} while (rem >= page_size && index < max);
 
-		drm_clflush_virt_range(vaddr, PAGE_SIZE);
+		drm_clflush_virt_range(vaddr, I915_GTT_PAGE_SIZE);
 		vma_res->page_sizes_gtt |= page_size;
 	} while (iter->sg && sg_dma_len(iter->sg));
 }
@@ -687,7 +687,7 @@ static void gen8_ppgtt_insert_huge(struct i915_address_space *vm,
 			}
 		} while (rem >= page_size && index < I915_PDES);
 
-		drm_clflush_virt_range(vaddr, PAGE_SIZE);
+		drm_clflush_virt_range(vaddr, I915_GTT_PAGE_SIZE);
 
 		/*
 		 * Is it safe to mark the 2M block as 64K? -- Either we have
@@ -703,7 +703,7 @@ static void gen8_ppgtt_insert_huge(struct i915_address_space *vm,
 					      I915_GTT_PAGE_SIZE_2M)))) {
 			vaddr = px_vaddr(pd);
 			vaddr[maybe_64K] |= GEN8_PDE_IPS_64K;
-			drm_clflush_virt_range(vaddr, PAGE_SIZE);
+			drm_clflush_virt_range(vaddr, I915_GTT_PAGE_SIZE);
 			page_size = I915_GTT_PAGE_SIZE_64K;
 
 			/*
@@ -724,7 +724,7 @@ static void gen8_ppgtt_insert_huge(struct i915_address_space *vm,
 				for (i = 1; i < index; i += 16)
 					memset64(vaddr + i, encode, 15);
 
-				drm_clflush_virt_range(vaddr, PAGE_SIZE);
+				drm_clflush_virt_range(vaddr, I915_GTT_PAGE_SIZE);
 			}
 		}
 
@@ -965,11 +965,11 @@ static int gen8_init_rsvd(struct i915_address_space *vm)
 		return 0;
 
 	/* The memory will be used only by GPU. */
-	obj = i915_gem_object_create_lmem(i915, PAGE_SIZE,
+	obj = i915_gem_object_create_lmem(i915, I915_GTT_PAGE_SIZE,
 					  I915_BO_ALLOC_VOLATILE |
 					  I915_BO_ALLOC_GPU_ONLY);
 	if (IS_ERR(obj))
-		obj = i915_gem_object_create_internal(i915, PAGE_SIZE);
+		obj = i915_gem_object_create_internal(i915, I915_GTT_PAGE_SIZE);
 	if (IS_ERR(obj))
 		return PTR_ERR(obj);
 
