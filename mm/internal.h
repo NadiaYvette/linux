@@ -392,6 +392,41 @@ static inline unsigned int folio_pte_batch_flags(struct folio *folio,
 unsigned int folio_pte_batch(struct folio *folio, pte_t *ptep, pte_t pte,
 		unsigned int max_nr);
 
+#if PAGE_MMUSHIFT
+/**
+ * pgcl_pte_batch - count contiguous PTEs mapping the same kernel page
+ * @pte: first PTE value (must be present)
+ * @ptep: pointer to first PTE in the page table
+ * @max_nr: maximum number of PTEs to scan
+ *
+ * For PGCL order-0 pages (non-compound), scans consecutive PTEs to find
+ * how many map contiguous PFNs within the same kernel page.  Returns at
+ * least 1.  Only considers PFNs — does not check permission bits.
+ *
+ * This enables batching PTE clearing and TLB flushing for PGCL sub-pages
+ * without requiring compound page infrastructure.
+ */
+static inline unsigned int pgcl_pte_batch(pte_t pte, pte_t *ptep,
+					  unsigned int max_nr)
+{
+	unsigned long base_pfn = pte_pfn(pte);
+	/* How many sub-pages remain in this kernel page? */
+	unsigned int remaining = PAGE_MMUCOUNT - (base_pfn & (PAGE_MMUCOUNT - 1));
+	unsigned int nr;
+
+	max_nr = min(max_nr, remaining);
+	for (nr = 1; nr < max_nr; nr++) {
+		pte_t next = ptep_get(ptep + nr);
+
+		if (!pte_present(next))
+			break;
+		if (pte_pfn(next) != base_pfn + nr)
+			break;
+	}
+	return nr;
+}
+#endif /* PAGE_MMUSHIFT */
+
 /**
  * pte_move_swp_offset - Move the swap entry offset field of a swap pte
  *	 forward or backward by delta
