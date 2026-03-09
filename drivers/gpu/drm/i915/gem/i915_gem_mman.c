@@ -131,7 +131,7 @@ err:
 
 static unsigned int tile_row_pages(const struct drm_i915_gem_object *obj)
 {
-	return i915_gem_object_get_tile_row_size(obj) >> PAGE_SHIFT;
+	return i915_gem_object_get_tile_row_size(obj) >> MMUPAGE_SHIFT;
 }
 
 /**
@@ -210,10 +210,10 @@ compute_partial_view(const struct drm_i915_gem_object *obj,
 	view.partial.offset = rounddown(page_offset, chunk);
 	view.partial.size =
 		min_t(unsigned int, chunk,
-		      (obj->base.size >> PAGE_SHIFT) - view.partial.offset);
+		      (obj->base.size >> MMUPAGE_SHIFT) - view.partial.offset);
 
 	/* If the partial covers the entire object, just create a normal VMA. */
-	if (chunk >= obj->base.size >> PAGE_SHIFT)
+	if (chunk >= obj->base.size >> MMUPAGE_SHIFT)
 		view.type = I915_GTT_VIEW_NORMAL;
 
 	return view;
@@ -306,12 +306,12 @@ static void set_address_limits(struct vm_area_struct *area,
 	long start, end; /* memory boundaries */
 
 	/*
-	 * Let's move into the ">> PAGE_SHIFT"
+	 * Let's move into the ">> MMUPAGE_SHIFT"
 	 * domain to be sure not to lose bits
 	 */
-	vm_start = area->vm_start >> PAGE_SHIFT;
-	vm_end = area->vm_end >> PAGE_SHIFT;
-	vma_size = vma->size >> PAGE_SHIFT;
+	vm_start = area->vm_start >> MMUPAGE_SHIFT;
+	vm_end = area->vm_end >> MMUPAGE_SHIFT;
+	vma_size = vma->size >> MMUPAGE_SHIFT;
 
 	/*
 	 * Calculate the memory boundaries by considering the offset
@@ -326,18 +326,18 @@ static void set_address_limits(struct vm_area_struct *area,
 	start = max_t(long, start, vm_start);
 	end = min_t(long, end, vm_end);
 
-	/* Let's move back into the "<< PAGE_SHIFT" domain */
-	*start_vaddr = (unsigned long)start << PAGE_SHIFT;
-	*end_vaddr = (unsigned long)end << PAGE_SHIFT;
+	/* Let's move back into the "<< MMUPAGE_SHIFT" domain */
+	*start_vaddr = (unsigned long)start << MMUPAGE_SHIFT;
+	*end_vaddr = (unsigned long)end << MMUPAGE_SHIFT;
 
-	*pfn = (gmadr_start + i915_ggtt_offset(vma)) >> PAGE_SHIFT;
-	*pfn += (*start_vaddr - area->vm_start) >> PAGE_SHIFT;
+	*pfn = (gmadr_start + i915_ggtt_offset(vma)) >> MMUPAGE_SHIFT;
+	*pfn += (*start_vaddr - area->vm_start) >> MMUPAGE_SHIFT;
 	*pfn += obj_offset - vma->gtt_view.partial.offset;
 }
 
 static vm_fault_t vm_fault_gtt(struct vm_fault *vmf)
 {
-#define MIN_CHUNK_PAGES (SZ_1M >> PAGE_SHIFT)
+#define MIN_CHUNK_PAGES (SZ_1M >> MMUPAGE_SHIFT)
 	struct vm_area_struct *area = vmf->vma;
 	struct i915_mmap_offset *mmo = area->vm_private_data;
 	struct drm_i915_gem_object *obj = mmo->obj;
@@ -357,7 +357,7 @@ static vm_fault_t vm_fault_gtt(struct vm_fault *vmf)
 	int ret;
 
 	obj_offset = area->vm_pgoff - drm_vma_node_start(&mmo->vma_node);
-	page_offset = (vmf->address - area->vm_start) >> PAGE_SHIFT;
+	page_offset = (vmf->address - area->vm_start) >> MMUPAGE_SHIFT;
 	page_offset += obj_offset;
 
 	trace_i915_gem_object_fault(obj, page_offset, true, write);
@@ -739,7 +739,7 @@ mmap_offset_attach(struct drm_i915_gem_object *obj,
 	drm_vma_node_reset(&mmo->vma_node);
 
 	err = drm_vma_offset_add(obj->base.dev->vma_offset_manager,
-				 &mmo->vma_node, obj->base.size / PAGE_SIZE);
+				 &mmo->vma_node, obj->base.size / MMUPAGE_SIZE);
 	if (likely(!err))
 		goto insert;
 
@@ -751,7 +751,7 @@ mmap_offset_attach(struct drm_i915_gem_object *obj,
 
 	i915_gem_drain_freed_objects(i915);
 	err = drm_vma_offset_add(obj->base.dev->vma_offset_manager,
-				 &mmo->vma_node, obj->base.size / PAGE_SIZE);
+				 &mmo->vma_node, obj->base.size / MMUPAGE_SIZE);
 	if (err)
 		goto err;
 

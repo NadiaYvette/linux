@@ -43,9 +43,9 @@ struct remap_pfn {
 static inline unsigned long sgt_pfn(const struct remap_pfn *r)
 {
 	if (use_dma(r->iobase))
-		return (r->sgt.dma + r->sgt.curr + r->iobase) >> PAGE_SHIFT;
+		return (r->sgt.dma + r->sgt.curr + r->iobase) >> MMUPAGE_SHIFT;
 	else
-		return r->sgt.pfn + (r->sgt.curr >> PAGE_SHIFT);
+		return r->sgt.pfn + (r->sgt.curr >> MMUPAGE_SHIFT);
 }
 
 static int remap_sg(pte_t *pte, unsigned long addr, void *data)
@@ -60,7 +60,7 @@ static int remap_sg(pte_t *pte, unsigned long addr, void *data)
 		   pte_mkspecial(pfn_pte(sgt_pfn(r), r->prot)));
 	r->pfn++; /* track insertions in case we need to unwind later */
 
-	r->sgt.curr += PAGE_SIZE;
+	r->sgt.curr += MMUPAGE_SIZE;
 	if (r->sgt.curr >= r->sgt.max)
 		r->sgt = __sgt_iter(__sg_next(r->sgt.sgp), use_dma(r->iobase));
 
@@ -108,7 +108,7 @@ int remap_io_mapping(struct vm_area_struct *vma,
 
 	err = apply_to_page_range(r.mm, addr, size, remap_pfn, &r);
 	if (unlikely(err)) {
-		zap_special_vma_range(vma, addr, (r.pfn - pfn) << PAGE_SHIFT);
+		zap_special_vma_range(vma, addr, (r.pfn - pfn) << MMUPAGE_SHIFT);
 		return err;
 	}
 
@@ -143,20 +143,20 @@ int remap_io_sg(struct vm_area_struct *vma,
 	/* We rely on prevalidation of the io-mapping to skip pfnmap tracking. */
 	GEM_BUG_ON((vma->vm_flags & EXPECTED_FLAGS) != EXPECTED_FLAGS);
 
-	while (offset >= r.sgt.max >> PAGE_SHIFT) {
-		offset -= r.sgt.max >> PAGE_SHIFT;
+	while (offset >= r.sgt.max >> MMUPAGE_SHIFT) {
+		offset -= r.sgt.max >> MMUPAGE_SHIFT;
 		r.sgt = __sgt_iter(__sg_next(r.sgt.sgp), use_dma(iobase));
 		if (!r.sgt.sgp)
 			return -EINVAL;
 	}
-	r.sgt.curr = offset << PAGE_SHIFT;
+	r.sgt.curr = offset << MMUPAGE_SHIFT;
 
 	if (!use_dma(iobase))
 		flush_cache_range(vma, addr, size);
 
 	err = apply_to_page_range(r.mm, addr, size, remap_sg, &r);
 	if (unlikely(err)) {
-		zap_special_vma_range(vma, addr, r.pfn << PAGE_SHIFT);
+		zap_special_vma_range(vma, addr, r.pfn << MMUPAGE_SHIFT);
 		return err;
 	}
 

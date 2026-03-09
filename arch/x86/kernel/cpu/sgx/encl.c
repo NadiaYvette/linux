@@ -15,7 +15,7 @@
 static int sgx_encl_lookup_backing(struct sgx_encl *encl, unsigned long page_index,
 			    struct sgx_backing *backing);
 
-#define PCMDS_PER_PAGE (PAGE_SIZE / sizeof(struct sgx_pcmd))
+#define PCMDS_PER_PAGE (MMUPAGE_SIZE / sizeof(struct sgx_pcmd))
 /*
  * 32 PCMD entries share a PCMD page. PCMD_FIRST_MASK is used to
  * determine the page index associated with the first PCMD entry

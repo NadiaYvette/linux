@@ -1838,7 +1838,7 @@ int nommu_shrink_inode_mappings(struct inode *inode, size_t size,
 
 		region = vma->vm_region;
 		r_size = region->vm_top - region->vm_start;
-		r_top = (region->vm_pgoff << PAGE_SHIFT) + r_size;
+		r_top = (region->vm_pgoff << MMUPAGE_SHIFT) + r_size;
 
 		if (r_top > newsize) {
 			region->vm_top -= r_top - newsize;

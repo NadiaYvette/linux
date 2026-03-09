@@ -186,16 +186,16 @@ vma_create(struct drm_i915_gem_object *obj,
 			GEM_BUG_ON(range_overflows_t(u64,
 						     view->partial.offset,
 						     view->partial.size,
-						     obj->base.size >> PAGE_SHIFT));
+						     obj->base.size >> MMUPAGE_SHIFT));
 			vma->size = view->partial.size;
-			vma->size <<= PAGE_SHIFT;
+			vma->size <<= MMUPAGE_SHIFT;
 			GEM_BUG_ON(vma->size > obj->base.size);
 		} else if (view->type == I915_GTT_VIEW_ROTATED) {
 			vma->size = intel_rotation_info_size(&view->rotated);
-			vma->size <<= PAGE_SHIFT;
+			vma->size <<= MMUPAGE_SHIFT;
 		} else if (view->type == I915_GTT_VIEW_REMAPPED) {
 			vma->size = intel_remapped_info_size(&view->remapped);
-			vma->size <<= PAGE_SHIFT;
+			vma->size <<= MMUPAGE_SHIFT;
 		}
 	}
 
@@ -1129,7 +1129,7 @@ remap_tiled_color_plane_pages(struct drm_i915_gem_object *obj,
 		if (!left)
 			continue;
 
-		sg = add_padding_pages(left >> PAGE_SHIFT, st, sg);
+		sg = add_padding_pages(left >> MMUPAGE_SHIFT, st, sg);
 	}
 
 	*gtt_offset += alignment_pad + dst_stride * height;
@@ -1152,15 +1152,15 @@ remap_contiguous_pages(struct drm_i915_gem_object *obj,
 	do {
 		unsigned int len;
 
-		len = min(sg_dma_len(iter) - (offset << PAGE_SHIFT),
-			  count << PAGE_SHIFT);
+		len = min(sg_dma_len(iter) - (offset << MMUPAGE_SHIFT),
+			  count << MMUPAGE_SHIFT);
 		sg_set_page(sg, NULL, len, 0);
 		sg_dma_address(sg) =
-			sg_dma_address(iter) + (offset << PAGE_SHIFT);
+			sg_dma_address(iter) + (offset << MMUPAGE_SHIFT);
 		sg_dma_len(sg) = len;
 
 		st->nents++;
-		count -= len >> PAGE_SHIFT;
+		count -= len >> MMUPAGE_SHIFT;
 		if (count == 0)
 			return sg;
 
@@ -1939,7 +1939,7 @@ void i915_vma_revoke_mmap(struct i915_vma *vma)
 	GEM_BUG_ON(!vma->obj->userfault_count);
 
 	node = &vma->mmo->vma_node;
-	vma_offset = vma->gtt_view.partial.offset << PAGE_SHIFT;
+	vma_offset = vma->gtt_view.partial.offset << MMUPAGE_SHIFT;
 	unmap_mapping_range(vma->vm->i915->drm.anon_inode->i_mapping,
 			    drm_vma_node_offset_addr(node) + vma_offset,
 			    vma->size,

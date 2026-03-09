@@ -176,7 +176,7 @@ static int usb_stream_hwdep_mmap(struct snd_hwdep *hw,
 	struct usb_stream *s;
 	bool read;
 
-	offset = area->vm_pgoff << PAGE_SHIFT;
+	offset = area->vm_pgoff << MMUPAGE_SHIFT;
 	guard(mutex)(&us122l->mutex);
 	s = us122l->sk.s;
 	read = offset < s->read_size;
