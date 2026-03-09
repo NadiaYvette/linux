@@ -1078,7 +1078,7 @@ end:
 static int s5p_mfc_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct s5p_mfc_ctx *ctx = file_to_ctx(file);
-	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
+	unsigned long offset = vma->vm_pgoff << MMUPAGE_SHIFT;
 	int ret;
 
 	if (offset < DST_QUEUE_OFF_BASE) {

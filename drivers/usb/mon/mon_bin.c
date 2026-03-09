@@ -1254,7 +1254,7 @@ static vm_fault_t mon_bin_vma_fault(struct vm_fault *vmf)
 	unsigned long flags;
 
 	spin_lock_irqsave(&rp->b_lock, flags);
-	offset = vmf->pgoff << PAGE_SHIFT;
+	offset = vmf->pgoff << MMUPAGE_SHIFT;
 	if (offset >= rp->b_size) {
 		spin_unlock_irqrestore(&rp->b_lock, flags);
 		return VM_FAULT_SIGBUS;

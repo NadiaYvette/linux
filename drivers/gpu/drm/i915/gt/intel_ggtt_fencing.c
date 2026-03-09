@@ -814,7 +814,7 @@ void
 i915_gem_object_save_bit_17_swizzle(struct drm_i915_gem_object *obj,
 				    struct sg_table *pages)
 {
-	const unsigned int page_count = obj->base.size >> PAGE_SHIFT;
+	const unsigned int page_count = obj->base.size >> MMUPAGE_SHIFT;
 	struct sgt_iter sgt_iter;
 	struct page *page;
 	int i;

@@ -560,7 +560,7 @@ static int sa1100fb_mmap(struct fb_info *info,
 {
 	struct sa1100fb_info *fbi =
 		container_of(info, struct sa1100fb_info, fb);
-	unsigned long off = vma->vm_pgoff << PAGE_SHIFT;
+	unsigned long off = vma->vm_pgoff << MMUPAGE_SHIFT;
 
 	vma->vm_page_prot = pgprot_decrypted(vma->vm_page_prot);
 
