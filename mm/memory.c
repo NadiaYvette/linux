@@ -1733,6 +1733,41 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 				       force_break, any_skipped);
 		return nr;
 	}
+#if PAGE_MMUSHIFT
+	/*
+	 * PGCL batch: order-0 pages are not compound, so we can't use
+	 * folio_pte_batch.  Instead, batch PTE clearing and TLB flushing
+	 * for contiguous sub-pages within the same kernel page, then do
+	 * per-sub-page rmap removal and page freeing.
+	 */
+	if (max_nr > 1 && folio_test_anon(folio)) {
+		nr = pgcl_pte_batch(ptent, pte, max_nr);
+		if (nr > 1) {
+			int i;
+
+			/* Batch clear all PTEs and flush TLB */
+			clear_full_ptes(mm, addr, pte, nr, tlb->fullmm);
+			rss[MM_ANONPAGES] -= nr;
+			arch_check_zapped_pte(vma, ptent);
+			tlb_remove_tlb_entries(tlb, pte, nr, addr);
+
+			/* Per-sub-page rmap removal and page freeing */
+			for (i = 0; i < nr; i++) {
+				struct page *subpage = page + i;
+				struct folio *subfolio = page_folio(subpage);
+
+				folio_remove_rmap_pte(subfolio, subpage, vma);
+				if (unlikely(__tlb_remove_page_size(tlb,
+						subpage, false,
+						MMUPAGE_SIZE))) {
+					*force_flush = true;
+					*force_break = true;
+				}
+			}
+			return nr;
+		}
+	}
+#endif
 	zap_present_folio_ptes(tlb, vma, folio, page, pte, ptent, 1, addr,
 			       details, rss, force_flush, force_break, any_skipped);
 	return 1;
