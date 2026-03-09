@@ -340,7 +340,7 @@ fill_page_dma(struct drm_i915_gem_object *p, const u64 val, unsigned int count)
 	void *vaddr = __px_vaddr(p);
 
 	memset64(vaddr, val, count);
-	drm_clflush_virt_range(vaddr, PAGE_SIZE);
+	drm_clflush_virt_range(vaddr, I915_GTT_PAGE_SIZE);
 }
 
 static void poison_scratch_page(struct drm_i915_gem_object *scratch)

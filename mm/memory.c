@@ -4865,6 +4865,8 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 	unsigned long page_idx;
 	unsigned long address;
 	pte_t *ptep;
+	swp_entry_t swap_prefetch[PAGE_MMUCOUNT > 1 ? PAGE_MMUCOUNT - 1 : 1];
+	int swap_prefetch_nr = 0;
 
 	if (!pte_unmap_same(vmf))
 		goto out;
@@ -5218,6 +5220,43 @@ check_folio:
 	if (should_try_to_free_swap(si, folio, vma, nr_pages, vmf->flags))
 		folio_free_swap(folio);
 
+	/*
+	 * PGCL swap-in prefetch: with PAGE_MMUSHIFT>0, each sub-page within
+	 * a kernel page gets its own swap slot.  After mapping the faulting
+	 * sub-page, scan neighbor PTEs within the same kernel page for swap
+	 * entries and prefetch them into the swap cache asynchronously.
+	 * This avoids I/O stalls on subsequent sub-page faults.
+	 */
+	if (PAGE_MMUSHIFT && nr_pages == 1 && !folio_test_large(folio)) {
+		unsigned long cluster_start = address & PAGE_MASK;
+		unsigned long sub_idx = (address - cluster_start) >> MMUPAGE_SHIFT;
+		pte_t *cluster_ptep = ptep - sub_idx;
+		unsigned long neighbor_addr;
+		int i;
+
+		for (i = 0; i < PAGE_MMUCOUNT; i++) {
+			pte_t neighbor;
+			softleaf_t sl;
+
+			if (i == (int)sub_idx)
+				continue;
+
+			neighbor_addr = cluster_start + ((unsigned long)i << MMUPAGE_SHIFT);
+			if (neighbor_addr < vma->vm_start ||
+			    neighbor_addr >= vma->vm_end)
+				continue;
+
+			neighbor = ptep_get(cluster_ptep + i);
+			sl = softleaf_from_pte(neighbor);
+			if (!softleaf_is_swap(sl))
+				continue;
+
+			swap_prefetch[swap_prefetch_nr++] = sl;
+			if (swap_prefetch_nr >= PAGE_MMUCOUNT - 1)
+				break;
+		}
+	}
+
 	folio_unlock(folio);
 	if (unlikely(folio != swapcache)) {
 		/*
@@ -5247,6 +5286,25 @@ unlock:
 out:
 	if (si)
 		put_swap_device(si);
+
+	/* Issue PGCL swap-in prefetch reads after releasing all locks */
+	if (swap_prefetch_nr) {
+		struct swap_iocb *splug = NULL;
+		int i;
+
+		for (i = 0; i < swap_prefetch_nr; i++) {
+			struct folio *f;
+
+			f = read_swap_cache_async(swap_prefetch[i],
+					GFP_HIGHUSER_MOVABLE, vma,
+					vmf->address, &splug);
+			if (f)
+				folio_put(f);
+		}
+		if (splug)
+			swap_read_unplug(splug);
+	}
+
 	return ret;
 out_nomap:
 	if (vmf->pte)

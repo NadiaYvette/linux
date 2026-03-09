@@ -622,7 +622,7 @@ void i915_ggtt_resume(struct i915_ggtt *ggtt);
 void
 fill_page_dma(struct drm_i915_gem_object *p, const u64 val, unsigned int count);
 
-#define fill_px(px, v) fill_page_dma(px_base(px), (v), PAGE_SIZE / sizeof(u64))
+#define fill_px(px, v) fill_page_dma(px_base(px), (v), I915_GTT_PAGE_SIZE / sizeof(u64))
 #define fill32_px(px, v) do {						\
 	u64 v__ = lower_32_bits(v);					\
 	fill_px((px), v__ << 32 | v__);					\
