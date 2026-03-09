@@ -232,6 +232,9 @@ static inline bool page_range_contiguous(const struct page *page,
 /* to align the pointer to the (next) MMUPAGE boundary */
 #define MMUPAGE_ALIGN(addr) ALIGN(addr, MMUPAGE_SIZE)
 
+/* to align the pointer to the (prev) MMUPAGE boundary */
+#define MMUPAGE_ALIGN_DOWN(addr) ALIGN_DOWN(addr, MMUPAGE_SIZE)
+
 /* test whether an address is aligned to MMUPAGE_SIZE */
 #define MMUPAGE_ALIGNED(addr)	IS_ALIGNED((unsigned long)(addr), MMUPAGE_SIZE)
 

@@ -334,7 +334,7 @@ static void *i915_gem_object_map_pfn(struct drm_i915_gem_object *obj,
 {
 	resource_size_t iomap = obj->mm.region->iomap.base -
 		obj->mm.region->region.start;
-	unsigned long n_pfn = obj->base.size >> PAGE_SHIFT;
+	unsigned long n_pfn = obj->base.size >> MMUPAGE_SHIFT;
 	unsigned long stack[32], *pfns = stack, i;
 	struct sgt_iter iter;
 	dma_addr_t addr;
@@ -351,7 +351,7 @@ static void *i915_gem_object_map_pfn(struct drm_i915_gem_object *obj,
 
 	i = 0;
 	for_each_sgt_daddr(addr, iter, obj->mm.pages)
-		pfns[i++] = (iomap + addr) >> PAGE_SHIFT;
+		pfns[i++] = (iomap + addr) >> MMUPAGE_SHIFT;
 	vaddr = vmap_pfn(pfns, n_pfn, pgprot_writecombine(PAGE_KERNEL_IO));
 	if (pfns != stack)
 		kvfree(pfns);
@@ -654,7 +654,7 @@ __i915_gem_object_page_iter_get_sg(struct drm_i915_gem_object *obj,
 	struct scatterlist *sg;
 
 	might_sleep();
-	GEM_BUG_ON(n >= obj->base.size >> PAGE_SHIFT);
+	GEM_BUG_ON(n >= obj->base.size >> (dma ? MMUPAGE_SHIFT : PAGE_SHIFT));
 	if (!i915_gem_object_has_pinned_pages(obj))
 		assert_object_held(obj);
 
@@ -793,9 +793,9 @@ __i915_gem_object_get_dma_address_len(struct drm_i915_gem_object *obj,
 	sg = i915_gem_object_get_sg_dma(obj, n, &offset);
 
 	if (len)
-		*len = sg_dma_len(sg) - (offset << PAGE_SHIFT);
+		*len = sg_dma_len(sg) - (offset << MMUPAGE_SHIFT);
 
-	return sg_dma_address(sg) + (offset << PAGE_SHIFT);
+	return sg_dma_address(sg) + (offset << MMUPAGE_SHIFT);
 }
 
 dma_addr_t

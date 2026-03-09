@@ -274,7 +274,7 @@ int intel_vgpu_opregion_base_write_handler(struct intel_vgpu *vgpu, u32 gpa)
 	gvt_dbg_core("emulate opregion from kernel\n");
 
 	for (i = 0; i < INTEL_GVT_OPREGION_PAGES; i++)
-		vgpu_opregion(vgpu)->gfn[i] = (gpa >> PAGE_SHIFT) + i;
+		vgpu_opregion(vgpu)->gfn[i] = (gpa >> MMUPAGE_SHIFT) + i;
 	return 0;
 }
 
@@ -419,9 +419,9 @@ int intel_vgpu_emulate_opregion_request(struct intel_vgpu *vgpu, u32 swsci)
 	u64 scic_pa = 0, parm_pa = 0;
 	int ret;
 
-	scic_pa = (vgpu_opregion(vgpu)->gfn[0] << PAGE_SHIFT) +
+	scic_pa = (vgpu_opregion(vgpu)->gfn[0] << MMUPAGE_SHIFT) +
 				INTEL_GVT_OPREGION_SCIC;
-	parm_pa = (vgpu_opregion(vgpu)->gfn[0] << PAGE_SHIFT) +
+	parm_pa = (vgpu_opregion(vgpu)->gfn[0] << MMUPAGE_SHIFT) +
 				INTEL_GVT_OPREGION_PARM;
 	ret = intel_gvt_read_gpa(vgpu, scic_pa, &scic, sizeof(scic));
 	if (ret) {

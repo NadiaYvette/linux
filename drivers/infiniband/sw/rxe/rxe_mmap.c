@@ -62,7 +62,7 @@ static const struct vm_operations_struct rxe_vm_ops = {
 int rxe_mmap(struct ib_ucontext *context, struct vm_area_struct *vma)
 {
 	struct rxe_dev *rxe = to_rdev(context->device);
-	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
+	unsigned long offset = vma->vm_pgoff << MMUPAGE_SHIFT;
 	unsigned long size = vma->vm_end - vma->vm_start;
 	struct rxe_mmap_info *ip, *pp;
 	int ret;

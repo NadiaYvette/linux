@@ -293,9 +293,9 @@ static void __iomem *acpi_map(acpi_physical_address pg_off, unsigned long pg_sz)
 {
 	unsigned long pfn;
 
-	pfn = pg_off >> PAGE_SHIFT;
+	pfn = pg_off >> MMUPAGE_SHIFT;
 	if (should_use_kmap(pfn)) {
-		if (pg_sz > PAGE_SIZE)
+		if (pg_sz > MMUPAGE_SIZE)
 			return NULL;
 		return (void __iomem __force *)kmap(pfn_to_page(pfn));
 	} else
@@ -306,7 +306,7 @@ static void acpi_unmap(acpi_physical_address pg_off, void __iomem *vaddr)
 {
 	unsigned long pfn;
 
-	pfn = pg_off >> PAGE_SHIFT;
+	pfn = pg_off >> MMUPAGE_SHIFT;
 	if (should_use_kmap(pfn))
 		kunmap(pfn_to_page(pfn));
 	else
@@ -356,8 +356,8 @@ void __iomem __ref
 		return NULL;
 	}
 
-	pg_off = round_down(phys, PAGE_SIZE);
-	pg_sz = round_up(phys + size, PAGE_SIZE) - pg_off;
+	pg_off = round_down(phys, MMUPAGE_SIZE);
+	pg_sz = round_up(phys + size, MMUPAGE_SIZE) - pg_off;
 	virt = acpi_map(phys, size);
 	if (!virt) {
 		mutex_unlock(&acpi_ioremap_lock);
@@ -366,7 +366,7 @@ void __iomem __ref
 	}
 
 	INIT_LIST_HEAD(&map->list);
-	map->virt = (void __iomem __force *)((unsigned long)virt & PAGE_MASK);
+	map->virt = (void __iomem __force *)((unsigned long)virt & MMUPAGE_MASK);
 	map->phys = pg_off;
 	map->size = pg_sz;
 	map->track.refcount = 1;
