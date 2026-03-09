@@ -290,7 +290,7 @@ gtt_user_read(struct io_mapping *mapping,
 					    length);
 	io_mapping_unmap_atomic(vaddr);
 	if (unwritten) {
-		vaddr = io_mapping_map_wc(mapping, base, PAGE_SIZE);
+		vaddr = io_mapping_map_wc(mapping, base, I915_GTT_PAGE_SIZE);
 		unwritten = copy_to_user(user_data,
 					 (void __force *)vaddr + offset,
 					 length);
@@ -332,7 +332,7 @@ retry:
 		node->start = i915_ggtt_offset(vma);
 		node->flags = 0;
 	} else {
-		ret = insert_mappable_node(ggtt, node, PAGE_SIZE);
+		ret = insert_mappable_node(ggtt, node, I915_GTT_PAGE_SIZE);
 		if (ret)
 			goto err_ww;
 		GEM_BUG_ON(!drm_mm_node_allocated(node));
@@ -413,18 +413,18 @@ i915_gem_gtt_pread(struct drm_i915_gem_object *obj,
 		 * page_length = bytes to copy for this page
 		 */
 		u32 page_base = node.start;
-		unsigned page_offset = offset_in_page(offset);
-		unsigned page_length = PAGE_SIZE - page_offset;
+		unsigned page_offset = offset & (MMUPAGE_SIZE - 1);
+		unsigned page_length = MMUPAGE_SIZE - page_offset;
 		page_length = remain < page_length ? remain : page_length;
 		if (drm_mm_node_allocated(&node)) {
 			ggtt->vm.insert_page(&ggtt->vm,
 					     i915_gem_object_get_dma_address(obj,
-									     offset >> PAGE_SHIFT),
+									     offset >> MMUPAGE_SHIFT),
 					     node.start,
 					     i915_gem_get_pat_index(i915,
 								    I915_CACHE_NONE), 0);
 		} else {
-			page_base += offset & PAGE_MASK;
+			page_base += offset & MMUPAGE_MASK;
 		}
 
 		if (gtt_user_read(&ggtt->iomap, page_base, page_offset,
@@ -524,7 +524,7 @@ ggtt_write(struct io_mapping *mapping,
 						      user_data, length);
 	io_mapping_unmap_atomic(vaddr);
 	if (unwritten) {
-		vaddr = io_mapping_map_wc(mapping, base, PAGE_SIZE);
+		vaddr = io_mapping_map_wc(mapping, base, I915_GTT_PAGE_SIZE);
 		unwritten = copy_from_user((void __force *)vaddr + offset,
 					   user_data, length);
 		io_mapping_unmap(vaddr);
@@ -592,21 +592,21 @@ i915_gem_gtt_pwrite_fast(struct drm_i915_gem_object *obj,
 		 * page_length = bytes to copy for this page
 		 */
 		u32 page_base = node.start;
-		unsigned int page_offset = offset_in_page(offset);
-		unsigned int page_length = PAGE_SIZE - page_offset;
+		unsigned int page_offset = offset & (MMUPAGE_SIZE - 1);
+		unsigned int page_length = MMUPAGE_SIZE - page_offset;
 		page_length = remain < page_length ? remain : page_length;
 		if (drm_mm_node_allocated(&node)) {
 			/* flush the write before we modify the GGTT */
 			intel_gt_flush_ggtt_writes(ggtt->vm.gt);
 			ggtt->vm.insert_page(&ggtt->vm,
 					     i915_gem_object_get_dma_address(obj,
-									     offset >> PAGE_SHIFT),
+									     offset >> MMUPAGE_SHIFT),
 					     node.start,
 					     i915_gem_get_pat_index(i915,
 								    I915_CACHE_NONE), 0);
 			wmb(); /* flush modifications to the GGTT (insert_page) */
 		} else {
-			page_base += offset & PAGE_MASK;
+			page_base += offset & MMUPAGE_MASK;
 		}
 		/* If we get a fault while copying data, then (presumably) our
 		 * source page isn't available.  Return the error and we'll

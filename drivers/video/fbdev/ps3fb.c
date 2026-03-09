@@ -713,7 +713,7 @@ static int ps3fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 	r = vm_iomap_memory(vma, info->fix.smem_start, info->fix.smem_len);
 
 	dev_dbg(info->device, "ps3fb: mmap framebuffer P(%lx)->V(%lx)\n",
-		info->fix.smem_start + (vma->vm_pgoff << PAGE_SHIFT),
+		info->fix.smem_start + (vma->vm_pgoff << MMUPAGE_SHIFT),
 		vma->vm_start);
 
 	return r;

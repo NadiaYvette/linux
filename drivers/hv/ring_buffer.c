@@ -190,7 +190,7 @@ int hv_ringbuffer_init(struct hv_ring_buffer_info *ring_info,
 	struct page **pages_wraparound;
 	int i;
 
-	BUILD_BUG_ON((sizeof(struct hv_ring_buffer) != PAGE_SIZE));
+	BUILD_BUG_ON((sizeof(struct hv_ring_buffer) != HV_HYP_PAGE_SIZE));
 
 	/*
 	 * First page holds struct hv_ring_buffer, do wraparound mapping for

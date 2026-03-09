@@ -898,11 +898,19 @@ void free_init_pages(const char *what, unsigned long begin, unsigned long end)
 {
 	unsigned long begin_aligned, end_aligned;
 
-	/* Make sure boundaries are page aligned */
+	/*
+	 * Make sure boundaries are page aligned.  With PAGE_MMUSHIFT > 0,
+	 * init sections may only be MMUPAGE-aligned, so silently round
+	 * to PAGE boundaries — CPA requires PAGE-aligned addresses.
+	 */
 	begin_aligned = PAGE_ALIGN(begin);
 	end_aligned   = end & PAGE_MASK;
 
-	if (WARN_ON(begin_aligned != begin || end_aligned != end)) {
+	if (PAGE_MMUSHIFT == 0 &&
+	    WARN_ON(begin_aligned != begin || end_aligned != end)) {
+		begin = begin_aligned;
+		end   = end_aligned;
+	} else {
 		begin = begin_aligned;
 		end   = end_aligned;
 	}

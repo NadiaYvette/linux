@@ -57,7 +57,7 @@ static int virtio_gpu_vram_mmap(struct drm_gem_object *obj,
 	else if (vram->map_info == VIRTIO_GPU_MAP_CACHE_UNCACHED)
 		vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 
-	if (check_add_overflow(vma->vm_pgoff << PAGE_SHIFT, vm_size, &vm_end))
+	if (check_add_overflow(vma->vm_pgoff << MMUPAGE_SHIFT, vm_size, &vm_end))
 		return -EINVAL;
 
 	if (vm_end > vram->vram_node.size)

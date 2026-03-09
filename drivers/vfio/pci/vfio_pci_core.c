@@ -1651,7 +1651,7 @@ void vfio_pci_memory_unlock_and_restore(struct vfio_pci_core_device *vdev, u16 c
 static unsigned long vma_to_pfn(struct vm_area_struct *vma)
 {
 	struct vfio_pci_core_device *vdev = vma->vm_private_data;
-	int index = vma->vm_pgoff >> (VFIO_PCI_OFFSET_SHIFT - PAGE_SHIFT);
+	int index = vma->vm_pgoff >> (VFIO_PCI_OFFSET_SHIFT - MMUPAGE_SHIFT);
 	u64 pgoff;
 
 	pgoff = vma->vm_pgoff &
@@ -1734,7 +1734,7 @@ int vfio_pci_core_mmap(struct vfio_device *core_vdev, struct vm_area_struct *vma
 	u64 phys_len, req_len, pgoff, req_start;
 	int ret;
 
-	index = vma->vm_pgoff >> (VFIO_PCI_OFFSET_SHIFT - PAGE_SHIFT);
+	index = vma->vm_pgoff >> (VFIO_PCI_OFFSET_SHIFT - MMUPAGE_SHIFT);
 
 	if (index >= VFIO_PCI_NUM_REGIONS + vdev->num_regions)
 		return -EINVAL;

@@ -1069,7 +1069,7 @@ static int vhost_vdpa_va_map(struct vhost_vdpa *v,
 			ret = -ENOMEM;
 			break;
 		}
-		offset = (vma->vm_pgoff << PAGE_SHIFT) + uaddr - vma->vm_start;
+		offset = (vma->vm_pgoff << MMUPAGE_SHIFT) + uaddr - vma->vm_start;
 		map_file->offset = offset;
 		map_file->file = get_file(vma->vm_file);
 		ret = vhost_vdpa_map(v, iotlb, map_iova, map_size, uaddr,

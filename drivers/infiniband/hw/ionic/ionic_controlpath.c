@@ -448,7 +448,7 @@ int ionic_mmap(struct ib_ucontext *ibctx, struct vm_area_struct *vma)
 	rdma_entry = rdma_user_mmap_entry_get(&ctx->ibctx, vma);
 	if (!rdma_entry) {
 		ibdev_dbg(&dev->ibdev, "not found %#lx\n",
-			  vma->vm_pgoff << PAGE_SHIFT);
+			  vma->vm_pgoff << MMUPAGE_SHIFT);
 		return -EINVAL;
 	}
 

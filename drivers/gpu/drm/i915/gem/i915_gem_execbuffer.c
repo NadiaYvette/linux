@@ -1167,7 +1167,7 @@ static void reloc_cache_remap(struct reloc_cache *cache,
 
 		offset = cache->node.start;
 		if (!drm_mm_node_allocated(&cache->node))
-			offset += cache->page << PAGE_SHIFT;
+			offset += cache->page << MMUPAGE_SHIFT;
 
 		cache->vaddr = (unsigned long)
 			io_mapping_map_atomic_wc(&ggtt->iomap, offset);
@@ -1320,7 +1320,7 @@ static void *reloc_iomap(struct i915_vma *batch,
 							    I915_CACHE_NONE),
 				     0);
 	} else {
-		offset += page << PAGE_SHIFT;
+		offset += page << MMUPAGE_SHIFT;
 	}
 
 	vaddr = (void __force *)io_mapping_map_atomic_wc(&ggtt->iomap,
@@ -1386,12 +1386,12 @@ relocate_entry(struct i915_vma *vma,
 
 repeat:
 	vaddr = reloc_vaddr(vma, eb,
-			    offset >> PAGE_SHIFT);
+			    offset >> MMUPAGE_SHIFT);
 	if (IS_ERR(vaddr))
 		return PTR_ERR(vaddr);
 
 	GEM_BUG_ON(!IS_ALIGNED(offset, sizeof(u32)));
-	clflush_write32(vaddr + offset_in_page(offset),
+	clflush_write32(vaddr + (offset & (MMUPAGE_SIZE - 1)),
 			lower_32_bits(target_addr),
 			eb->reloc_cache.vaddr);
 

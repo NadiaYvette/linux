@@ -128,7 +128,7 @@ err:
 static int c4iw_mmap(struct ib_ucontext *context, struct vm_area_struct *vma)
 {
 	int len = vma->vm_end - vma->vm_start;
-	u32 key = vma->vm_pgoff << PAGE_SHIFT;
+	u32 key = vma->vm_pgoff << MMUPAGE_SHIFT;
 	struct c4iw_rdev *rdev;
 	int ret = 0;
 	struct c4iw_mm_entry *mm;

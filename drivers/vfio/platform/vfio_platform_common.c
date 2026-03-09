@@ -559,7 +559,7 @@ static int vfio_platform_mmap_mmio(struct vfio_platform_region region,
 		return -EINVAL;
 
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-	vma->vm_pgoff = (region.addr >> PAGE_SHIFT) + pgoff;
+	vma->vm_pgoff = (region.addr >> MMUPAGE_SHIFT) + pgoff;
 
 	return remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
 			       req_len, vma->vm_page_prot);
@@ -571,7 +571,7 @@ int vfio_platform_mmap(struct vfio_device *core_vdev, struct vm_area_struct *vma
 		container_of(core_vdev, struct vfio_platform_device, vdev);
 	unsigned int index;
 
-	index = vma->vm_pgoff >> (VFIO_PLATFORM_OFFSET_SHIFT - PAGE_SHIFT);
+	index = vma->vm_pgoff >> (VFIO_PLATFORM_OFFSET_SHIFT - MMUPAGE_SHIFT);
 
 	if (vma->vm_end < vma->vm_start)
 		return -EINVAL;

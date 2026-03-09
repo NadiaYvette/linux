@@ -119,7 +119,7 @@ static int opal_prd_mmap(struct file *file, struct vm_area_struct *vma)
 			vma->vm_start, vma->vm_end, vma->vm_pgoff,
 			vma->vm_flags);
 
-	addr = vma->vm_pgoff << PAGE_SHIFT;
+	addr = vma->vm_pgoff << MMUPAGE_SHIFT;
 	size = vma->vm_end - vma->vm_start;
 
 	/* ensure we're mapping within one of the allowable ranges */

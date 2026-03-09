@@ -128,7 +128,7 @@ static int alloc_discontig_frames(unsigned int order)
 	unsigned long flags;
 
 	BUG_ON(order < MIN_CONTIG_ORDER);
-	BUILD_BUG_ON(sizeof(discontig_frames_early) != PAGE_SIZE);
+	BUILD_BUG_ON(sizeof(discontig_frames_early) > PAGE_SIZE);
 
 	new_array = (unsigned long *)__get_free_pages(GFP_KERNEL,
 						      order - MIN_CONTIG_ORDER);

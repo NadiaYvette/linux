@@ -13,13 +13,13 @@
 #endif
 
 #define THREAD_SIZE_ORDER	(2 + KASAN_STACK_ORDER)
-#define THREAD_SIZE  (PAGE_SIZE << THREAD_SIZE_ORDER)
+#define THREAD_SIZE  (MMUPAGE_SIZE << THREAD_SIZE_ORDER)
 
 #define EXCEPTION_STACK_ORDER (1 + KASAN_STACK_ORDER)
-#define EXCEPTION_STKSZ (PAGE_SIZE << EXCEPTION_STACK_ORDER)
+#define EXCEPTION_STKSZ (MMUPAGE_SIZE << EXCEPTION_STACK_ORDER)
 
 #define IRQ_STACK_ORDER (2 + KASAN_STACK_ORDER)
-#define IRQ_STACK_SIZE (PAGE_SIZE << IRQ_STACK_ORDER)
+#define IRQ_STACK_SIZE (MMUPAGE_SIZE << IRQ_STACK_ORDER)
 
 /*
  * The index for the tss.ist[] array. The hardware limit is 7 entries.
@@ -51,7 +51,7 @@
 #define __VIRTUAL_MASK_SHIFT	(pgtable_l5_enabled() ? 56 : 47)
 
 #define TASK_SIZE_MAX		task_size_max()
-#define DEFAULT_MAP_WINDOW	((1UL << 47) - PAGE_SIZE)
+#define DEFAULT_MAP_WINDOW	((1UL << 47) - MMUPAGE_SIZE)
 
 /* This decides where the kernel will search for a free chunk of vm
  * space during mmap's.

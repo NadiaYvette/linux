@@ -43,7 +43,7 @@ void __xenmem_reservation_va_mapping_update(unsigned long count,
 		 * We don't support PV MMU when Linux and Xen is using
 		 * different page granularity.
 		 */
-		BUILD_BUG_ON(XEN_PAGE_SIZE != PAGE_SIZE);
+		BUILD_BUG_ON(XEN_PAGE_SIZE != MMUPAGE_SIZE);
 
 		set_phys_to_machine(pfn, frames[i]);
 
@@ -69,7 +69,7 @@ void __xenmem_reservation_va_mapping_reset(unsigned long count,
 		 * We don't support PV MMU when Linux and Xen are using
 		 * different page granularity.
 		 */
-		BUILD_BUG_ON(XEN_PAGE_SIZE != PAGE_SIZE);
+		BUILD_BUG_ON(XEN_PAGE_SIZE != MMUPAGE_SIZE);
 
 		ret = HYPERVISOR_update_va_mapping(
 				(unsigned long)__va(pfn << PAGE_SHIFT),

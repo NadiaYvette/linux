@@ -309,7 +309,7 @@ static int ep93xxfb_check_var(struct fb_var_screeninfo *var,
 
 static int ep93xxfb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 {
-	unsigned int offset = vma->vm_pgoff << PAGE_SHIFT;
+	unsigned int offset = vma->vm_pgoff << MMUPAGE_SHIFT;
 
 	vma->vm_page_prot = pgprot_decrypted(vma->vm_page_prot);
 

@@ -2546,7 +2546,7 @@ static int ublk_ch_mmap(struct file *filp, struct vm_area_struct *vma)
 	struct ublk_device *ub = filp->private_data;
 	size_t sz = vma->vm_end - vma->vm_start;
 	unsigned max_sz = ublk_max_cmd_buf_size();
-	unsigned long pfn, end, phys_off = vma->vm_pgoff << PAGE_SHIFT;
+	unsigned long pfn, end, phys_off = vma->vm_pgoff << MMUPAGE_SHIFT;
 	int q_id, ret = 0;
 
 	spin_lock(&ub->lock);

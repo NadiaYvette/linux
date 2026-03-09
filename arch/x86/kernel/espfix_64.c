@@ -39,10 +39,10 @@
  * it up to a cache line to avoid unnecessary sharing.
  */
 #define ESPFIX_STACK_SIZE	(8*8UL)
-#define ESPFIX_STACKS_PER_PAGE	(PAGE_SIZE/ESPFIX_STACK_SIZE)
+#define ESPFIX_STACKS_PER_PAGE	(MMUPAGE_SIZE/ESPFIX_STACK_SIZE)
 
 /* There is address space for how many espfix pages? */
-#define ESPFIX_PAGE_SPACE	(1UL << (P4D_SHIFT-PAGE_SHIFT-16))
+#define ESPFIX_PAGE_SPACE	(1UL << (P4D_SHIFT-MMUPAGE_SHIFT-16))
 
 #define ESPFIX_MAX_CPUS		(ESPFIX_STACKS_PER_PAGE * ESPFIX_PAGE_SPACE)
 #if CONFIG_NR_CPUS > ESPFIX_MAX_CPUS
@@ -79,13 +79,13 @@ static inline unsigned long espfix_base_addr(unsigned int cpu)
 
 	page = (cpu / ESPFIX_STACKS_PER_PAGE) ^ page_random;
 	slot = (cpu + slot_random) % ESPFIX_STACKS_PER_PAGE;
-	addr = (page << PAGE_SHIFT) + (slot * ESPFIX_STACK_SIZE);
+	addr = (page << MMUPAGE_SHIFT) + (slot * ESPFIX_STACK_SIZE);
 	addr = (addr & 0xffffUL) | ((addr & ~0xffffUL) << 16);
 	addr += ESPFIX_BASE_ADDR;
 	return addr;
 }
 
-#define PTE_STRIDE        (65536/PAGE_SIZE)
+#define PTE_STRIDE        (65536/MMUPAGE_SIZE)
 #define ESPFIX_PTE_CLONES (PTRS_PER_PTE/PTE_STRIDE)
 #define ESPFIX_PMD_CLONES PTRS_PER_PMD
 #define ESPFIX_PUD_CLONES (65536/(ESPFIX_PTE_CLONES*ESPFIX_PMD_CLONES))
@@ -201,5 +201,5 @@ unlock_done:
 done:
 	per_cpu(espfix_stack, cpu) = addr;
 	per_cpu(espfix_waddr, cpu) = (unsigned long)stack_page
-				      + (addr & ~PAGE_MASK);
+				      + (addr & ~MMUPAGE_MASK);
 }

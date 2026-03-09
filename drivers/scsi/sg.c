@@ -1225,7 +1225,7 @@ sg_vma_fault(struct vm_fault *vmf)
 	if ((NULL == vma) || (!(sfp = (Sg_fd *) vma->vm_private_data)))
 		return VM_FAULT_SIGBUS;
 	rsv_schp = &sfp->reserve;
-	offset = vmf->pgoff << PAGE_SHIFT;
+	offset = vmf->pgoff << MMUPAGE_SHIFT;
 	if (offset >= rsv_schp->bufflen)
 		return VM_FAULT_SIGBUS;
 	SCSI_LOG_TIMEOUT(3, sg_printk(KERN_INFO, sfp->parentdp,

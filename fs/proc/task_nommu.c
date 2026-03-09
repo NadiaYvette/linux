@@ -140,7 +140,7 @@ static int nommu_vma_show(struct seq_file *m, struct vm_area_struct *vma)
 		struct inode *inode = file_inode(vma->vm_file);
 		dev = inode->i_sb->s_dev;
 		ino = inode->i_ino;
-		pgoff = (loff_t)vma->vm_pgoff << PAGE_SHIFT;
+		pgoff = (loff_t)vma->vm_pgoff << MMUPAGE_SHIFT;
 	}
 
 	seq_setwidth(m, 25 + sizeof(void *) * 6 - 1);

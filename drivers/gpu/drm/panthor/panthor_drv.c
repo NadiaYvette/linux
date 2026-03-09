@@ -1547,7 +1547,7 @@ static int panthor_mmap(struct file *filp, struct vm_area_struct *vma)
 	struct drm_file *file = filp->private_data;
 	struct panthor_file *pfile = file->driver_priv;
 	struct panthor_device *ptdev = pfile->ptdev;
-	u64 offset = (u64)vma->vm_pgoff << PAGE_SHIFT;
+	u64 offset = (u64)vma->vm_pgoff << MMUPAGE_SHIFT;
 	u64 user_mmio_offset;
 	int ret, cookie;
 
@@ -1563,7 +1563,7 @@ static int panthor_mmap(struct file *filp, struct vm_area_struct *vma)
 	if (offset >= user_mmio_offset) {
 		offset -= user_mmio_offset;
 		offset += DRM_PANTHOR_USER_MMIO_OFFSET;
-		vma->vm_pgoff = offset >> PAGE_SHIFT;
+		vma->vm_pgoff = offset >> MMUPAGE_SHIFT;
 		ret = panthor_device_mmap_io(ptdev, vma);
 	} else {
 		ret = drm_gem_mmap(filp, vma);

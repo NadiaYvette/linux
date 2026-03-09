@@ -2486,7 +2486,7 @@ EXPORT_SYMBOL_GPL(vb2_core_expbuf);
 
 int vb2_mmap(struct vb2_queue *q, struct vm_area_struct *vma)
 {
-	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
+	unsigned long offset = vma->vm_pgoff << MMUPAGE_SHIFT;
 	struct vb2_buffer *vb;
 	unsigned int plane = 0;
 	int ret;

@@ -300,7 +300,7 @@ static vm_fault_t nvgrace_gpu_vfio_pci_huge_fault(struct vm_fault *vmf,
 	struct nvgrace_gpu_pci_core_device *nvdev = vma->vm_private_data;
 	struct vfio_pci_core_device *vdev = &nvdev->core_device;
 	unsigned int index =
-		vma->vm_pgoff >> (VFIO_PCI_OFFSET_SHIFT - PAGE_SHIFT);
+		vma->vm_pgoff >> (VFIO_PCI_OFFSET_SHIFT - MMUPAGE_SHIFT);
 	vm_fault_t ret = VM_FAULT_FALLBACK;
 	struct mem_region *memregion;
 	unsigned long pfn, addr;
@@ -362,7 +362,7 @@ static int nvgrace_gpu_mmap(struct vfio_device *core_vdev,
 	u64 req_len, pgoff, end;
 	unsigned int index;
 
-	index = vma->vm_pgoff >> (VFIO_PCI_OFFSET_SHIFT - PAGE_SHIFT);
+	index = vma->vm_pgoff >> (VFIO_PCI_OFFSET_SHIFT - MMUPAGE_SHIFT);
 
 	memregion = nvgrace_gpu_memregion(index, nvdev);
 	if (!memregion)

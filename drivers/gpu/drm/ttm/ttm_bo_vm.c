@@ -91,7 +91,7 @@ static unsigned long ttm_bo_io_mem_pfn(struct ttm_buffer_object *bo,
 	if (bdev->funcs->io_mem_pfn)
 		return bdev->funcs->io_mem_pfn(bo, page_offset);
 
-	return (bo->resource->bus.offset >> PAGE_SHIFT) + page_offset;
+	return (bo->resource->bus.offset >> MMUPAGE_SHIFT) + page_offset;
 }
 
 /**
@@ -208,12 +208,12 @@ vm_fault_t ttm_bo_vm_fault_reserved(struct vm_fault *vmf,
 	if (unlikely(err != 0))
 		return VM_FAULT_SIGBUS;
 
-	page_offset = ((address - vma->vm_start) >> PAGE_SHIFT) +
+	page_offset = ((address - vma->vm_start) >> MMUPAGE_SHIFT) +
 		vma->vm_pgoff - drm_vma_node_start(&bo->base.vma_node);
 	page_last = vma_pages(vma) + vma->vm_pgoff -
 		drm_vma_node_start(&bo->base.vma_node);
 
-	if (unlikely(page_offset >= PFN_UP(bo->base.size)))
+	if (unlikely(page_offset >= DIV_ROUND_UP(bo->base.size, MMUPAGE_SIZE)))
 		return VM_FAULT_SIGBUS;
 
 	prot = ttm_io_prot(bo, bo->resource, prot);
@@ -241,18 +241,24 @@ vm_fault_t ttm_bo_vm_fault_reserved(struct vm_fault *vmf,
 	/*
 	 * Speculatively prefault a number of pages. Only error on
 	 * first page.
+	 *
+	 * page_offset is in MMUPAGE units. For the iomem path, it is
+	 * passed directly to io_mem_pfn which returns MMUPAGE PFNs.
+	 * For the struct page path, we convert to kernel page index
+	 * and add the sub-page PFN offset.
 	 */
 	for (i = 0; i < num_prefault; ++i) {
 		if (bo->resource->bus.is_iomem) {
 			pfn = ttm_bo_io_mem_pfn(bo, page_offset);
 		} else {
-			page = ttm->pages[page_offset];
+			page = ttm->pages[page_offset >> PAGE_MMUSHIFT];
 			if (unlikely(!page && i == 0)) {
 				return VM_FAULT_OOM;
 			} else if (unlikely(!page)) {
 				break;
 			}
-			pfn = page_to_pfn(page);
+			pfn = page_to_pfn(page) +
+			      (page_offset & (PAGE_MMUCOUNT - 1));
 		}
 
 		/*
@@ -273,7 +279,7 @@ vm_fault_t ttm_bo_vm_fault_reserved(struct vm_fault *vmf,
 				break;
 		}
 
-		address += PAGE_SIZE;
+		address += MMUPAGE_SIZE;
 		if (unlikely(++page_offset >= page_last))
 			break;
 	}
@@ -311,7 +317,7 @@ vm_fault_t ttm_bo_vm_dummy_page(struct vm_fault *vmf, pgprot_t prot)
 
 	/* Prefault the entire VMA range right away to avoid further faults */
 	for (address = vma->vm_start; address < vma->vm_end;
-	     address += PAGE_SIZE)
+	     address += MMUPAGE_SIZE)
 		ret = vmf_insert_pfn_prot(vma, address, pfn, prot);
 
 	return ret;
@@ -464,7 +470,7 @@ int ttm_bo_vm_access(struct vm_area_struct *vma, unsigned long addr,
 	struct ttm_buffer_object *bo = vma->vm_private_data;
 	unsigned long offset = (addr) - vma->vm_start +
 		((vma->vm_pgoff - drm_vma_node_start(&bo->base.vma_node))
-		 << PAGE_SHIFT);
+		 << MMUPAGE_SHIFT);
 
 	return ttm_bo_access(bo, offset, buf, len, write);
 }

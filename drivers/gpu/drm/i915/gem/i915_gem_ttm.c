@@ -140,17 +140,17 @@ i915_ttm_place_from_region(const struct intel_memory_region *mr,
 	if (flags & I915_BO_ALLOC_CONTIGUOUS)
 		place->flags |= TTM_PL_FLAG_CONTIGUOUS;
 	if (offset != I915_BO_INVALID_OFFSET) {
-		WARN_ON(overflows_type(offset >> PAGE_SHIFT, place->fpfn));
-		place->fpfn = offset >> PAGE_SHIFT;
-		WARN_ON(overflows_type(place->fpfn + (size >> PAGE_SHIFT), place->lpfn));
-		place->lpfn = place->fpfn + (size >> PAGE_SHIFT);
+		WARN_ON(overflows_type(offset >> MMUPAGE_SHIFT, place->fpfn));
+		place->fpfn = offset >> MMUPAGE_SHIFT;
+		WARN_ON(overflows_type(place->fpfn + (size >> MMUPAGE_SHIFT), place->lpfn));
+		place->lpfn = place->fpfn + (size >> MMUPAGE_SHIFT);
 	} else if (resource_size(&mr->io) && resource_size(&mr->io) < mr->total) {
 		if (flags & I915_BO_ALLOC_GPU_ONLY) {
 			place->flags |= TTM_PL_FLAG_TOPDOWN;
 		} else {
 			place->fpfn = 0;
-			WARN_ON(overflows_type(resource_size(&mr->io) >> PAGE_SHIFT, place->lpfn));
-			place->lpfn = resource_size(&mr->io) >> PAGE_SHIFT;
+			WARN_ON(overflows_type(resource_size(&mr->io) >> MMUPAGE_SHIFT, place->lpfn));
+			place->lpfn = resource_size(&mr->io) >> MMUPAGE_SHIFT;
 		}
 	}
 }
@@ -571,7 +571,7 @@ i915_ttm_resource_get_st(struct drm_i915_gem_object *obj,
 	if (!i915_ttm_gtt_binds_lmem(res))
 		return i915_ttm_tt_get_st(bo->ttm);
 
-	page_alignment = bo->page_alignment << PAGE_SHIFT;
+	page_alignment = bo->page_alignment << MMUPAGE_SHIFT;
 	if (!page_alignment)
 		page_alignment = obj->mm.region->min_page_size;
 
@@ -697,7 +697,7 @@ static unsigned long i915_ttm_io_mem_pfn(struct ttm_buffer_object *bo,
 	base = obj->mm.region->iomap.base - obj->mm.region->region.start;
 	sg = i915_gem_object_page_iter_get_sg(obj, &obj->ttm.get_io_page, page_offset, &ofs);
 
-	return ((base + sg_dma_address(sg)) >> PAGE_SHIFT) + ofs;
+	return ((base + sg_dma_address(sg)) >> MMUPAGE_SHIFT) + ofs;
 }
 
 static int i915_ttm_access_memory(struct ttm_buffer_object *bo,
@@ -707,7 +707,7 @@ static int i915_ttm_access_memory(struct ttm_buffer_object *bo,
 	struct drm_i915_gem_object *obj = i915_ttm_to_gem(bo);
 	resource_size_t iomap = obj->mm.region->iomap.base -
 		obj->mm.region->region.start;
-	unsigned long page = offset >> PAGE_SHIFT;
+	unsigned long page = offset >> MMUPAGE_SHIFT;
 	unsigned long bytes_left = len;
 
 	/*
@@ -718,9 +718,9 @@ static int i915_ttm_access_memory(struct ttm_buffer_object *bo,
 	if (!i915_ttm_resource_mappable(bo->resource))
 		return -EIO;
 
-	offset -= page << PAGE_SHIFT;
+	offset -= page << MMUPAGE_SHIFT;
 	do {
-		unsigned long bytes = min(bytes_left, PAGE_SIZE - offset);
+		unsigned long bytes = min(bytes_left, MMUPAGE_SIZE - offset);
 		void __iomem *ptr;
 		dma_addr_t daddr;
 

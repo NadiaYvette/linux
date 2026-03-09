@@ -510,7 +510,7 @@ static int gntalloc_mmap(struct file *filp, struct vm_area_struct *vma)
 	pr_debug("%s: priv %p,%p, page %lu+%d\n", __func__,
 		       priv, vm_priv, vma->vm_pgoff, count);
 
-	gref = find_grefs(priv, vma->vm_pgoff << PAGE_SHIFT, count);
+	gref = find_grefs(priv, vma->vm_pgoff << MMUPAGE_SHIFT, count);
 	if (gref == NULL) {
 		rv = -ENOENT;
 		pr_debug("%s: Could not find grant reference",

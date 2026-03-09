@@ -321,7 +321,7 @@ static int hfi1_file_mmap(struct file *fp, struct vm_area_struct *vma)
 	struct hfi1_ctxtdata *uctxt = fd->uctxt;
 	struct hfi1_devdata *dd;
 	unsigned long flags;
-	u64 token = vma->vm_pgoff << PAGE_SHIFT,
+	u64 token = vma->vm_pgoff << MMUPAGE_SHIFT,
 		memaddr = 0;
 	void *memvirt = NULL;
 	dma_addr_t memdma = 0;
@@ -596,7 +596,7 @@ static vm_fault_t vma_fault(struct vm_fault *vmf)
 {
 	struct page *page;
 
-	page = vmalloc_to_page((void *)(vmf->pgoff << PAGE_SHIFT));
+	page = vmalloc_to_page((void *)(vmf->pgoff << MMUPAGE_SHIFT));
 	if (!page)
 		return VM_FAULT_SIGBUS;
 

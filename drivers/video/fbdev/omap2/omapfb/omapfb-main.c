@@ -1103,7 +1103,7 @@ static int omapfb_mmap(struct fb_info *fbi, struct vm_area_struct *vma)
 	len = fix->smem_len;
 
 	DBG("user mmap region start %lx, len %d, off %lx\n", start, len,
-			vma->vm_pgoff << PAGE_SHIFT);
+			vma->vm_pgoff << MMUPAGE_SHIFT);
 
 	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 	vma->vm_ops = &mmap_user_ops;

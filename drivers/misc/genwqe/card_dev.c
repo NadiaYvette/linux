@@ -403,7 +403,7 @@ static void genwqe_vma_close(struct vm_area_struct *vma)
 	if (dma_map == NULL) {
 		dev_err(&pci_dev->dev,
 			"  [%s] err: mapping not found: v=%lx, p=%lx s=%lx\n",
-			__func__, vma->vm_start, vma->vm_pgoff << PAGE_SHIFT,
+			__func__, vma->vm_start, vma->vm_pgoff << MMUPAGE_SHIFT,
 			vsize);
 		return;
 	}

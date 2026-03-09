@@ -996,7 +996,7 @@ static int gbefb_mmap(struct fb_info *info,
 			struct vm_area_struct *vma)
 {
 	unsigned long size = vma->vm_end - vma->vm_start;
-	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
+	unsigned long offset = vma->vm_pgoff << MMUPAGE_SHIFT;
 	unsigned long addr;
 	unsigned long phys_addr, phys_size;
 	u16 *tile;

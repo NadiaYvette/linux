@@ -517,7 +517,7 @@ static inline void copy_pte_cluster(pte_t *cluster[], struct page *dst_page,
 
 static inline unsigned long set_pte_cluster(pte_t *cluster[], pte_t pte)
 {
-	set_pte(cluster[0], pte);
+	set_ptes(NULL, 0, cluster[0], pte, 1);
 	return 1;
 }
 

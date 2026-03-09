@@ -238,7 +238,7 @@ int hl_mem_mgr_mmap(struct hl_mem_mgr *mmg, struct vm_area_struct *vma,
 	/* We use the page offset to hold the idr and thus we need to clear
 	 * it before doing the mmap itself
 	 */
-	handle = vma->vm_pgoff << PAGE_SHIFT;
+	handle = vma->vm_pgoff << MMUPAGE_SHIFT;
 	vma->vm_pgoff = 0;
 
 	/* Reference was taken here */

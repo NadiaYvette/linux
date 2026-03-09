@@ -163,6 +163,9 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	show_val_kb(m, "Balloon:        ",
 		    global_node_page_state(NR_BALLOON_PAGES));
 
+	seq_printf(m, "PageSize:       %8lu kB\n", PAGE_SIZE >> 10);
+	seq_printf(m, "BasePageSize:   %8lu kB\n", MMUPAGE_SIZE >> 10);
+
 	hugetlb_report_meminfo(m);
 
 	arch_report_meminfo(m);

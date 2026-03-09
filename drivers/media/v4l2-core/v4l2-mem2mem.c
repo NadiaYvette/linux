@@ -978,7 +978,7 @@ EXPORT_SYMBOL_GPL(v4l2_m2m_poll);
 int v4l2_m2m_mmap(struct file *file, struct v4l2_m2m_ctx *m2m_ctx,
 			 struct vm_area_struct *vma)
 {
-	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
+	unsigned long offset = vma->vm_pgoff << MMUPAGE_SHIFT;
 	struct vb2_queue *vq;
 
 	if (offset < DST_QUEUE_OFF_BASE) {

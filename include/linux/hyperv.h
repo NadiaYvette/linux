@@ -154,8 +154,8 @@ struct hv_ring_buffer {
 		u32 value;
 	} feature_bits;
 
-	/* Pad it to PAGE_SIZE so that data starts on page boundary */
-	u8	reserved2[PAGE_SIZE - 68];
+	/* Pad it to HV_HYP_PAGE_SIZE so that data starts on page boundary */
+	u8	reserved2[HV_HYP_PAGE_SIZE - 68];
 
 	/*
 	 * Ring data starts here + RingDataStartOffset

@@ -1641,7 +1641,7 @@ static void intel_fb_view_init(struct intel_display *display,
 
 	if (view_type == I915_GTT_VIEW_REMAPPED &&
 	    (display->platform.alderlake_p || DISPLAY_VER(display) >= 14))
-		view->gtt.remapped.plane_alignment = SZ_2M / PAGE_SIZE;
+		view->gtt.remapped.plane_alignment = SZ_2M / MMUPAGE_SIZE;
 }
 
 bool intel_fb_supports_90_270_rotation(const struct intel_framebuffer *fb)

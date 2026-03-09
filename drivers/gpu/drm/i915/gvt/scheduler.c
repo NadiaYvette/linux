@@ -221,7 +221,7 @@ static int populate_shadow_context(struct intel_vgpu_workload *workload)
 
 	s->last_ctx[ring_id].valid = false;
 	context_page_num = workload->engine->context_size;
-	context_page_num = context_page_num >> PAGE_SHIFT;
+	context_page_num = context_page_num >> MMUPAGE_SHIFT;
 
 	if (IS_BROADWELL(gvt->gt->i915) && workload->engine->id == RCS0)
 		context_page_num = 19;
@@ -981,7 +981,7 @@ static void update_guest_context(struct intel_vgpu_workload *workload)
 	vgpu_vreg_t(vgpu, RING_HEAD(ring_base)) = head;
 
 	context_page_num = rq->engine->context_size;
-	context_page_num = context_page_num >> PAGE_SHIFT;
+	context_page_num = context_page_num >> MMUPAGE_SHIFT;
 
 	if (IS_BROADWELL(rq->i915) && rq->engine->id == RCS0)
 		context_page_num = 19;

@@ -546,7 +546,7 @@ void vduse_domain_free_coherent(struct vduse_iova_domain *domain, size_t size,
 static vm_fault_t vduse_domain_mmap_fault(struct vm_fault *vmf)
 {
 	struct vduse_iova_domain *domain = vmf->vma->vm_private_data;
-	unsigned long iova = vmf->pgoff << PAGE_SHIFT;
+	unsigned long iova = vmf->pgoff << MMUPAGE_SHIFT;
 	struct page *page;
 
 	if (!domain)

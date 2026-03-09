@@ -955,7 +955,7 @@ int ttm_bo_init_reserved(struct ttm_device *bdev, struct ttm_buffer_object *bo,
 	 */
 	if (bo->type == ttm_bo_type_device || bo->type == ttm_bo_type_sg) {
 		ret = drm_vma_offset_add(bdev->vma_manager, &bo->base.vma_node,
-					 PFN_UP(bo->base.size));
+					 DIV_ROUND_UP(bo->base.size, MMUPAGE_SIZE));
 		if (ret)
 			goto err_put;
 	}

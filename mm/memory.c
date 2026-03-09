@@ -2393,7 +2393,7 @@ static int insert_page_into_pte_locked(struct vm_area_struct *vma, pte_t *pte,
 static int insert_page(struct vm_area_struct *vma, unsigned long addr,
 			struct page *page, pgprot_t prot, bool mkwrite)
 {
-	int retval;
+	int retval, j;
 	pte_t *pte;
 	spinlock_t *ptl;
 
@@ -2406,6 +2406,25 @@ static int insert_page(struct vm_area_struct *vma, unsigned long addr,
 		goto out;
 	retval = insert_page_into_pte_locked(vma, pte, addr, page, prot,
 					mkwrite);
+	/*
+	 * Map remaining sub-page MMUPAGEs within this kernel page.
+	 * No-op when PAGE_MMUSHIFT == 0.
+	 */
+	for (j = 1; !retval && j < PAGE_MMUCOUNT; j++) {
+		struct folio *folio = page_folio(page);
+		pte_t pteval = mk_pte(page, prot);
+
+		pteval = __pte(pte_val(pteval) + j * MMUPAGE_SIZE);
+		if (mkwrite) {
+			pteval = pte_mkyoung(pteval);
+			pteval = maybe_mkwrite(pte_mkdirty(pteval), vma);
+		}
+		folio_get(folio);
+		inc_mm_counter(vma->vm_mm, mm_counter_file(folio));
+		folio_add_file_rmap_pte(folio, page, vma);
+		set_pte_at(vma->vm_mm, addr + j * MMUPAGE_SIZE,
+			   pte + j, pteval);
+	}
 	pte_unmap_unlock(pte, ptl);
 out:
 	return retval;
@@ -2442,8 +2461,12 @@ more:
 	if (!pmd)
 		goto out;
 
-	pages_to_write_in_pmd = min_t(unsigned long,
-		remaining_pages_total, PTRS_PER_PTE - pte_index(addr));
+	/*
+	 * Each page needs PAGE_MMUCOUNT PTEs.  Compute how many pages
+	 * fit in the remaining PTE slots of this PMD.
+	 */
+	pages_to_write_in_pmd = min_t(unsigned long, remaining_pages_total,
+		(PTRS_PER_PTE - pte_index(addr)) / PAGE_MMUCOUNT);
 
 	/* Allocate the PTE if necessary; takes PMD lock once only. */
 	ret = -ENOMEM;
@@ -2451,7 +2474,7 @@ more:
 		goto out;
 
 	while (pages_to_write_in_pmd) {
-		int pte_idx = 0;
+		int page_idx = 0;
 		const int batch_size = min_t(int, pages_to_write_in_pmd, 8);
 
 		start_pte = pte_offset_map_lock(mm, pmd, addr, &pte_lock);
@@ -2459,16 +2482,37 @@ more:
 			ret = -EFAULT;
 			goto out;
 		}
-		for (pte = start_pte; pte_idx < batch_size; ++pte, ++pte_idx) {
+		for (pte = start_pte; page_idx < batch_size; ++page_idx) {
+			int j;
 			int err = insert_page_in_batch_locked(vma, pte,
 				addr, pages[curr_page_idx], prot);
 			if (unlikely(err)) {
 				pte_unmap_unlock(start_pte, pte_lock);
 				ret = err;
-				remaining_pages_total -= pte_idx;
+				remaining_pages_total -= page_idx;
 				goto out;
 			}
-			addr += PAGE_SIZE;
+			pte++;
+			addr += MMUPAGE_SIZE;
+			/*
+			 * Map remaining sub-page MMUPAGEs within this
+			 * kernel page (no-op when PAGE_MMUSHIFT == 0).
+			 */
+			for (j = 1; j < PAGE_MMUCOUNT; j++) {
+				struct folio *folio =
+					page_folio(pages[curr_page_idx]);
+				pte_t pteval = mk_pte(pages[curr_page_idx],
+						      prot);
+				pteval = __pte(pte_val(pteval) +
+					       j * MMUPAGE_SIZE);
+				folio_get(folio);
+				inc_mm_counter(mm, mm_counter_file(folio));
+				folio_add_file_rmap_pte(folio,
+					pages[curr_page_idx], vma);
+				set_pte_at(mm, addr, pte, pteval);
+				pte++;
+				addr += MMUPAGE_SIZE;
+			}
 			++curr_page_idx;
 		}
 		pte_unmap_unlock(start_pte, pte_lock);
@@ -3822,6 +3866,12 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 
 	__folio_mark_uptodate(new_folio);
 
+	/*
+	 * With PAGE_MMUSHIFT > 0, COW clustering may clear+remap
+	 * multiple PTEs within the kernel page, so the notifier
+	 * range covers the full PAGE_SIZE.  When PAGE_MMUSHIFT == 0,
+	 * this degenerates to the single-page range.
+	 */
 	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, mm,
 				vmf->address & PAGE_MASK,
 				(vmf->address & PAGE_MASK) + PAGE_SIZE);
@@ -3903,6 +3953,66 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 			folio_remove_rmap_pte(old_folio, vmf->page, vma);
 		}
 
+#if PAGE_MMUSHIFT
+		/*
+		 * COW clustering: remap neighbor PTEs in the same kernel
+		 * page that still point to the old page.  The new page
+		 * already has a full copy of the old page's contents
+		 * (done by __wp_page_copy_user above).
+		 */
+		if (old_folio && folio_test_anon(old_folio) && !unshare) {
+			pgoff_t pgoff = vma->vm_pgoff +
+				((vmf->address - vma->vm_start) >> MMUPAGE_SHIFT);
+			unsigned int sub = pgoff_sub_page_index(pgoff);
+			pte_t *base_pte = vmf->pte - sub;
+			unsigned long base_addr = vmf->address -
+					(unsigned long)sub * MMUPAGE_SIZE;
+			pte_t base_entry = folio_mk_pte(new_folio,
+							vma->vm_page_prot);
+			unsigned long extra = 0;
+			int j;
+
+			base_entry = pte_sw_mkyoung(base_entry);
+			base_entry = maybe_mkwrite(pte_mkdirty(base_entry),
+						   vma);
+
+			for (j = 0; j < PAGE_MMUCOUNT; j++) {
+				unsigned long a = base_addr +
+					(unsigned long)j * MMUPAGE_SIZE;
+				pte_t *ptep = base_pte + j;
+				pte_t pteval;
+
+				/* Skip the PTE we already handled */
+				if (ptep == vmf->pte)
+					continue;
+				/* Skip if outside VMA bounds */
+				if (a < vma->vm_start || a >= vma->vm_end)
+					continue;
+				pteval = ptep_get(ptep);
+				/* Skip if not present */
+				if (!pte_present(pteval))
+					continue;
+				/* Skip if not in the same kernel page */
+				if (page_folio(pte_page(pteval)) !=
+				    page_folio(vmf->page))
+					continue;
+
+				/* Clear+flush old, set new */
+				ptep_clear_flush(vma, a, ptep);
+				set_pte_at(mm, a, ptep,
+					   pte_mksub(base_entry,
+						     (unsigned long)j *
+						     MMUPAGE_SIZE));
+				folio_remove_rmap_pte(old_folio,
+						      pte_page(pteval), vma);
+				extra++;
+			}
+			if (extra) {
+				folio_ref_add(new_folio, extra);
+				atomic_add(extra, &new_folio->_mapcount);
+			}
+		}
+#endif
 		/* Free the old page.. */
 		new_folio = old_folio;
 		page_copied = 1;
@@ -4584,6 +4694,15 @@ static bool can_swapin_thp(struct vm_fault *vmf, pte_t *ptep, int nr_pages)
 	idx = (vmf->address - addr) / PAGE_SIZE;
 	pte = ptep_get(ptep);
 
+	/*
+	 * With page clustering, PAGE_MMUCOUNT PTEs share the same swap
+	 * entry per kernel page, so swap_pte_batch (which expects
+	 * consecutively incrementing swap offsets per PTE) won't match.
+	 * Disable large folio swap-in batching for now.
+	 */
+	if (PAGE_MMUSHIFT)
+		return false;
+
 	if (!pte_same(pte, pte_move_swp_offset(vmf->orig_pte, -idx)))
 		return false;
 	entry = softleaf_from_pte(pte);
@@ -4928,6 +5047,13 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 		pte_t *folio_ptep;
 		pte_t folio_pte;
 
+		/*
+		 * With page clustering, swap PTE layout doesn't match
+		 * swap_pte_batch expectations. Fall through to single-page.
+		 */
+		if (PAGE_MMUSHIFT)
+			goto check_folio;
+
 		if (unlikely(folio_start < max(address & PMD_MASK, vma->vm_start)))
 			goto check_folio;
 		if (unlikely(folio_end > pmd_addr_end(address, vma->vm_end)))
@@ -5140,11 +5266,11 @@ out_release:
 	return ret;
 }
 
-static bool pte_range_none(pte_t *pte, int nr_pages)
+static bool pte_range_none(pte_t *pte, int nr_ptes)
 {
 	int i;
 
-	for (i = 0; i < nr_pages; i++) {
+	for (i = 0; i < nr_ptes; i++) {
 		if (!pte_none(ptep_get_lockless(pte + i)))
 			return false;
 	}
@@ -5194,7 +5320,8 @@ static struct folio *alloc_anon_folio(struct vm_fault *vmf)
 	order = highest_order(orders);
 	while (orders) {
 		addr = ALIGN_DOWN(vmf->address, PAGE_SIZE << order);
-		if (pte_range_none(pte + pte_index(addr), 1 << order))
+		if (pte_range_none(pte + pte_index(addr),
+				    (1 << order) * PAGE_MMUCOUNT))
 			break;
 		order = next_order(&orders, order);
 	}
@@ -5312,10 +5439,11 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 
 	entry = folio_mk_pte(folio, vma->vm_page_prot);
 	/*
-	 * With PAGE_MMUSHIFT > 0, adjust PTE to the correct MMUPAGE
-	 * within the allocated page.
+	 * With PAGE_MMUSHIFT > 0 and a single-page fault, adjust PTE to
+	 * the correct MMUPAGE within the allocated page.  For large folios
+	 * (nr_pages > 1), set_ptes() handles sub-page offsets internally.
 	 */
-	if (PAGE_MMUSHIFT > 0) {
+	if (PAGE_MMUSHIFT > 0 && nr_pages == 1) {
 		unsigned int sub = pgoff_sub_page_index(vmf->pgoff);
 		entry = __pte(pte_val(entry) + sub * MMUPAGE_SIZE);
 	}
@@ -5329,7 +5457,8 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	if (nr_pages == 1 && vmf_pte_changed(vmf)) {
 		update_mmu_tlb(vma, addr, vmf->pte);
 		goto release;
-	} else if (nr_pages > 1 && !pte_range_none(vmf->pte, nr_pages)) {
+	} else if (nr_pages > 1 &&
+		   !pte_range_none(vmf->pte, nr_pages * PAGE_MMUCOUNT)) {
 		update_mmu_tlb_range(vma, addr, vmf->pte, nr_pages);
 		goto release;
 	}
@@ -5350,6 +5479,61 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	count_mthp_stat(folio_order(folio), MTHP_STAT_ANON_FAULT_ALLOC);
 	folio_add_new_anon_rmap(folio, vma, addr, RMAP_EXCLUSIVE);
 	folio_add_lru_vma(folio, vma);
+#if PAGE_MMUSHIFT
+	if (nr_pages == 1) {
+		/*
+		 * Page clustering: map all sub-page PTEs within the
+		 * allocated kernel page that fall inside the VMA and
+		 * are currently pte_none.  This avoids wasting memory
+		 * by using only 1/PAGE_MMUCOUNT of each allocated page.
+		 *
+		 * For anonymous VMAs (pgoff typically 0), the cluster
+		 * never crosses PMD boundaries since PAGE_MMUCOUNT
+		 * divides PTRS_PER_PTE evenly.
+		 */
+		unsigned int sub = pgoff_sub_page_index(
+			vma->vm_pgoff +
+			((vmf->address - vma->vm_start) >> MMUPAGE_SHIFT));
+		pte_t *base_pte = vmf->pte - sub;
+		unsigned long base_addr = addr - (unsigned long)sub * MMUPAGE_SIZE;
+		unsigned long rss = 0;
+		int j;
+
+		entry = folio_mk_pte(folio, vma->vm_page_prot);
+		entry = pte_sw_mkyoung(entry);
+		if (vma->vm_flags & VM_WRITE)
+			entry = pte_mkwrite(pte_mkdirty(entry), vma);
+		if (vmf_orig_pte_uffd_wp(vmf))
+			entry = pte_mkuffd_wp(entry);
+
+		for (j = 0; j < PAGE_MMUCOUNT; j++) {
+			unsigned long a = base_addr + (unsigned long)j * MMUPAGE_SIZE;
+			pte_t *ptep = base_pte + j;
+
+			/* Skip if outside VMA bounds */
+			if (a < vma->vm_start || a >= vma->vm_end)
+				continue;
+			/* Skip if PTE already occupied */
+			if (!pte_none(ptep_get(ptep)))
+				continue;
+			set_pte(ptep, pte_mksub(entry, (unsigned long)j * MMUPAGE_SIZE));
+			rss++;
+		}
+		/*
+		 * Adjust refcount and mapcount for the extra PTEs.
+		 * folio_add_new_anon_rmap set mapcount to 0 (= 1 mapping)
+		 * and PageAnonExclusive.  We need mapcount = rss.
+		 */
+		if (rss > 1) {
+			folio_ref_add(folio, rss - 1);
+			atomic_add(rss - 1, &folio->_mapcount);
+		}
+		/* Fix RSS: we added 1 above (nr_pages), need rss total */
+		add_mm_counter(vma->vm_mm, MM_ANONPAGES, rss - 1);
+		update_mmu_cache_range(vmf, vma, addr, vmf->pte, 1);
+		goto unlock;
+	}
+#endif
 setpte:
 	if (vmf_orig_pte_uffd_wp(vmf))
 		entry = pte_mkuffd_wp(entry);
@@ -5575,7 +5759,14 @@ void set_pte_range(struct vm_fault *vmf, struct folio *folio,
 		folio_add_new_anon_rmap(folio, vma, addr, RMAP_EXCLUSIVE);
 		folio_add_lru_vma(folio, vma);
 	} else {
-		folio_add_file_rmap_ptes(folio, page, nr, vma);
+		/*
+		 * With PGCL, set_ptes(nr=1) maps a single PTE (special case),
+		 * but set_ptes(nr>1) maps nr * PAGE_MMUCOUNT PTEs.
+		 * Match rmap count to actual PTEs set.
+		 */
+		unsigned int rmap_nr = (nr > 1) ?
+			nr * PAGE_MMUCOUNT : nr;
+		folio_add_file_rmap_ptes(folio, page, rmap_nr, vma);
 	}
 	set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr);
 
@@ -5675,10 +5866,19 @@ fallback:
 		nr_pages = 1;
 	} else if (nr_pages > 1) {
 		pgoff_t idx = folio_page_idx(folio, page);
-		/* The page offset of vmf->address within the VMA. */
-		pgoff_t vma_off = vmf->pgoff - vmf->vma->vm_pgoff;
-		/* The index of the entry in the pagetable for fault page. */
-		pgoff_t pte_off = pte_index(vmf->address);
+		/*
+		 * The PAGE offset of vmf->address within the VMA.
+		 * vmf->pgoff and vm_pgoff are in MMUPAGE units;
+		 * convert to PAGE units for comparison with idx.
+		 */
+		pgoff_t vma_off = (vmf->pgoff - vmf->vma->vm_pgoff)
+				  >> PAGE_MMUSHIFT;
+		/*
+		 * The PAGE-granular index within this PMD.
+		 * pte_index() returns MMUPAGE-granular PTE index;
+		 * convert to PAGE units.
+		 */
+		pgoff_t pte_off = pte_index(vmf->address) >> PAGE_MMUSHIFT;
 
 		/*
 		 * Fallback to per-page fault in case the folio size in page
@@ -5687,11 +5887,15 @@ fallback:
 		if (unlikely(vma_off < idx ||
 			    vma_off + (nr_pages - idx) > vma_pages(vma) ||
 			    pte_off < idx ||
-			    pte_off + (nr_pages - idx)  > PTRS_PER_PTE)) {
+			    pte_off + (nr_pages - idx) >
+				(PTRS_PER_PTE >> PAGE_MMUSHIFT))) {
 			nr_pages = 1;
 		} else {
-			/* Now we can set mappings for the whole large folio. */
-			addr = vmf->address - idx * PAGE_SIZE;
+			/*
+			 * Map the whole large folio.  Align addr down to
+			 * PAGE boundary then back up to folio start.
+			 */
+			addr = (vmf->address & PAGE_MASK) - idx * PAGE_SIZE;
 			page = &folio->page;
 		}
 	}
@@ -5706,16 +5910,26 @@ fallback:
 		update_mmu_tlb(vma, addr, vmf->pte);
 		ret = VM_FAULT_NOPAGE;
 		goto unlock;
-	} else if (nr_pages > 1 && !pte_range_none(vmf->pte, nr_pages)) {
+	} else if (nr_pages > 1 &&
+		   !pte_range_none(vmf->pte, nr_pages * PAGE_MMUCOUNT)) {
 		needs_fallback = true;
 		pte_unmap_unlock(vmf->pte, vmf->ptl);
 		goto fallback;
 	}
 
-	folio_ref_add(folio, nr_pages - 1);
-	set_pte_range(vmf, folio, page, nr_pages, addr);
-	type = is_cow ? MM_ANONPAGES : mm_counter_file(folio);
-	add_mm_counter(vma->vm_mm, type, nr_pages);
+	/*
+	 * With page clustering (PAGE_MMUSHIFT > 0), set_ptes(nr>1) maps
+	 * nr * PAGE_MMUCOUNT PTEs, but set_ptes(nr=1) maps a single PTE.
+	 * Match refcount and RSS to actual PTEs created by set_ptes.
+	 */
+	{
+		unsigned long nr_ptes = (nr_pages > 1) ?
+			(unsigned long)nr_pages * PAGE_MMUCOUNT : nr_pages;
+		folio_ref_add(folio, nr_ptes - 1);
+		set_pte_range(vmf, folio, page, nr_pages, addr);
+		type = is_cow ? MM_ANONPAGES : mm_counter_file(folio);
+		add_mm_counter(vma->vm_mm, type, nr_ptes);
+	}
 	ret = 0;
 
 unlock:
