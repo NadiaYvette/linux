@@ -716,7 +716,7 @@ static vm_fault_t exfat_page_mkwrite(struct vm_fault *vmf)
 	if (!inode_trylock(inode))
 		return VM_FAULT_RETRY;
 
-	new_valid_size = ((loff_t)vmf->pgoff + 1) << PAGE_SHIFT;
+	new_valid_size = ((loff_t)vmf->pgoff + 1) << MMUPAGE_SHIFT;
 	new_valid_size = min(new_valid_size, i_size_read(inode));
 
 	if (ei->valid_size < new_valid_size) {

@@ -59,12 +59,12 @@ flash_mmap(struct file *file, struct vm_area_struct *vma)
 	}
 	spin_unlock(&flash_lock);
 
-	if ((vma->vm_pgoff << PAGE_SHIFT) > size)
+	if ((vma->vm_pgoff << MMUPAGE_SHIFT) > size)
 		return -ENXIO;
 	addr = vma->vm_pgoff + (addr >> PAGE_SHIFT);
 
-	if (vma->vm_end - (vma->vm_start + (vma->vm_pgoff << PAGE_SHIFT)) > size)
-		size = vma->vm_end - (vma->vm_start + (vma->vm_pgoff << PAGE_SHIFT));
+	if (vma->vm_end - (vma->vm_start + (vma->vm_pgoff << MMUPAGE_SHIFT)) > size)
+		size = vma->vm_end - (vma->vm_start + (vma->vm_pgoff << MMUPAGE_SHIFT));
 
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 

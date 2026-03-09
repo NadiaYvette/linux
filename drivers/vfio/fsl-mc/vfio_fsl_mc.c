@@ -369,7 +369,7 @@ static int vfio_fsl_mc_mmap_mmio(struct vfio_fsl_mc_region region,
 	if (!region_cacheable)
 		vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 
-	vma->vm_pgoff = (region.addr >> PAGE_SHIFT) + pgoff;
+	vma->vm_pgoff = (region.addr >> MMUPAGE_SHIFT) + pgoff;
 
 	return remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
 			       size, vma->vm_page_prot);
@@ -383,7 +383,7 @@ static int vfio_fsl_mc_mmap(struct vfio_device *core_vdev,
 	struct fsl_mc_device *mc_dev = vdev->mc_dev;
 	unsigned int index;
 
-	index = vma->vm_pgoff >> (VFIO_FSL_MC_OFFSET_SHIFT - PAGE_SHIFT);
+	index = vma->vm_pgoff >> (VFIO_FSL_MC_OFFSET_SHIFT - MMUPAGE_SHIFT);
 
 	if (vma->vm_end < vma->vm_start)
 		return -EINVAL;

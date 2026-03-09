@@ -410,7 +410,7 @@ static vm_fault_t panthor_mmio_vm_fault(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	struct panthor_device *ptdev = vma->vm_private_data;
-	u64 offset = (u64)vma->vm_pgoff << PAGE_SHIFT;
+	u64 offset = (u64)vma->vm_pgoff << MMUPAGE_SHIFT;
 	unsigned long pfn;
 	pgprot_t pgprot;
 	vm_fault_t ret;
@@ -454,7 +454,7 @@ static const struct vm_operations_struct panthor_mmio_vm_ops = {
 
 int panthor_device_mmap_io(struct panthor_device *ptdev, struct vm_area_struct *vma)
 {
-	u64 offset = (u64)vma->vm_pgoff << PAGE_SHIFT;
+	u64 offset = (u64)vma->vm_pgoff << MMUPAGE_SHIFT;
 
 	if ((vma->vm_flags & VM_SHARED) == 0)
 		return -EINVAL;

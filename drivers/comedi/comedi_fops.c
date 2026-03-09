@@ -2462,7 +2462,7 @@ static int comedi_vm_access(struct vm_area_struct *vma, unsigned long addr,
 {
 	struct comedi_buf_map *bm = vma->vm_private_data;
 	unsigned long offset =
-	    addr - vma->vm_start + (vma->vm_pgoff << PAGE_SHIFT);
+	    addr - vma->vm_start + (vma->vm_pgoff << MMUPAGE_SHIFT);
 
 	if (len < 0)
 		return -EINVAL;

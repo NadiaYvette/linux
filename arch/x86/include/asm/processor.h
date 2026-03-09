@@ -359,12 +359,12 @@ struct x86_hw_tss {
 #define IO_BITMAP_OFFSET_INVALID	(__KERNEL_TSS_LIMIT + 1)
 
 struct entry_stack {
-	char	stack[PAGE_SIZE];
+	char	stack[MMUPAGE_SIZE];
 };
 
 struct entry_stack_page {
 	struct entry_stack stack;
-} __aligned(PAGE_SIZE);
+} __aligned(MMUPAGE_SIZE);
 
 /*
  * All IO bitmap related data stored in the TSS:
@@ -406,7 +406,7 @@ struct tss_struct {
 	struct x86_hw_tss	x86_tss;
 
 	struct x86_io_bitmap	io_bitmap;
-} __aligned(PAGE_SIZE);
+} __aligned(MMUPAGE_SIZE);
 
 DECLARE_PER_CPU_PAGE_ALIGNED(struct tss_struct, cpu_tss_rw);
 

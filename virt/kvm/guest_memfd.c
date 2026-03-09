@@ -442,7 +442,7 @@ static struct mempolicy *kvm_gmem_get_policy(struct vm_area_struct *vma,
 {
 	struct inode *inode = file_inode(vma->vm_file);
 
-	*pgoff = vma->vm_pgoff + ((addr - vma->vm_start) >> PAGE_SHIFT);
+	*pgoff = vma->vm_pgoff + ((addr - vma->vm_start) >> MMUPAGE_SHIFT);
 
 	/*
 	 * Return the memory policy for this index, or NULL if none is set.

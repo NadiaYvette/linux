@@ -594,7 +594,7 @@ static int mmap_vmcore(struct file *file, struct vm_area_struct *vma)
 	u64 start, end, len, tsz;
 	struct vmcore_range *m;
 
-	start = (u64)vma->vm_pgoff << PAGE_SHIFT;
+	start = (u64)vma->vm_pgoff << MMUPAGE_SHIFT;
 	end = start + size;
 
 	if (size > vmcore_size || end > vmcore_size)

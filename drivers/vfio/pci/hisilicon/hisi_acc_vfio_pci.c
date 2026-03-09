@@ -1361,7 +1361,7 @@ static int hisi_acc_vfio_pci_mmap(struct vfio_device *core_vdev,
 		container_of(core_vdev, struct vfio_pci_core_device, vdev);
 	unsigned int index;
 
-	index = vma->vm_pgoff >> (VFIO_PCI_OFFSET_SHIFT - PAGE_SHIFT);
+	index = vma->vm_pgoff >> (VFIO_PCI_OFFSET_SHIFT - MMUPAGE_SHIFT);
 	if (index == VFIO_PCI_BAR2_REGION_INDEX) {
 		u64 req_len, pgoff, req_start;
 		resource_size_t end;

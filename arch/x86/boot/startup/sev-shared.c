@@ -703,7 +703,7 @@ static bool __init svsm_setup_ca(const struct cc_blob_sev_info *cc_info,
 	unsigned int i;
 	u64 caa;
 
-	BUILD_BUG_ON(sizeof(*secrets_page) != PAGE_SIZE);
+	BUILD_BUG_ON(sizeof(*secrets_page) != MMUPAGE_SIZE);
 
 	/*
 	 * Check if running at VMPL0.

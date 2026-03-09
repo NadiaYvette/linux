@@ -80,7 +80,7 @@ static void insert_pte(struct i915_address_space *vm,
 	vm->insert_page(vm, px_dma(pt), d->offset,
 			i915_gem_get_pat_index(vm->i915, I915_CACHE_NONE),
 			i915_gem_object_is_lmem(pt->base) ? PTE_LM : 0);
-	d->offset += PAGE_SIZE;
+	d->offset += I915_GTT_PAGE_SIZE;
 }
 
 static struct i915_address_space *migrate_vm(struct intel_gt *gt)
@@ -477,7 +477,7 @@ static int emit_pte(struct i915_request *rq,
 
 static bool wa_1209644611_applies(int ver, u32 size)
 {
-	u32 height = size >> PAGE_SHIFT;
+	u32 height = size >> MMUPAGE_SHIFT;
 
 	if (ver != 11)
 		return false;
@@ -591,33 +591,33 @@ static int emit_copy(struct i915_request *rq,
 
 	if (ver >= 9 && !wa_1209644611_applies(ver, size)) {
 		*cs++ = GEN9_XY_FAST_COPY_BLT_CMD | (10 - 2);
-		*cs++ = BLT_DEPTH_32 | PAGE_SIZE;
+		*cs++ = BLT_DEPTH_32 | I915_GTT_PAGE_SIZE;
 		*cs++ = 0;
-		*cs++ = size >> PAGE_SHIFT << 16 | PAGE_SIZE / 4;
+		*cs++ = size >> MMUPAGE_SHIFT << 16 | I915_GTT_PAGE_SIZE / 4;
 		*cs++ = dst_offset;
 		*cs++ = instance;
 		*cs++ = 0;
-		*cs++ = PAGE_SIZE;
+		*cs++ = I915_GTT_PAGE_SIZE;
 		*cs++ = src_offset;
 		*cs++ = instance;
 	} else if (ver >= 8) {
 		*cs++ = XY_SRC_COPY_BLT_CMD | BLT_WRITE_RGBA | (10 - 2);
-		*cs++ = BLT_DEPTH_32 | BLT_ROP_SRC_COPY | PAGE_SIZE;
+		*cs++ = BLT_DEPTH_32 | BLT_ROP_SRC_COPY | I915_GTT_PAGE_SIZE;
 		*cs++ = 0;
-		*cs++ = size >> PAGE_SHIFT << 16 | PAGE_SIZE / 4;
+		*cs++ = size >> MMUPAGE_SHIFT << 16 | I915_GTT_PAGE_SIZE / 4;
 		*cs++ = dst_offset;
 		*cs++ = instance;
 		*cs++ = 0;
-		*cs++ = PAGE_SIZE;
+		*cs++ = I915_GTT_PAGE_SIZE;
 		*cs++ = src_offset;
 		*cs++ = instance;
 	} else {
 		GEM_BUG_ON(instance);
 		*cs++ = SRC_COPY_BLT_CMD | BLT_WRITE_RGBA | (6 - 2);
-		*cs++ = BLT_DEPTH_32 | BLT_ROP_SRC_COPY | PAGE_SIZE;
-		*cs++ = size >> PAGE_SHIFT << 16 | PAGE_SIZE;
+		*cs++ = BLT_DEPTH_32 | BLT_ROP_SRC_COPY | I915_GTT_PAGE_SIZE;
+		*cs++ = size >> MMUPAGE_SHIFT << 16 | I915_GTT_PAGE_SIZE;
 		*cs++ = dst_offset;
-		*cs++ = PAGE_SIZE;
+		*cs++ = I915_GTT_PAGE_SIZE;
 		*cs++ = src_offset;
 	}
 
@@ -923,7 +923,7 @@ static int emit_clear(struct i915_request *rq, u32 offset, int size,
 	int ring_sz;
 	u32 *cs;
 
-	GEM_BUG_ON(size >> PAGE_SHIFT > S16_MAX);
+	GEM_BUG_ON(size >> MMUPAGE_SHIFT > S16_MAX);
 
 	if (GRAPHICS_VER_FULL(i915) >= IP_VER(12, 55))
 		ring_sz = XY_FAST_COLOR_BLT_DW;
@@ -940,9 +940,9 @@ static int emit_clear(struct i915_request *rq, u32 offset, int size,
 		*cs++ = XY_FAST_COLOR_BLT_CMD | XY_FAST_COLOR_BLT_DEPTH_32 |
 			(XY_FAST_COLOR_BLT_DW - 2);
 		*cs++ = FIELD_PREP(XY_FAST_COLOR_BLT_MOCS_MASK, mocs) |
-			(PAGE_SIZE - 1);
+			(I915_GTT_PAGE_SIZE - 1);
 		*cs++ = 0;
-		*cs++ = size >> PAGE_SHIFT << 16 | PAGE_SIZE / 4;
+		*cs++ = size >> MMUPAGE_SHIFT << 16 | I915_GTT_PAGE_SIZE / 4;
 		*cs++ = offset;
 		*cs++ = rq->engine->instance;
 		*cs++ = !is_lmem << XY_FAST_COLOR_BLT_MEM_TYPE_SHIFT;
@@ -960,18 +960,18 @@ static int emit_clear(struct i915_request *rq, u32 offset, int size,
 		*cs++ = 0;
 	} else if (ver >= 8) {
 		*cs++ = XY_COLOR_BLT_CMD | BLT_WRITE_RGBA | (7 - 2);
-		*cs++ = BLT_DEPTH_32 | BLT_ROP_COLOR_COPY | PAGE_SIZE;
+		*cs++ = BLT_DEPTH_32 | BLT_ROP_COLOR_COPY | I915_GTT_PAGE_SIZE;
 		*cs++ = 0;
-		*cs++ = size >> PAGE_SHIFT << 16 | PAGE_SIZE / 4;
+		*cs++ = size >> MMUPAGE_SHIFT << 16 | I915_GTT_PAGE_SIZE / 4;
 		*cs++ = offset;
 		*cs++ = rq->engine->instance;
 		*cs++ = value;
 		*cs++ = MI_NOOP;
 	} else {
 		*cs++ = XY_COLOR_BLT_CMD | BLT_WRITE_RGBA | (6 - 2);
-		*cs++ = BLT_DEPTH_32 | BLT_ROP_COLOR_COPY | PAGE_SIZE;
+		*cs++ = BLT_DEPTH_32 | BLT_ROP_COLOR_COPY | I915_GTT_PAGE_SIZE;
 		*cs++ = 0;
-		*cs++ = size >> PAGE_SHIFT << 16 | PAGE_SIZE / 4;
+		*cs++ = size >> MMUPAGE_SHIFT << 16 | I915_GTT_PAGE_SIZE / 4;
 		*cs++ = offset;
 		*cs++ = value;
 	}

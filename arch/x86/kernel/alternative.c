@@ -2588,15 +2588,18 @@ static void *__text_poke(text_poke_f func, void *addr, const void *src, size_t l
 	local_irq_save(flags);
 
 	/*
-	 * Map the MMUPAGE containing addr. Use the physical address directly
-	 * to correctly handle sub-PAGE_SIZE offsets within a kernel page.
+	 * Map the MMUPAGE containing addr. With page clustering, a struct page
+	 * covers PAGE_SIZE (>MMUPAGE_SIZE), so add the sub-page MMUPAGE offset
+	 * to get the correct physical address for the PTE.
 	 */
-	phys = __pa((unsigned long)addr & MMUPAGE_MASK);
+	phys = page_to_phys(pages[0]) + (offset_in_page(addr) & MMUPAGE_MASK);
 	pte = __pte((phys & PTE_PFN_MASK) | pgprot_val(pgprot));
 	set_pte_at(text_poke_mm, text_poke_mm_addr, ptep, pte);
 
 	if (cross_page_boundary) {
-		phys = __pa(((unsigned long)addr & MMUPAGE_MASK) + MMUPAGE_SIZE);
+		unsigned long addr2 = (unsigned long)addr + MMUPAGE_SIZE;
+
+		phys = page_to_phys(pages[1]) + (offset_in_page(addr2) & MMUPAGE_MASK);
 		pte = __pte((phys & PTE_PFN_MASK) | pgprot_val(pgprot));
 		set_pte_at(text_poke_mm, text_poke_mm_addr + MMUPAGE_SIZE,
 			   ptep + 1, pte);
@@ -2705,7 +2708,7 @@ void *text_poke_copy_locked(void *addr, const void *opcode, size_t len,
 		unsigned long ptr = start + patched;
 		size_t s;
 
-		s = min_t(size_t, PAGE_SIZE * 2 - offset_in_page(ptr), len - patched);
+		s = min_t(size_t, MMUPAGE_SIZE * 2 - (ptr & ~MMUPAGE_MASK), len - patched);
 
 		__text_poke(text_poke_memcpy, (void *)ptr, opcode + patched, s);
 		patched += s;
@@ -2755,7 +2758,7 @@ void *text_poke_set(void *addr, int c, size_t len)
 		unsigned long ptr = start + patched;
 		size_t s;
 
-		s = min_t(size_t, PAGE_SIZE * 2 - offset_in_page(ptr), len - patched);
+		s = min_t(size_t, MMUPAGE_SIZE * 2 - (ptr & ~MMUPAGE_MASK), len - patched);
 
 		__text_poke(text_poke_memset, (void *)ptr, (void *)&c, s);
 		patched += s;

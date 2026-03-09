@@ -83,10 +83,10 @@ SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
 		unsigned long, prot, unsigned long, flags,
 		unsigned long, fd, unsigned long, off)
 {
-	if (off & ~PAGE_MASK)
+	if (off & ~MMUPAGE_MASK)
 		return -EINVAL;
 
-	return ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> PAGE_SHIFT);
+	return ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> MMUPAGE_SHIFT);
 }
 
 static void find_start_end(unsigned long addr, unsigned long flags,

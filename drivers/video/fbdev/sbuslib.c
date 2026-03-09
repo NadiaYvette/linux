@@ -57,7 +57,7 @@ int sbusfb_mmap_helper(const struct sbus_mmap_map *map,
 	if (vma->vm_pgoff > (~0UL >> PAGE_SHIFT))
 		return -EINVAL;
 
-	off = vma->vm_pgoff << PAGE_SHIFT;
+	off = vma->vm_pgoff << MMUPAGE_SHIFT;
 
 	/* VM_IO | VM_DONTEXPAND | VM_DONTDUMP are set by remap_pfn_range() */
 

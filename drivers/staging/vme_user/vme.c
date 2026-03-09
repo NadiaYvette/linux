@@ -758,7 +758,7 @@ int vme_master_mmap(struct vme_resource *resource, struct vm_area_struct *vma)
 	}
 
 	image = list_entry(resource->entry, struct vme_master_resource, list);
-	phys_addr = image->bus_resource.start + (vma->vm_pgoff << PAGE_SHIFT);
+	phys_addr = image->bus_resource.start + (vma->vm_pgoff << MMUPAGE_SHIFT);
 	vma_size = vma->vm_end - vma->vm_start;
 
 	if (phys_addr + vma_size > image->bus_resource.end + 1) {

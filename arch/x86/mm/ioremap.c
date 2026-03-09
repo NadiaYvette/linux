@@ -219,11 +219,15 @@ __ioremap_caller(resource_size_t phys_addr, unsigned long size,
 	}
 
 	/*
-	 * Mappings have to be MMU-page-aligned (hardware page size)
+	 * Mappings have to be MMU-page-aligned (hardware page size).
+	 * The vm_area allocated by get_vm_area_caller rounds up to
+	 * PAGE_SIZE, but we only map the MMUPAGE-aligned range to
+	 * avoid extending into adjacent memory regions (which could
+	 * cross RAM/reserved boundaries and fail memtype_reserve).
 	 */
 	offset = phys_addr & ~MMUPAGE_MASK;
 	phys_addr &= MMUPAGE_MASK;
-	size = ALIGN(last_addr+1, MMUPAGE_SIZE) - phys_addr;
+	size = ALIGN(last_addr + 1, MMUPAGE_SIZE) - phys_addr;
 
 	/*
 	 * Mask out any bits not part of the actual physical

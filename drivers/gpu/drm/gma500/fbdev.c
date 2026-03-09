@@ -23,10 +23,10 @@ static vm_fault_t psb_fbdev_vm_fault(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	struct fb_info *info = vma->vm_private_data;
-	unsigned long address = vmf->address - (vmf->pgoff << PAGE_SHIFT);
-	unsigned long pfn = info->fix.smem_start >> PAGE_SHIFT;
+	unsigned long address = vmf->address - (vmf->pgoff << MMUPAGE_SHIFT);
+	unsigned long pfn = info->fix.smem_start >> MMUPAGE_SHIFT;
 	vm_fault_t err = VM_FAULT_SIGBUS;
-	unsigned long page_num = vma_pages(vma);
+	unsigned long page_num = (vma->vm_end - vma->vm_start) >> MMUPAGE_SHIFT;
 	unsigned long i;
 
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
@@ -35,7 +35,7 @@ static vm_fault_t psb_fbdev_vm_fault(struct vm_fault *vmf)
 		err = vmf_insert_mixed(vma, address, pfn);
 		if (unlikely(err & VM_FAULT_ERROR))
 			break;
-		address += PAGE_SIZE;
+		address += MMUPAGE_SIZE;
 		++pfn;
 	}
 
@@ -54,7 +54,7 @@ static int psb_fbdev_fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 {
 	if (vma->vm_pgoff != 0)
 		return -EINVAL;
-	if (vma->vm_pgoff > (~0UL >> PAGE_SHIFT))
+	if (vma->vm_pgoff > (~0UL >> MMUPAGE_SHIFT))
 		return -EINVAL;
 
 	/*

@@ -125,7 +125,7 @@ static vm_fault_t fb_deferred_io_fault(struct vm_fault *vmf)
 	struct page *page;
 	struct fb_info *info = vmf->vma->vm_private_data;
 
-	offset = vmf->pgoff << PAGE_SHIFT;
+	offset = vmf->pgoff << MMUPAGE_SHIFT;
 	if (offset >= info->fix.smem_len)
 		return VM_FAULT_SIGBUS;
 
@@ -219,7 +219,7 @@ err_mutex_unlock:
  */
 static vm_fault_t fb_deferred_io_page_mkwrite(struct fb_info *info, struct vm_fault *vmf)
 {
-	unsigned long offset = vmf->pgoff << PAGE_SHIFT;
+	unsigned long offset = vmf->pgoff << MMUPAGE_SHIFT;
 	struct page *page = vmf->page;
 
 	file_update_time(vmf->vma->vm_file);
