@@ -291,7 +291,7 @@ static enum bp_state reserve_additional_memory(void)
 	 * We don't support PV MMU when Linux and Xen is using
 	 * different page granularity.
 	 */
-	BUILD_BUG_ON(XEN_PAGE_SIZE != PAGE_SIZE);
+	BUILD_BUG_ON(XEN_PAGE_SIZE != MMUPAGE_SIZE);
 
         /*
          * add_memory() will build page tables for the new memory so
@@ -624,7 +624,7 @@ int xen_alloc_ballooned_pages(unsigned int nr_pages, struct page **pages)
 			 * We don't support PV MMU when Linux and Xen is using
 			 * different page granularity.
 			 */
-			BUILD_BUG_ON(XEN_PAGE_SIZE != PAGE_SIZE);
+			BUILD_BUG_ON(XEN_PAGE_SIZE != MMUPAGE_SIZE);
 
 			if (xen_pv_domain()) {
 				ret = xen_alloc_p2m_entry(page_to_pfn(page));

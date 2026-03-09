@@ -254,7 +254,7 @@ static int vfio_cdx_mmap_mmio(struct vfio_cdx_region region,
 	if (base + size > region.size)
 		return -EINVAL;
 
-	vma->vm_pgoff = (region.addr >> PAGE_SHIFT) + pgoff;
+	vma->vm_pgoff = (region.addr >> MMUPAGE_SHIFT) + pgoff;
 	vma->vm_page_prot = pgprot_device(vma->vm_page_prot);
 
 	return io_remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
@@ -269,7 +269,7 @@ static int vfio_cdx_mmap(struct vfio_device *core_vdev,
 	struct cdx_device *cdx_dev = to_cdx_device(core_vdev->dev);
 	unsigned int index;
 
-	index = vma->vm_pgoff >> (VFIO_CDX_OFFSET_SHIFT - PAGE_SHIFT);
+	index = vma->vm_pgoff >> (VFIO_CDX_OFFSET_SHIFT - MMUPAGE_SHIFT);
 
 	if (index >= cdx_dev->res_count)
 		return -EINVAL;

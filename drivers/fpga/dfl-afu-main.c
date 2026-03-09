@@ -819,7 +819,7 @@ static int afu_mmap(struct file *filp, struct vm_area_struct *vma)
 
 	fdata = to_dfl_feature_dev_data(&pdev->dev);
 
-	offset = vma->vm_pgoff << PAGE_SHIFT;
+	offset = vma->vm_pgoff << MMUPAGE_SHIFT;
 	ret = afu_mmio_region_get_by_offset(fdata, offset, size, &region);
 	if (ret)
 		return ret;

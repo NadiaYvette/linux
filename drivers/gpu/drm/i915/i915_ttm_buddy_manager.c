@@ -71,12 +71,12 @@ static int i915_ttm_buddy_man_alloc(struct ttm_resource_manager *man,
 
 	min_page_size = bman->default_page_size;
 	if (bo->page_alignment)
-		min_page_size = bo->page_alignment << PAGE_SHIFT;
+		min_page_size = bo->page_alignment << MMUPAGE_SHIFT;
 
 	GEM_BUG_ON(min_page_size < mm->chunk_size);
 	GEM_BUG_ON(!IS_ALIGNED(size, min_page_size));
 
-	if (size > lpfn << PAGE_SHIFT) {
+	if (size > lpfn << MMUPAGE_SHIFT) {
 		err = -E2BIG;
 		goto err_free_res;
 	}
@@ -90,9 +90,9 @@ static int i915_ttm_buddy_man_alloc(struct ttm_resource_manager *man,
 		goto err_free_res;
 	}
 
-	err = gpu_buddy_alloc_blocks(mm, (u64)place->fpfn << PAGE_SHIFT,
-				     (u64)lpfn << PAGE_SHIFT,
-				     (u64)n_pages << PAGE_SHIFT,
+	err = gpu_buddy_alloc_blocks(mm, (u64)place->fpfn << MMUPAGE_SHIFT,
+				     (u64)lpfn << MMUPAGE_SHIFT,
+				     (u64)n_pages << MMUPAGE_SHIFT,
 				     min_page_size,
 				     &bman_res->blocks,
 				     bman_res->flags);
@@ -106,11 +106,11 @@ static int i915_ttm_buddy_man_alloc(struct ttm_resource_manager *man,
 
 		list_for_each_entry(block, &bman_res->blocks, link) {
 			unsigned long start =
-				gpu_buddy_block_offset(block) >> PAGE_SHIFT;
+				gpu_buddy_block_offset(block) >> MMUPAGE_SHIFT;
 
 			if (start < bman->visible_size) {
 				unsigned long end = start +
-					(gpu_buddy_block_size(mm, block) >> PAGE_SHIFT);
+					(gpu_buddy_block_size(mm, block) >> MMUPAGE_SHIFT);
 
 				bman_res->used_visible_size +=
 					min(end, bman->visible_size) - start;
@@ -177,9 +177,9 @@ static bool i915_ttm_buddy_man_intersects(struct ttm_resource_manager *man,
 	/* Check each drm buddy block individually */
 	list_for_each_entry(block, &bman_res->blocks, link) {
 		unsigned long fpfn =
-			gpu_buddy_block_offset(block) >> PAGE_SHIFT;
+			gpu_buddy_block_offset(block) >> MMUPAGE_SHIFT;
 		unsigned long lpfn = fpfn +
-			(gpu_buddy_block_size(mm, block) >> PAGE_SHIFT);
+			(gpu_buddy_block_size(mm, block) >> MMUPAGE_SHIFT);
 
 		if (place->fpfn < lpfn && place->lpfn > fpfn)
 			return true;
@@ -210,9 +210,9 @@ static bool i915_ttm_buddy_man_compatible(struct ttm_resource_manager *man,
 	/* Check each drm buddy block individually */
 	list_for_each_entry(block, &bman_res->blocks, link) {
 		unsigned long fpfn =
-			gpu_buddy_block_offset(block) >> PAGE_SHIFT;
+			gpu_buddy_block_offset(block) >> MMUPAGE_SHIFT;
 		unsigned long lpfn = fpfn +
-			(gpu_buddy_block_size(mm, block) >> PAGE_SHIFT);
+			(gpu_buddy_block_size(mm, block) >> MMUPAGE_SHIFT);
 
 		if (fpfn < place->fpfn || lpfn > place->lpfn)
 			return false;
@@ -231,11 +231,11 @@ static void i915_ttm_buddy_man_debug(struct ttm_resource_manager *man,
 	drm_printf(printer, "default_page_size: %lluKiB\n",
 		   bman->default_page_size >> 10);
 	drm_printf(printer, "visible_avail: %lluMiB\n",
-		   (u64)bman->visible_avail << PAGE_SHIFT >> 20);
+		   (u64)bman->visible_avail << MMUPAGE_SHIFT >> 20);
 	drm_printf(printer, "visible_size: %lluMiB\n",
-		   (u64)bman->visible_size << PAGE_SHIFT >> 20);
+		   (u64)bman->visible_size << MMUPAGE_SHIFT >> 20);
 	drm_printf(printer, "visible_reserved: %lluMiB\n",
-		   (u64)bman->visible_reserved << PAGE_SHIFT >> 20);
+		   (u64)bman->visible_reserved << MMUPAGE_SHIFT >> 20);
 
 	drm_buddy_print(&bman->mm, printer);
 
@@ -302,13 +302,13 @@ int i915_ttm_buddy_man_init(struct ttm_device *bdev,
 	INIT_LIST_HEAD(&bman->reserved);
 	GEM_BUG_ON(default_page_size < chunk_size);
 	bman->default_page_size = default_page_size;
-	bman->visible_size = visible_size >> PAGE_SHIFT;
+	bman->visible_size = visible_size >> MMUPAGE_SHIFT;
 	bman->visible_avail = bman->visible_size;
 
 	man = &bman->manager;
 	man->use_tt = use_tt;
 	man->func = &i915_ttm_buddy_manager_func;
-	ttm_resource_manager_init(man, bdev, bman->mm.size >> PAGE_SHIFT);
+	ttm_resource_manager_init(man, bdev, bman->mm.size >> MMUPAGE_SHIFT);
 
 	ttm_resource_manager_set_used(man, true);
 	ttm_set_driver_manager(bdev, type, man);
@@ -373,7 +373,7 @@ int i915_ttm_buddy_man_reserve(struct ttm_resource_manager *man,
 {
 	struct i915_ttm_buddy_manager *bman = to_buddy_manager(man);
 	struct gpu_buddy *mm = &bman->mm;
-	unsigned long fpfn = start >> PAGE_SHIFT;
+	unsigned long fpfn = start >> MMUPAGE_SHIFT;
 	unsigned long flags = 0;
 	int ret;
 
@@ -387,7 +387,7 @@ int i915_ttm_buddy_man_reserve(struct ttm_resource_manager *man,
 				     flags);
 
 	if (fpfn < bman->visible_size) {
-		unsigned long lpfn = fpfn + (size >> PAGE_SHIFT);
+		unsigned long lpfn = fpfn + (size >> MMUPAGE_SHIFT);
 		unsigned long visible = min(lpfn, bman->visible_size) - fpfn;
 
 		bman->visible_reserved += visible;
@@ -425,7 +425,7 @@ void i915_ttm_buddy_man_avail(struct ttm_resource_manager *man,
 	struct i915_ttm_buddy_manager *bman = to_buddy_manager(man);
 
 	mutex_lock(&bman->lock);
-	*avail = bman->mm.avail >> PAGE_SHIFT;
+	*avail = bman->mm.avail >> MMUPAGE_SHIFT;
 	*visible_avail = bman->visible_avail;
 	mutex_unlock(&bman->lock);
 }

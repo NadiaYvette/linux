@@ -136,8 +136,19 @@ static int vmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 			size = MMUPAGE_SIZE;
 		}
 #endif
+		/*
+		 * With PAGE_MMUSHIFT > 0, paddr may be MMUPAGE-aligned
+		 * but not PAGE-aligned.  PTE_PFN_MASK (arch-specific)
+		 * preserves the MMUPAGE PFN bits directly.  On arches
+		 * where PAGE_MMUSHIFT is always 0, use pfn_pte().
+		 */
+#ifdef PTE_PFN_MASK
 		set_pte_at(&init_mm, addr, pte,
 			   __pte((paddr & PTE_PFN_MASK) | pgprot_val(prot)));
+#else
+		set_pte_at(&init_mm, addr, pte,
+			   pfn_pte(paddr >> PAGE_SHIFT, prot));
+#endif
 		paddr += MMUPAGE_SIZE;
 	} while (pte++, addr += MMUPAGE_SIZE, addr != end);
 
@@ -361,7 +372,7 @@ int ioremap_page_range(unsigned long addr, unsigned long end,
 		return -EINVAL;
 	}
 	if (addr != (unsigned long)area->addr ||
-	    (void *)end != area->addr + get_vm_area_size(area)) {
+	    end > (unsigned long)area->addr + get_vm_area_size(area)) {
 		WARN_ONCE(1, "ioremap request [%lx,%lx) doesn't match vm_area [%lx, %lx)\n",
 			  addr, end, (long)area->addr,
 			  (long)area->addr + get_vm_area_size(area));
@@ -570,8 +581,13 @@ static int vmap_pages_pte_range(pmd_t *pmd, unsigned long addr,
 		for (sub = 0; sub < PAGE_MMUCOUNT; sub++) {
 			phys_addr_t pa = page_to_phys(page) + sub * MMUPAGE_SIZE;
 
+#ifdef PTE_PFN_MASK
 			set_pte_at(&init_mm, addr, pte,
 				   __pte((pa & PTE_PFN_MASK) | pgprot_val(prot)));
+#else
+			set_pte_at(&init_mm, addr, pte,
+				   pfn_pte(pa >> PAGE_SHIFT, prot));
+#endif
 			pte++;
 			addr += MMUPAGE_SIZE;
 			if (addr == end)
@@ -3619,18 +3635,18 @@ void *vmap_pfn(unsigned long *pfns, unsigned int count, pgprot_t prot)
 	struct vmap_pfn_data data = { .pfns = pfns, .prot = pgprot_nx(prot) };
 	struct vm_struct *area;
 
-	area = get_vm_area_caller(count * PAGE_SIZE, VM_IOREMAP,
+	area = get_vm_area_caller(count * MMUPAGE_SIZE, VM_IOREMAP,
 			__builtin_return_address(0));
 	if (!area)
 		return NULL;
 	if (apply_to_page_range(&init_mm, (unsigned long)area->addr,
-			count * PAGE_SIZE, vmap_pfn_apply, &data)) {
+			count * MMUPAGE_SIZE, vmap_pfn_apply, &data)) {
 		free_vm_area(area);
 		return NULL;
 	}
 
 	flush_cache_vmap((unsigned long)area->addr,
-			 (unsigned long)area->addr + count * PAGE_SIZE);
+			 (unsigned long)area->addr + count * MMUPAGE_SIZE);
 
 	return area->addr;
 }

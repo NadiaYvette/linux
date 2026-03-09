@@ -3544,7 +3544,7 @@ static int kfd_mmap(struct file *filep, struct vm_area_struct *vma)
 	if (process->lead_thread != current->group_leader)
 		return -EBADF;
 
-	mmap_offset = vma->vm_pgoff << PAGE_SHIFT;
+	mmap_offset = vma->vm_pgoff << MMUPAGE_SHIFT;
 	gpu_id = KFD_MMAP_GET_GPU_ID(mmap_offset);
 	if (gpu_id)
 		dev = kfd_device_by_id(gpu_id);

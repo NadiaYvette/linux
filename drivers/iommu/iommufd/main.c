@@ -577,7 +577,7 @@ static int iommufd_fops_mmap(struct file *filp, struct vm_area_struct *vma)
 
 	mtree_lock(&ictx->mt_mmap);
 	/* vma->vm_pgoff carries a page-shifted start position to an immap */
-	immap = mtree_load(&ictx->mt_mmap, vma->vm_pgoff << PAGE_SHIFT);
+	immap = mtree_load(&ictx->mt_mmap, vma->vm_pgoff << MMUPAGE_SHIFT);
 	if (!immap || !refcount_inc_not_zero(&immap->owner->users)) {
 		mtree_unlock(&ictx->mt_mmap);
 		return -ENXIO;
