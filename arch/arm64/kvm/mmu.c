@@ -1444,7 +1444,7 @@ static int get_vma_page_shift(struct vm_area_struct *vma, unsigned long hva)
 
 	VM_BUG_ON(is_vm_hugetlb_page(vma));
 
-	pa = (vma->vm_pgoff << PAGE_SHIFT) + (hva - vma->vm_start);
+	pa = (vma->vm_pgoff << MMUPAGE_SHIFT) + (hva - vma->vm_start);
 
 #ifndef __PAGETABLE_PMD_FOLDED
 	if ((hva & (PUD_SIZE - 1)) == (pa & (PUD_SIZE - 1)) &&

@@ -190,10 +190,6 @@ static void __init set_real_mode_permissions(void)
 	unsigned char *base = (unsigned char *) real_mode_header;
 	size_t size = PAGE_ALIGN(real_mode_blob_end - real_mode_blob);
 
-	size_t ro_size =
-		PAGE_ALIGN(real_mode_header->ro_end) -
-		__pa(base);
-
 	/*
 	 * With PAGE_MMUSHIFT > 0, text_start may be MMUPAGE-aligned
 	 * rather than PAGE-aligned.  Round down to PAGE boundary so
@@ -208,9 +204,29 @@ static void __init set_real_mode_permissions(void)
 	unsigned long text_start =
 		(unsigned long) __va(text_start_phys);
 
-	set_memory_nx((unsigned long) base, size >> PAGE_SHIFT);
-	set_memory_ro((unsigned long) base, ro_size >> PAGE_SHIFT);
-	set_memory_x(text_start, text_size >> PAGE_SHIFT);
+	if (PAGE_MMUSHIFT == 0) {
+		size_t ro_size =
+			PAGE_ALIGN(real_mode_header->ro_end) -
+			__pa(base);
+
+		set_memory_nx((unsigned long) base, size >> PAGE_SHIFT);
+		set_memory_ro((unsigned long) base, ro_size >> PAGE_SHIFT);
+		set_memory_x(text_start, text_size >> PAGE_SHIFT);
+	} else {
+		/*
+		 * With PAGE_MMUSHIFT > 0, CPA operates at PAGE_SIZE
+		 * granularity.  We can't do fine-grained NX+RO without
+		 * creating W+X on the data sections that share the same
+		 * PAGE.  But we MUST clear NX on the text, otherwise the
+		 * AP will triple-fault on instruction fetch (the direct
+		 * mapping uses PAGE_KERNEL which includes _PAGE_NX).
+		 *
+		 * Accept the W+X trade-off — the trampoline is only
+		 * used during AP boot and the security impact is
+		 * negligible.
+		 */
+		set_memory_x(text_start, text_size >> PAGE_SHIFT);
+	}
 }
 
 void __init init_real_mode(void)

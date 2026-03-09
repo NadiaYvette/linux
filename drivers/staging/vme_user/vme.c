@@ -759,7 +759,7 @@ int vme_master_mmap_prepare(struct vme_resource *resource,
 	}
 
 	image = list_entry(resource->entry, struct vme_master_resource, list);
-	phys_addr = image->bus_resource.start + (desc->pgoff << PAGE_SHIFT);
+	phys_addr = image->bus_resource.start + (desc->pgoff << MMUPAGE_SHIFT);
 
 	if (phys_addr + vma_size > image->bus_resource.end + 1) {
 		dev_err(bridge->parent, "Map size cannot exceed the window size\n");

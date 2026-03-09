@@ -2189,7 +2189,7 @@ static int mport_cdev_mmap(struct file *filp, struct vm_area_struct *vma)
 		   (unsigned int)size, vma->vm_pgoff);
 
 	md = priv->md;
-	baddr = ((dma_addr_t)vma->vm_pgoff << PAGE_SHIFT);
+	baddr = ((dma_addr_t)vma->vm_pgoff << MMUPAGE_SHIFT);
 
 	mutex_lock(&md->buf_mutex);
 	list_for_each_entry(map, &md->mappings, node) {

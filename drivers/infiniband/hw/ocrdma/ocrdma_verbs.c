@@ -540,7 +540,7 @@ int ocrdma_mmap(struct ib_ucontext *context, struct vm_area_struct *vma)
 {
 	struct ocrdma_ucontext *ucontext = get_ocrdma_ucontext(context);
 	struct ocrdma_dev *dev = get_ocrdma_dev(context->device);
-	unsigned long vm_page = vma->vm_pgoff << PAGE_SHIFT;
+	unsigned long vm_page = vma->vm_pgoff << MMUPAGE_SHIFT;
 	u64 unmapped_db = (u64) dev->nic_info.unmapped_db;
 	unsigned long len = (vma->vm_end - vma->vm_start);
 	int status;
@@ -548,7 +548,7 @@ int ocrdma_mmap(struct ib_ucontext *context, struct vm_area_struct *vma)
 
 	if (vma->vm_start & (PAGE_SIZE - 1))
 		return -EINVAL;
-	found = ocrdma_search_mmap(ucontext, vma->vm_pgoff << PAGE_SHIFT, len);
+	found = ocrdma_search_mmap(ucontext, vma->vm_pgoff << MMUPAGE_SHIFT, len);
 	if (!found)
 		return -EINVAL;
 

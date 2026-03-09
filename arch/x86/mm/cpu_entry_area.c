@@ -98,9 +98,7 @@ void cea_set_pte(void *cea_vaddr, phys_addr_t pa, pgprot_t flags)
 static void __init
 cea_map_percpu_pages(void *cea_vaddr, void *ptr, int pages, pgprot_t prot)
 {
-	int mmupages = pages * PAGE_MMUCOUNT;
-
-	for ( ; mmupages; mmupages--, cea_vaddr += MMUPAGE_SIZE, ptr += MMUPAGE_SIZE)
+	for ( ; pages; pages--, cea_vaddr += MMUPAGE_SIZE, ptr += MMUPAGE_SIZE)
 		cea_set_pte(cea_vaddr, per_cpu_ptr_to_phys(ptr), prot);
 }
 
@@ -114,8 +112,8 @@ static void __init percpu_setup_debug_store(unsigned int cpu)
 		return;
 
 	cea = &get_cpu_entry_area(cpu)->cpu_debug_store;
-	npages = sizeof(struct debug_store) / PAGE_SIZE;
-	BUILD_BUG_ON(sizeof(struct debug_store) % PAGE_SIZE != 0);
+	npages = sizeof(struct debug_store) / MMUPAGE_SIZE;
+	BUILD_BUG_ON(sizeof(struct debug_store) % MMUPAGE_SIZE != 0);
 	cea_map_percpu_pages(cea, &per_cpu(cpu_debug_store, cpu), npages,
 			     PAGE_KERNEL);
 
@@ -133,7 +131,7 @@ static void __init percpu_setup_debug_store(unsigned int cpu)
 #ifdef CONFIG_X86_64
 
 #define cea_map_stack(name) do {					\
-	npages = sizeof(estacks->name## _stack) / PAGE_SIZE;		\
+	npages = sizeof(estacks->name## _stack) / MMUPAGE_SIZE;		\
 	cea_map_percpu_pages(cea->estacks.name## _stack,		\
 			estacks->name## _stack, npages, PAGE_KERNEL);	\
 	} while (0)
@@ -144,7 +142,7 @@ static void __init percpu_setup_exception_stacks(unsigned int cpu)
 	struct cpu_entry_area *cea = get_cpu_entry_area(cpu);
 	unsigned int npages;
 
-	BUILD_BUG_ON(sizeof(exception_stacks) % PAGE_SIZE != 0);
+	BUILD_BUG_ON(sizeof(exception_stacks) % MMUPAGE_SIZE != 0);
 
 	per_cpu(cea_exception_stacks, cpu) = &cea->estacks;
 
@@ -222,8 +220,8 @@ static void __init setup_cpu_entry_area(unsigned int cpu)
 	 * boundary.  Assert that we're not doing that.
 	 */
 	BUILD_BUG_ON((offsetof(struct tss_struct, x86_tss) ^
-		      offsetofend(struct tss_struct, x86_tss)) & PAGE_MASK);
-	BUILD_BUG_ON(sizeof(struct tss_struct) % PAGE_SIZE != 0);
+		      offsetofend(struct tss_struct, x86_tss)) & MMUPAGE_MASK);
+	BUILD_BUG_ON(sizeof(struct tss_struct) % MMUPAGE_SIZE != 0);
 	/*
 	 * VMX changes the host TR limit to 0x67 after a VM exit. This is
 	 * okay, since 0x67 covers the size of struct x86_hw_tss. Make sure
@@ -233,7 +231,7 @@ static void __init setup_cpu_entry_area(unsigned int cpu)
 	BUILD_BUG_ON(sizeof(struct x86_hw_tss) != 0x68);
 
 	cea_map_percpu_pages(&cea->tss, &per_cpu(cpu_tss_rw, cpu),
-			     sizeof(struct tss_struct) / PAGE_SIZE, tss_prot);
+			     sizeof(struct tss_struct) / MMUPAGE_SIZE, tss_prot);
 
 #ifdef CONFIG_X86_32
 	per_cpu(cpu_entry_area, cpu) = cea;
