@@ -433,8 +433,8 @@ static int efifb_probe(struct platform_device *dev)
 	size_remap  = size_vmode * 2;
 	if (size_remap > size_total)
 		size_remap = size_total;
-	if (size_remap % PAGE_SIZE)
-		size_remap += PAGE_SIZE - (size_remap % PAGE_SIZE);
+	if (size_remap % MMUPAGE_SIZE)
+		size_remap += MMUPAGE_SIZE - (size_remap % MMUPAGE_SIZE);
 	efifb_fix.smem_len = size_remap;
 
 	if (request_mem_region(efifb_fix.smem_start, size_remap, "efifb")) {

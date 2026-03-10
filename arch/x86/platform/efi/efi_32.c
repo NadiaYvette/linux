@@ -40,7 +40,7 @@ void __init efi_map_region(efi_memory_desc_t *md)
 	void *va;
 
 	start_pfn	= PFN_DOWN(md->phys_addr);
-	size		= md->num_pages << PAGE_SHIFT;
+	size		= md->num_pages << EFI_PAGE_SHIFT;
 	end		= md->phys_addr + size;
 	end_pfn 	= PFN_UP(end);
 
@@ -48,7 +48,8 @@ void __init efi_map_region(efi_memory_desc_t *md)
 		va = __va(md->phys_addr);
 
 		if (!(md->attribute & EFI_MEMORY_WB))
-			set_memory_uc((unsigned long)va, md->num_pages);
+			set_memory_uc((unsigned long)va,
+			      DIV_ROUND_UP(md->num_pages, PAGE_MMUCOUNT));
 	} else {
 		va = ioremap_cache(md->phys_addr, size);
 	}
