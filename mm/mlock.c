@@ -310,8 +310,13 @@ static inline unsigned int folio_mlock_step(struct folio *folio,
 	unsigned int count = (end - addr) >> MMUPAGE_SHIFT;
 	pte_t ptent = ptep_get(pte);
 
-	if (!folio_test_large(folio))
+	if (!folio_test_large(folio)) {
+#if PAGE_MMUSHIFT
+		return pgcl_pte_batch(ptent, pte, count);
+#else
 		return 1;
+#endif
+	}
 
 	return folio_pte_batch(folio, pte, ptent, count);
 }
