@@ -188,7 +188,13 @@ static int mremap_folio_pte_batch(struct vm_area_struct *vma, unsigned long addr
 		return 1;
 
 	folio = vm_normal_folio(vma, addr, pte);
-	if (!folio || !folio_test_large(folio))
+	if (!folio)
+		return 1;
+#if PAGE_MMUSHIFT
+	if (!folio_test_large(folio))
+		return pgcl_pte_batch(pte, ptep, max_nr);
+#endif
+	if (!folio_test_large(folio))
 		return 1;
 
 	return folio_pte_batch_flags(folio, NULL, ptep, &pte, max_nr, FPB_RESPECT_WRITE);
