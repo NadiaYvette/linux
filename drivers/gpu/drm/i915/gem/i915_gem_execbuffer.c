@@ -1301,7 +1301,7 @@ static void *reloc_iomap(struct i915_vma *batch,
 			mutex_lock(&ggtt->vm.mutex);
 			err = drm_mm_insert_node_in_range
 				(&ggtt->vm.mm, &cache->node,
-				 PAGE_SIZE, 0, I915_COLOR_UNEVICTABLE,
+				 I915_GTT_PAGE_SIZE, 0, I915_COLOR_UNEVICTABLE,
 				 0, ggtt->mappable_end,
 				 DRM_MM_INSERT_LOW);
 			mutex_unlock(&ggtt->vm.mutex);
