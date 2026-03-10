@@ -297,15 +297,23 @@ static void __init __map_region(efi_memory_desc_t *md, u64 va)
 	    md->type != EFI_MEMORY_MAPPED_IO)
 		flags |= _PAGE_ENC;
 
-	pfn = md->phys_addr >> PAGE_SHIFT;
-	if (kernel_map_pages_in_pgd(pgd, pfn, va, md->num_pages, flags))
-		pr_warn("Error mapping PA 0x%llx -> VA 0x%llx!\n",
-			   md->phys_addr, va);
+	{
+		unsigned long phys_offset = md->phys_addr & ~PAGE_MASK;
+		unsigned long total_size = phys_offset +
+					  (md->num_pages << EFI_PAGE_SHIFT);
+
+		pfn = md->phys_addr >> PAGE_SHIFT;
+		if (kernel_map_pages_in_pgd(pgd, pfn, va - phys_offset,
+					    DIV_ROUND_UP(total_size, PAGE_SIZE),
+					    flags))
+			pr_warn("Error mapping PA 0x%llx -> VA 0x%llx!\n",
+				   md->phys_addr, va);
+	}
 }
 
 void __init efi_map_region(efi_memory_desc_t *md)
 {
-	unsigned long size = md->num_pages << PAGE_SHIFT;
+	unsigned long size = md->num_pages << EFI_PAGE_SHIFT;
 	u64 pa = md->phys_addr;
 
 	/*
@@ -374,14 +382,25 @@ static int __init efi_update_mappings(efi_memory_desc_t *md, unsigned long pf)
 	int err1, err2;
 
 	/* Update the 1:1 mapping */
-	pfn = md->phys_addr >> PAGE_SHIFT;
-	err1 = kernel_map_pages_in_pgd(pgd, pfn, md->phys_addr, md->num_pages, pf);
-	if (err1) {
-		pr_err("Error while updating 1:1 mapping PA 0x%llx -> VA 0x%llx!\n",
-			   md->phys_addr, md->virt_addr);
-	}
+	{
+		unsigned long phys_offset = md->phys_addr & ~PAGE_MASK;
+		unsigned long total_size = phys_offset +
+					  (md->num_pages << EFI_PAGE_SHIFT);
+		unsigned long nkpages = DIV_ROUND_UP(total_size, PAGE_SIZE);
 
-	err2 = kernel_map_pages_in_pgd(pgd, pfn, md->virt_addr, md->num_pages, pf);
+		pfn = md->phys_addr >> PAGE_SHIFT;
+		err1 = kernel_map_pages_in_pgd(pgd, pfn,
+					       md->phys_addr - phys_offset,
+					       nkpages, pf);
+		if (err1) {
+			pr_err("Error while updating 1:1 mapping PA 0x%llx -> VA 0x%llx!\n",
+				   md->phys_addr, md->virt_addr);
+		}
+
+		err2 = kernel_map_pages_in_pgd(pgd, pfn,
+					       md->virt_addr - phys_offset,
+					       nkpages, pf);
+	}
 	if (err2) {
 		pr_err("Error while updating VA mapping PA 0x%llx -> VA 0x%llx!\n",
 			   md->phys_addr, md->virt_addr);

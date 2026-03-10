@@ -35,7 +35,7 @@ efi_status_t allocate_unaccepted_bitmap(__u32 nr_desc,
 
 		unaccepted_start = min(unaccepted_start, d->phys_addr);
 		unaccepted_end = max(unaccepted_end,
-				     d->phys_addr + d->num_pages * PAGE_SIZE);
+				     d->phys_addr + d->num_pages * EFI_PAGE_SIZE);
 	}
 
 	if (unaccepted_start == ULLONG_MAX)

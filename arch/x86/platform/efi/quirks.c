@@ -397,11 +397,18 @@ static void __init efi_unmap_pages(efi_memory_desc_t *md)
 	if (efi_is_mixed())
 		return;
 
-	if (kernel_unmap_pages_in_pgd(pgd, pa, md->num_pages))
-		pr_err("Failed to unmap 1:1 mapping for 0x%llx\n", pa);
+	{
+		unsigned long phys_offset = pa & ~PAGE_MASK;
+		unsigned long total_size = phys_offset +
+					  (md->num_pages << EFI_PAGE_SHIFT);
+		unsigned long nkpages = DIV_ROUND_UP(total_size, PAGE_SIZE);
 
-	if (kernel_unmap_pages_in_pgd(pgd, va, md->num_pages))
-		pr_err("Failed to unmap VA mapping for 0x%llx\n", va);
+		if (kernel_unmap_pages_in_pgd(pgd, pa - phys_offset, nkpages))
+			pr_err("Failed to unmap 1:1 mapping for 0x%llx\n", pa);
+
+		if (kernel_unmap_pages_in_pgd(pgd, va - phys_offset, nkpages))
+			pr_err("Failed to unmap VA mapping for 0x%llx\n", va);
+	}
 }
 
 struct efi_freeable_range {
