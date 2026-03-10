@@ -605,7 +605,7 @@ static void dbg_poison(struct i915_ggtt *ggtt,
 	if (ggtt->vm.bind_async_flags & I915_VMA_GLOBAL_BIND)
 		return; /* beware stop_machine() inversion */
 
-	GEM_BUG_ON(!IS_ALIGNED(size, PAGE_SIZE));
+	GEM_BUG_ON(!IS_ALIGNED(size, I915_GTT_PAGE_SIZE));
 
 	mutex_lock(&ggtt->error_mutex);
 	while (size) {
@@ -620,15 +620,15 @@ static void dbg_poison(struct i915_ggtt *ggtt,
 
 		s = io_mapping_map_wc(&ggtt->iomap,
 				      ggtt->error_capture.start,
-				      PAGE_SIZE);
-		memset_io(s, x, PAGE_SIZE);
+				      I915_GTT_PAGE_SIZE);
+		memset_io(s, x, I915_GTT_PAGE_SIZE);
 		io_mapping_unmap(s);
 
-		addr += PAGE_SIZE;
-		size -= PAGE_SIZE;
+		addr += I915_GTT_PAGE_SIZE;
+		size -= I915_GTT_PAGE_SIZE;
 	}
 	mb();
-	ggtt->vm.clear_range(&ggtt->vm, ggtt->error_capture.start, PAGE_SIZE);
+	ggtt->vm.clear_range(&ggtt->vm, ggtt->error_capture.start, I915_GTT_PAGE_SIZE);
 	mutex_unlock(&ggtt->error_mutex);
 #endif
 }
@@ -1009,7 +1009,7 @@ i915_gem_stolen_smem_setup(struct drm_i915_private *i915, u16 type,
 	mem = intel_memory_region_create(i915,
 					 intel_graphics_stolen_res.start,
 					 resource_size(&intel_graphics_stolen_res),
-					 PAGE_SIZE, 0, 0, type, instance,
+					 MMUPAGE_SIZE, 0, 0, type, instance,
 					 &i915_region_stolen_smem_ops);
 	if (IS_ERR(mem))
 		return mem;
