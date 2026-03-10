@@ -110,8 +110,13 @@ static int mprotect_folio_pte_batch(struct folio *folio, pte_t *ptep,
 	if (!folio)
 		return 1;
 
-	if (!folio_test_large(folio))
+	if (!folio_test_large(folio)) {
+#if PAGE_MMUSHIFT
+		return pgcl_pte_batch(pte, ptep, max_nr_ptes);
+#else
 		return 1;
+#endif
+	}
 
 	return folio_pte_batch_flags(folio, NULL, ptep, &pte, max_nr_ptes, flags);
 }
