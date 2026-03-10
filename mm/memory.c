@@ -1182,6 +1182,46 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 		return nr;
 	}
 
+
+#if PAGE_MMUSHIFT
+	/*
+	 * PGCL batch: order-0 pages are not compound, so folio_pte_batch
+	 * can't help. Batch PTE operations (wrprotect, set_ptes) for
+	 * contiguous sub-pages within the same kernel page, with
+	 * per-sub-page rmap/refcount since each sub-page is its own folio.
+	 */
+	if (max_nr > 1 && !folio_test_large(folio) && folio_test_anon(folio)
+	    && !*prealloc) {
+		nr = pgcl_pte_batch(pte, src_pte, max_nr);
+		if (nr > 1) {
+			int i;
+
+			for (i = 0; i < nr; i++) {
+				struct page *sp = page + i;
+				struct folio *sf = page_folio(sp);
+
+				folio_get(sf);
+				if (unlikely(folio_try_dup_anon_rmap_pte(
+						sf, sp, dst_vma, src_vma))) {
+					folio_put(sf);
+					/* Undo already-processed sub-pages */
+					while (--i >= 0) {
+						sp = page + i;
+						sf = page_folio(sp);
+						atomic_dec(&sf->_mapcount);
+						folio_put(sf);
+					}
+					return -EAGAIN;
+				}
+			}
+			rss[MM_ANONPAGES] += nr;
+			__copy_present_ptes(dst_vma, src_vma, dst_pte,
+					    src_pte, pte, addr, nr);
+			return nr;
+		}
+	}
+#endif
+
 	folio_get(folio);
 	if (folio_test_anon(folio)) {
 		/*
