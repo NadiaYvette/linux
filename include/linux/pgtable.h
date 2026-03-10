@@ -1022,7 +1022,7 @@ static inline void clear_not_present_full_ptes(struct mm_struct *mm,
 		if (--nr == 0)
 			break;
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 	}
 }
 #endif
@@ -1127,7 +1127,7 @@ static inline void wrprotect_ptes(struct mm_struct *mm, unsigned long addr,
 		if (--nr == 0)
 			break;
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 	}
 }
 #endif
@@ -1681,7 +1681,7 @@ static inline pte_t modify_prot_start_ptes(struct vm_area_struct *vma,
 	pte = ptep_modify_prot_start(vma, addr, ptep);
 	while (--nr) {
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 		tmp_pte = ptep_modify_prot_start(vma, addr, ptep);
 		if (pte_dirty(tmp_pte))
 			pte = pte_mkdirty(pte);
