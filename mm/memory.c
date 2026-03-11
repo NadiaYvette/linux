@@ -1186,34 +1186,26 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 #if PAGE_MMUSHIFT
 	/*
 	 * PGCL batch: order-0 pages are not compound, so folio_pte_batch
-	 * can't help. Batch PTE operations (wrprotect, set_ptes) for
-	 * contiguous sub-pages within the same kernel page, with
-	 * per-sub-page rmap/refcount since each sub-page is its own folio.
+	 * can't help.  Batch PTE operations (wrprotect, set_ptes) for
+	 * contiguous sub-pages within the same kernel page.
+	 *
+	 * In PGCL, pte_page() returns the same struct page for all
+	 * sub-page PTEs within a kernel page, so all nr PTEs share
+	 * one refcount and one mapcount on the same folio.
 	 */
 	if (max_nr > 1 && !folio_test_large(folio) && folio_test_anon(folio)
 	    && !*prealloc) {
 		nr = pgcl_pte_batch(pte, src_pte, max_nr);
 		if (nr > 1) {
-			int i;
-
-			for (i = 0; i < nr; i++) {
-				struct page *sp = page + i;
-				struct folio *sf = page_folio(sp);
-
-				folio_get(sf);
-				if (unlikely(folio_try_dup_anon_rmap_pte(
-						sf, sp, dst_vma, src_vma))) {
-					folio_put(sf);
-					/* Undo already-processed sub-pages */
-					while (--i >= 0) {
-						sp = page + i;
-						sf = page_folio(sp);
-						atomic_dec(&sf->_mapcount);
-						folio_put(sf);
-					}
-					return -EAGAIN;
-				}
+			folio_ref_add(folio, nr);
+			if (unlikely(folio_try_dup_anon_rmap_pte(
+					folio, page, dst_vma, src_vma))) {
+				folio_ref_sub(folio, nr);
+				return -EAGAIN;
 			}
+			/* First dup added 1 to mapcount; add the rest */
+			if (nr > 1)
+				atomic_add(nr - 1, &folio->_mapcount);
 			rss[MM_ANONPAGES] += nr;
 			__copy_present_ptes(dst_vma, src_vma, dst_pte,
 					    src_pte, pte, addr, nr);
@@ -1782,8 +1774,12 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 	/*
 	 * PGCL batch: order-0 pages are not compound, so we can't use
 	 * folio_pte_batch.  Instead, batch PTE clearing and TLB flushing
-	 * for contiguous sub-pages within the same kernel page, then do
-	 * per-sub-page rmap removal and page freeing.
+	 * for contiguous sub-pages within the same kernel page.
+	 *
+	 * In PGCL, all nr PTEs map to the same struct page (pte_page()
+	 * drops the sub-page offset).  Decrement mapcount nr times and
+	 * release nr refs, but add the page to the TLB free batch only
+	 * once — the remaining nr-1 refs are dropped explicitly.
 	 */
 	if (max_nr > 1 && folio_test_anon(folio)) {
 		nr = pgcl_pte_batch(ptent, pte, max_nr);
@@ -1796,18 +1792,21 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 			arch_check_zapped_pte(vma, ptent);
 			tlb_remove_tlb_entries(tlb, pte, nr, addr);
 
-			/* Per-sub-page rmap removal and page freeing */
-			for (i = 0; i < nr; i++) {
-				struct page *subpage = page + i;
-				struct folio *subfolio = page_folio(subpage);
+			/* Remove nr mappings from the same folio */
+			for (i = 0; i < nr; i++)
+				folio_remove_rmap_pte(folio, page, vma);
 
-				folio_remove_rmap_pte(subfolio, subpage, vma);
-				if (unlikely(__tlb_remove_page_size(tlb,
-						subpage, false,
-						MMUPAGE_SIZE))) {
-					*force_flush = true;
-					*force_break = true;
-				}
+			/*
+			 * Drop nr-1 refs now; the TLB batch will drop
+			 * the last ref when it frees the page.
+			 */
+			if (nr > 1)
+				folio_ref_sub(folio, nr - 1);
+			if (unlikely(__tlb_remove_page_size(tlb,
+					page, false,
+					MMUPAGE_SIZE))) {
+				*force_flush = true;
+				*force_break = true;
 			}
 			return nr;
 		}
@@ -4180,6 +4179,12 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 			if (extra) {
 				folio_ref_add(new_folio, extra);
 				atomic_add(extra, &new_folio->_mapcount);
+				/*
+				 * Drop old folio refs for the remapped
+				 * neighbor PTEs.  The faulting PTE's ref
+				 * is dropped by folio_put(old_folio) below.
+				 */
+				folio_ref_sub(old_folio, extra);
 			}
 		}
 #endif
