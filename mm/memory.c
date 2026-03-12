@@ -1128,6 +1128,23 @@ static __always_inline void __copy_present_ptes(struct vm_area_struct *dst_vma,
 	if (!userfaultfd_wp(dst_vma))
 		pte = pte_clear_uffd_wp(pte);
 
+#if PAGE_MMUSHIFT
+	/*
+	 * With PGCL, set_ptes(nr>1) writes nr*PAGE_MMUCOUNT PTEs
+	 * (treating nr as kernel page count).  The large folio batch
+	 * path passes nr in MMUPAGE-granular units from folio_pte_batch,
+	 * so write individual PTEs with MMUPAGE_SIZE stride instead.
+	 */
+	if (nr > 1) {
+		int i;
+
+		for (i = 0; i < nr; i++) {
+			set_pte(dst_pte + i, pte);
+			pte = __pte(pte_val(pte) + MMUPAGE_SIZE);
+		}
+		return;
+	}
+#endif
 	set_ptes(dst_vma->vm_mm, addr, dst_pte, pte, nr);
 }
 
@@ -1187,20 +1204,47 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 
 #if PAGE_MMUSHIFT
 	/*
-	 * PGCL batch DISABLED: pgcl_pte_batch() uses pte_pfn() which
-	 * returns PAGE-granular PFNs (shifted by PAGE_SHIFT).  Two PTEs
-	 * pointing to DIFFERENT 64KB kernel pages with consecutive PFNs
-	 * wrongly match as "contiguous", and set_ptes(nr>1) then writes
-	 * nr * PAGE_MMUCOUNT PTEs — overflowing past VMA boundaries.
+	 * PGCL batch: batch-copy contiguous sub-page PTEs within the
+	 * same kernel page.  Write individual PTEs (not set_ptes nr>1
+	 * which multiplies by PAGE_MMUCOUNT) and batch rmap/refcount.
 	 *
-	 * Additionally, the rmap/refcount updates here assume all nr PTEs
-	 * share the same folio, which is wrong when consecutive PAGE PFNs
-	 * are different folios.
-	 *
-	 * TODO: to re-enable, pgcl_pte_batch must use MMUPAGE-granular
-	 * PFN comparison, and the copy loop must write individual PTEs
-	 * (not set_ptes nr>1 which multiplies by PAGE_MMUCOUNT).
+	 * Check rmap FIRST so that if the page is pinned we fall through
+	 * to the single-PTE path without having modified any PTEs.
 	 */
+	if (max_nr > 1 && folio_test_anon(folio) && !folio_test_large(folio)) {
+		nr = pgcl_pte_batch(pte, src_pte, max_nr);
+		if (nr > 1) {
+			folio_ref_add(folio, nr);
+			if (!folio_try_dup_anon_rmap_ptes(folio, page,
+							  nr, dst_vma,
+							  src_vma)) {
+				int i;
+
+				for (i = 0; i < nr; i++) {
+					pte_t p = ptep_get(src_pte + i);
+
+					if (is_cow_mapping(src_vma->vm_flags)
+					    && pte_write(p)) {
+						ptep_set_wrprotect(
+							src_vma->vm_mm,
+							addr + i * MMUPAGE_SIZE,
+							src_pte + i);
+						p = pte_wrprotect(p);
+					}
+					if (src_vma->vm_flags & VM_SHARED)
+						p = pte_mkclean(p);
+					p = pte_mkold(p);
+					if (!userfaultfd_wp(dst_vma))
+						p = pte_clear_uffd_wp(p);
+					set_pte(dst_pte + i, p);
+				}
+				rss[MM_ANONPAGES] += nr;
+				return nr;
+			}
+			/* Pinned page — undo refcount, fall through */
+			folio_ref_sub(folio, nr);
+		}
+	}
 #endif
 
 	folio_get(folio);
@@ -1758,18 +1802,34 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 	}
 #if PAGE_MMUSHIFT
 	/*
-	 * PGCL zap batch DISABLED: pgcl_pte_batch() uses pte_pfn() which
-	 * returns PAGE-granular PFNs (shifted by PAGE_SHIFT).  Two PTEs
-	 * pointing to DIFFERENT 64KB kernel pages with consecutive PAGE
-	 * PFNs wrongly match as "contiguous within the same kernel page".
-	 * The rmap/refcount updates then operate on only the first folio,
-	 * causing mapcount underflow (Bad page state) on the first folio
-	 * and a ref leak on the second.
-	 *
-	 * TODO: to re-enable, pgcl_pte_batch must compare MMUPAGE-granular
-	 * PFNs (pte_val >> MMUPAGE_SHIFT) and verify all PTEs map into
-	 * the same kernel page before batching.
+	 * PGCL batch: order-0 pages are not compound, so we can't use
+	 * folio_pte_batch.  Instead, batch PTE clearing and TLB flushing
+	 * for contiguous sub-pages within the same kernel page.
 	 */
+	if (max_nr > 1 && folio_test_anon(folio)) {
+		nr = pgcl_pte_batch(ptent, pte, max_nr);
+		if (nr > 1) {
+			int i;
+
+			clear_full_ptes(mm, addr, pte, nr, tlb->fullmm);
+			rss[MM_ANONPAGES] -= nr;
+			arch_check_zapped_pte(vma, ptent);
+			tlb_remove_tlb_entries(tlb, pte, nr, addr);
+
+			for (i = 0; i < nr; i++)
+				folio_remove_rmap_pte(folio, page, vma);
+
+			if (nr > 1)
+				folio_ref_sub(folio, nr - 1);
+			if (unlikely(__tlb_remove_page_size(tlb,
+					page, false,
+					MMUPAGE_SIZE))) {
+				*force_flush = true;
+				*force_break = true;
+			}
+			return nr;
+		}
+	}
 #endif
 	zap_present_folio_ptes(tlb, vma, folio, page, pte, ptent, 1, addr,
 			       details, rss, force_flush, force_break, any_skipped);
