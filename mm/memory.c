@@ -1204,6 +1204,16 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 							  src_vma)) {
 				int i;
 
+				/*
+				 * folio_try_dup_anon_rmap_ptes only does
+				 * atomic_inc(&folio->_mapcount) for non-large
+				 * folios regardless of nr_pages.  With PGCL
+				 * pseudo-compound, all sub-pages resolve to
+				 * the same folio head, so we need nr mappings
+				 * tracked in the head's _mapcount.
+				 */
+				atomic_add(nr - 1, &folio->_mapcount);
+
 				for (i = 0; i < nr; i++) {
 					pte_t p = ptep_get(src_pte + i);
 
@@ -4125,12 +4135,17 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 			folio_remove_rmap_pte(old_folio, vmf->page, vma);
 		}
 
-#if PAGE_MMUSHIFT && 0 /* temporarily disabled */
+#if PAGE_MMUSHIFT
 		/*
 		 * COW clustering: remap neighbor PTEs in the same kernel
 		 * page that still point to the old page.  The new page
 		 * already has a full copy of the old page's contents
 		 * (done by __wp_page_copy_user above).
+		 *
+		 * With PGCL, pte_page() returns the same struct page for
+		 * all PTEs within a kernel page (PFN = phys >> PAGE_SHIFT),
+		 * so all refcount/mapcount operations naturally target the
+		 * same folio.
 		 */
 		if (old_folio && folio_test_anon(old_folio) && !unshare) {
 			pgoff_t pgoff = vma->vm_pgoff +
@@ -4153,7 +4168,6 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 					(unsigned long)j * MMUPAGE_SIZE;
 				pte_t *ptep = base_pte + j;
 				pte_t pteval;
-				struct page *sub_page;
 
 				/* Skip the PTE we already handled */
 				if (ptep == vmf->pte)
@@ -4167,10 +4181,8 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 					continue;
 				/* Skip if not in the same kernel page */
 				if (page_folio(pte_page(pteval)) !=
-				    page_folio(vmf->page))
+				    old_folio)
 					continue;
-
-				sub_page = folio_page(new_folio, 0) + j;
 
 				/* Clear+flush old, set new */
 				ptep_clear_flush(vma, a, ptep);
@@ -4178,15 +4190,19 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 					   pte_mksub(base_entry,
 						     (unsigned long)j *
 						     MMUPAGE_SIZE));
-				folio_ref_add(new_folio, 1);
-				folio_add_anon_rmap_pte(new_folio,
-							sub_page, vma, a,
-							RMAP_NONE);
 				folio_remove_rmap_pte(old_folio,
 						      pte_page(pteval), vma);
 				extra++;
 			}
 			if (extra) {
+				/*
+				 * Adjust new folio: add refs and mapcount
+				 * for the extra PTEs.  Use atomic_add on
+				 * _mapcount directly — the anon_vma is
+				 * already set up by folio_add_new_anon_rmap.
+				 */
+				folio_ref_add(new_folio, extra);
+				atomic_add(extra, &new_folio->_mapcount);
 				/*
 				 * Drop old folio refs for the remapped
 				 * neighbor PTEs.  The faulting PTE's ref
