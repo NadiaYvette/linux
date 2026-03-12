@@ -705,8 +705,8 @@ static int queue_folios_pte_range(pmd_t *pmd, unsigned long addr,
 		walk->action = ACTION_AGAIN;
 		return 0;
 	}
-	for (; addr != end; pte += nr, addr += nr * PAGE_SIZE) {
-		max_nr = (end - addr) >> PAGE_SHIFT;
+	for (; addr != end; pte += nr, addr += nr * MMUPAGE_SIZE) {
+		max_nr = (end - addr) >> MMUPAGE_SHIFT;
 		nr = 1;
 		ptent = ptep_get(pte);
 		if (pte_none(ptent))
@@ -2049,7 +2049,7 @@ struct mempolicy *get_vma_policy(struct vm_area_struct *vma,
 	if (pol->mode == MPOL_INTERLEAVE ||
 	    pol->mode == MPOL_WEIGHTED_INTERLEAVE) {
 		*ilx += vma->vm_pgoff >> order;
-		*ilx += (addr - vma->vm_start) >> (PAGE_SHIFT + order);
+		*ilx += (addr - vma->vm_start) >> (MMUPAGE_SHIFT + order);
 	}
 	return pol;
 }
