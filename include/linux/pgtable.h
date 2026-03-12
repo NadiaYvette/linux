@@ -1721,9 +1721,18 @@ static inline void modify_prot_commit_ptes(struct vm_area_struct *vma, unsigned 
 	for (i = 0; i < nr; ++i, ++ptep, addr += MMUPAGE_SIZE) {
 		ptep_modify_prot_commit(vma, addr, ptep, old_pte, pte);
 
-		/* Advance PFN only, set same prot */
+		/*
+		 * Advance PFN only, set same prot.
+		 * pte_next_pfn advances by PAGE_SIZE.  With PGCL, consecutive
+		 * sub-pages differ by MMUPAGE_SIZE, not PAGE_SIZE.
+		 */
+#if PAGE_MMUSHIFT
+		old_pte = __pte(pte_val(old_pte) + MMUPAGE_SIZE);
+		pte = __pte(pte_val(pte) + MMUPAGE_SIZE);
+#else
 		old_pte = pte_next_pfn(old_pte);
 		pte = pte_next_pfn(pte);
+#endif
 	}
 }
 #endif
