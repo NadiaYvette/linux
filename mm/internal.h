@@ -409,9 +409,16 @@ unsigned int folio_pte_batch(struct folio *folio, pte_t *ptep, pte_t pte,
 static inline unsigned int pgcl_pte_batch(pte_t pte, pte_t *ptep,
 					  unsigned int max_nr)
 {
-	unsigned long base_pfn = pte_pfn(pte);
-	/* How many sub-pages remain in this kernel page? */
-	unsigned int remaining = PAGE_MMUCOUNT - (base_pfn & (PAGE_MMUCOUNT - 1));
+	/*
+	 * Use pte_pfn (PAGE-granular) for the kernel page identity,
+	 * and extract the MMUPAGE sub-offset from pte_val directly.
+	 * For present PTEs, protnone_mask is 0, so pte_val's physical
+	 * bits between MMUPAGE_SHIFT and PAGE_SHIFT give the sub-offset.
+	 */
+	unsigned long base_page_pfn = pte_pfn(pte);
+	unsigned int sub = (unsigned int)((pte_val(pte) >> MMUPAGE_SHIFT) &
+					  (PAGE_MMUCOUNT - 1));
+	unsigned int remaining = PAGE_MMUCOUNT - sub;
 	unsigned int nr;
 
 	max_nr = min(max_nr, remaining);
@@ -420,7 +427,12 @@ static inline unsigned int pgcl_pte_batch(pte_t pte, pte_t *ptep,
 
 		if (!pte_present(next))
 			break;
-		if (pte_pfn(next) != base_pfn + nr)
+		/* Must be same kernel page */
+		if (pte_pfn(next) != base_page_pfn)
+			break;
+		/* Must be next consecutive sub-page */
+		if (((pte_val(next) >> MMUPAGE_SHIFT) &
+		     (PAGE_MMUCOUNT - 1)) != sub + nr)
 			break;
 	}
 	return nr;

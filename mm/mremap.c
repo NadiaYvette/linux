@@ -307,6 +307,23 @@ static int move_ptes(struct pagetable_move_control *pmc,
 				else
 					pte = pte_swp_clear_uffd_wp(pte);
 			}
+#if PAGE_MMUSHIFT
+			/*
+			 * With PGCL, set_ptes(nr>1) treats nr as kernel
+			 * page count (writes nr*PAGE_MMUCOUNT PTEs).
+			 * When nr comes from pgcl_pte_batch (MMUPAGE
+			 * count), write individual PTEs instead.
+			 */
+			if (nr_ptes > 1) {
+				int j;
+
+				for (j = 0; j < nr_ptes; j++) {
+					set_pte(new_ptep + j, pte);
+					pte = __pte(pte_val(pte) +
+						    MMUPAGE_SIZE);
+				}
+			} else
+#endif
 			set_ptes(mm, new_addr, new_ptep, pte, nr_ptes);
 		}
 	}
