@@ -1989,6 +1989,9 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 	unsigned long pfn;
 	unsigned long hsz = 0;
 	int ptes = 0;
+	int pgcl_unmap_count = 0;
+	unsigned long pgcl_addrs[4] = {};
+	unsigned long pgcl_ptevals[4] = {};
 
 	/*
 	 * When racing against e.g. zap_pte_range() on another cpu,
@@ -2334,6 +2337,11 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 			add_mm_counter(mm, mm_counter_file(folio), -nr_pages);
 		}
 discard:
+		if (pgcl_unmap_count < 4) {
+			pgcl_addrs[pgcl_unmap_count] = address;
+			pgcl_ptevals[pgcl_unmap_count] = (unsigned long)pte_val(pteval);
+		}
+		pgcl_unmap_count++;
 		if (unlikely(folio_test_hugetlb(folio))) {
 			hugetlb_remove_rmap(folio);
 		} else {
@@ -2355,6 +2363,25 @@ walk_abort:
 walk_done:
 		page_vma_mapped_walk_done(&pvmw);
 		break;
+	}
+
+	if (PAGE_MMUSHIFT && pgcl_unmap_count > 1 &&
+	    !folio_test_large(folio)) {
+		static int pgcl_multi_unmap_warn;
+		if (pgcl_multi_unmap_warn < 10) {
+			pgcl_multi_unmap_warn++;
+			pr_err("PGCL try_to_unmap: folio=%px pfn=%lx anon=%d unmapped %d PTEs mc=%d rc=%d addrs=%lx/%lx/%lx/%lx ptes=%lx/%lx/%lx/%lx\n",
+			       folio, folio_pfn(folio),
+			       folio_test_anon(folio) ? 1 : 0,
+			       pgcl_unmap_count,
+			       folio_mapcount(folio), folio_ref_count(folio),
+			       pgcl_addrs[0], pgcl_addrs[1],
+			       pgcl_addrs[2], pgcl_addrs[3],
+			       pgcl_ptevals[0], pgcl_ptevals[1],
+			       pgcl_ptevals[2], pgcl_ptevals[3]);
+			if (pgcl_multi_unmap_warn <= 3)
+				dump_stack();
+		}
 	}
 
 	mmu_notifier_invalidate_range_end(&range);
