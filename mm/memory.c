@@ -99,6 +99,8 @@ static vm_fault_t do_fault(struct vm_fault *vmf);
 static vm_fault_t do_anonymous_page(struct vm_fault *vmf);
 static bool vmf_pte_changed(struct vm_fault *vmf);
 
+/* (debug tripwire removed — using persistent PTE monitor instead) */
+
 /*
  * Return true if the original pte was a uffd-wp pte marker (so the pte was
  * wr-protected).
@@ -1169,33 +1171,20 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 
 #if PAGE_MMUSHIFT
 	/*
-	 * PGCL batch: order-0 pages are not compound, so folio_pte_batch
-	 * can't help.  Batch PTE operations (wrprotect, set_ptes) for
-	 * contiguous sub-pages within the same kernel page.
+	 * PGCL batch DISABLED: pgcl_pte_batch() uses pte_pfn() which
+	 * returns PAGE-granular PFNs (shifted by PAGE_SHIFT).  Two PTEs
+	 * pointing to DIFFERENT 64KB kernel pages with consecutive PFNs
+	 * wrongly match as "contiguous", and set_ptes(nr>1) then writes
+	 * nr * PAGE_MMUCOUNT PTEs — overflowing past VMA boundaries.
 	 *
-	 * In PGCL, pte_page() returns the same struct page for all
-	 * sub-page PTEs within a kernel page, so all nr PTEs share
-	 * one refcount and one mapcount on the same folio.
+	 * Additionally, the rmap/refcount updates here assume all nr PTEs
+	 * share the same folio, which is wrong when consecutive PAGE PFNs
+	 * are different folios.
+	 *
+	 * TODO: to re-enable, pgcl_pte_batch must use MMUPAGE-granular
+	 * PFN comparison, and the copy loop must write individual PTEs
+	 * (not set_ptes nr>1 which multiplies by PAGE_MMUCOUNT).
 	 */
-	if (max_nr > 1 && !folio_test_large(folio) && folio_test_anon(folio)
-	    && !*prealloc) {
-		nr = pgcl_pte_batch(pte, src_pte, max_nr);
-		if (nr > 1) {
-			folio_ref_add(folio, nr);
-			if (unlikely(folio_try_dup_anon_rmap_pte(
-					folio, page, dst_vma, src_vma))) {
-				folio_ref_sub(folio, nr);
-				return -EAGAIN;
-			}
-			/* First dup added 1 to mapcount; add the rest */
-			if (nr > 1)
-				atomic_add(nr - 1, &folio->_mapcount);
-			rss[MM_ANONPAGES] += nr;
-			__copy_present_ptes(dst_vma, src_vma, dst_pte,
-					    src_pte, pte, addr, nr);
-			return nr;
-		}
-	}
 #endif
 
 	folio_get(folio);
@@ -1282,6 +1271,7 @@ again:
 		ret = -ENOMEM;
 		goto out;
 	}
+
 
 	/*
 	 * We already hold the exclusive mmap_lock, the copy_pte_range() and
@@ -1695,12 +1685,8 @@ static __always_inline void zap_present_folio_ptes(struct mmu_gather *tlb,
 		*any_skipped = zap_install_uffd_wp_if_needed(vma, addr, pte,
 							     nr, details, ptent);
 
-	if (!delay_rmap) {
+	if (!delay_rmap)
 		folio_remove_rmap_ptes(folio, page, nr, vma);
-
-		if (unlikely(folio_mapcount(folio) < 0))
-			print_bad_pte(vma, addr, ptent, page);
-	}
 	if (unlikely(__tlb_remove_folio_pages(tlb, page, nr, delay_rmap))) {
 		*force_flush = true;
 		*force_break = true;
@@ -1756,45 +1742,18 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 	}
 #if PAGE_MMUSHIFT
 	/*
-	 * PGCL batch: order-0 pages are not compound, so we can't use
-	 * folio_pte_batch.  Instead, batch PTE clearing and TLB flushing
-	 * for contiguous sub-pages within the same kernel page.
+	 * PGCL zap batch DISABLED: pgcl_pte_batch() uses pte_pfn() which
+	 * returns PAGE-granular PFNs (shifted by PAGE_SHIFT).  Two PTEs
+	 * pointing to DIFFERENT 64KB kernel pages with consecutive PAGE
+	 * PFNs wrongly match as "contiguous within the same kernel page".
+	 * The rmap/refcount updates then operate on only the first folio,
+	 * causing mapcount underflow (Bad page state) on the first folio
+	 * and a ref leak on the second.
 	 *
-	 * In PGCL, all nr PTEs map to the same struct page (pte_page()
-	 * drops the sub-page offset).  Decrement mapcount nr times and
-	 * release nr refs, but add the page to the TLB free batch only
-	 * once — the remaining nr-1 refs are dropped explicitly.
+	 * TODO: to re-enable, pgcl_pte_batch must compare MMUPAGE-granular
+	 * PFNs (pte_val >> MMUPAGE_SHIFT) and verify all PTEs map into
+	 * the same kernel page before batching.
 	 */
-	if (max_nr > 1 && folio_test_anon(folio)) {
-		nr = pgcl_pte_batch(ptent, pte, max_nr);
-		if (nr > 1) {
-			int i;
-
-			/* Batch clear all PTEs and flush TLB */
-			clear_full_ptes(mm, addr, pte, nr, tlb->fullmm);
-			rss[MM_ANONPAGES] -= nr;
-			arch_check_zapped_pte(vma, ptent);
-			tlb_remove_tlb_entries(tlb, pte, nr, addr);
-
-			/* Remove nr mappings from the same folio */
-			for (i = 0; i < nr; i++)
-				folio_remove_rmap_pte(folio, page, vma);
-
-			/*
-			 * Drop nr-1 refs now; the TLB batch will drop
-			 * the last ref when it frees the page.
-			 */
-			if (nr > 1)
-				folio_ref_sub(folio, nr - 1);
-			if (unlikely(__tlb_remove_page_size(tlb,
-					page, false,
-					MMUPAGE_SIZE))) {
-				*force_flush = true;
-				*force_break = true;
-			}
-			return nr;
-		}
-	}
 #endif
 	zap_present_folio_ptes(tlb, vma, folio, page, pte, ptent, 1, addr,
 			       details, rss, force_flush, force_break, any_skipped);
@@ -4106,7 +4065,7 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 			folio_remove_rmap_pte(old_folio, vmf->page, vma);
 		}
 
-#if PAGE_MMUSHIFT
+#if PAGE_MMUSHIFT && 0 /* DISABLED FOR DEBUG */
 		/*
 		 * COW clustering: remap neighbor PTEs in the same kernel
 		 * page that still point to the old page.  The new page
@@ -5710,7 +5669,7 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		return handle_userfault(vmf, VM_UFFD_MISSING);
 	}
 #if PAGE_MMUSHIFT
-	if (nr_pages == 1) {
+	if (nr_pages == 1 && 0) { /* DISABLED FOR DEBUG */
 		/*
 		 * Page clustering: map all sub-page PTEs within the
 		 * allocated kernel page that fall inside the VMA and
