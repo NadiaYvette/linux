@@ -1139,7 +1139,7 @@ static __always_inline void __copy_present_ptes(struct vm_area_struct *dst_vma,
 		int i;
 
 		for (i = 0; i < nr; i++) {
-			set_pte(dst_pte + i, pte);
+			set_ptes(dst_vma->vm_mm, addr + (unsigned long)i * MMUPAGE_SIZE, dst_pte + i, pte, 1);
 			pte = __pte(pte_val(pte) + MMUPAGE_SIZE);
 		}
 		return;
@@ -1245,7 +1245,7 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 					p = pte_mkold(p);
 					if (!userfaultfd_wp(dst_vma))
 						p = pte_clear_uffd_wp(p);
-					set_pte(dst_pte + i, p);
+					set_ptes(dst_vma->vm_mm, addr + (unsigned long)i * MMUPAGE_SIZE, dst_pte + i, p, 1);
 				}
 				rss[MM_ANONPAGES] += nr;
 				return nr;
@@ -5812,7 +5812,7 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 			if (!pte_none(ptep_get(ptep)))
 				continue;
 			sub_page = folio_page(folio, 0) + j;
-			set_pte(ptep, pte_mksub(entry, (unsigned long)j * MMUPAGE_SIZE));
+			set_ptes(vma->vm_mm, a, ptep, pte_mksub(entry, (unsigned long)j * MMUPAGE_SIZE), 1);
 			rss++;
 		}
 		/*
