@@ -49,7 +49,7 @@ struct mmap_state {
 		.addr = addr_,						\
 		.end = (addr_) + (len_),				\
 		.pgoff = pgoff_,					\
-		.pglen = PHYS_PFN(len_),				\
+		.pglen = (len_) >> MMUPAGE_SHIFT,			\
 		.vma_flags = vma_flags_,				\
 		.file = file_,						\
 		.page_prot = vma_get_page_prot(vma_flags_),		\
@@ -197,7 +197,7 @@ static void init_multi_vma_prep(struct vma_prepare *vp,
  */
 static bool can_vma_merge_before(struct vma_merge_struct *vmg)
 {
-	pgoff_t pglen = PHYS_PFN(vmg->end - vmg->start);
+	pgoff_t pglen = (vmg->end - vmg->start) >> MMUPAGE_SHIFT;
 
 	if (is_mergeable_vma(vmg, /* merge_next = */ true) &&
 	    is_mergeable_anon_vma(vmg, /* merge_next = */ true)) {
@@ -965,7 +965,7 @@ static __must_check struct vm_area_struct *vma_merge_existing_range(
 		 * shrink/delete extend
 		 */
 
-		pgoff_t pglen = PHYS_PFN(vmg->end - vmg->start);
+		pgoff_t pglen = (vmg->end - vmg->start) >> MMUPAGE_SHIFT;
 
 		VM_WARN_ON_VMG(!merge_right, vmg);
 		/* If we are offset into a VMA, then prev must be middle. */
@@ -1878,7 +1878,7 @@ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
 	 * to match new location, to increase its chance of merging.
 	 */
 	if (unlikely(vma_is_anonymous(vma) && !vma->anon_vma)) {
-		pgoff = addr >> PAGE_SHIFT;
+		pgoff = addr >> MMUPAGE_SHIFT;
 		faulted_in_anon_vma = false;
 	}
 
@@ -2892,13 +2892,13 @@ int do_brk_flags(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	vma_flags_set_mask(&vma_flags, mm->def_vma_flags);
 
 	vma_flags = ksm_vma_flags(mm, NULL, vma_flags);
-	if (!may_expand_vm(mm, &vma_flags, len >> PAGE_SHIFT))
+	if (!may_expand_vm(mm, &vma_flags, len >> MMUPAGE_SHIFT))
 		return -ENOMEM;
 
 	if (mm->map_count > get_sysctl_max_map_count())
 		return -ENOMEM;
 
-	if (security_vm_enough_memory_mm(mm, len >> PAGE_SHIFT))
+	if (security_vm_enough_memory_mm(mm, len >> MMUPAGE_SHIFT))
 		return -ENOMEM;
 
 	/*
@@ -2906,7 +2906,7 @@ int do_brk_flags(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	 * occur after forking, so the expand will only happen on new VMAs.
 	 */
 	if (vma && vma->vm_end == addr) {
-		VMG_STATE(vmg, mm, vmi, addr, addr + len, vma_flags, PHYS_PFN(addr));
+		VMG_STATE(vmg, mm, vmi, addr, addr + len, vma_flags, addr >> MMUPAGE_SHIFT);
 
 		vmg.prev = vma;
 		/* vmi is positioned at prev, which this mode expects. */
@@ -2926,7 +2926,7 @@ int do_brk_flags(struct vma_iterator *vmi, struct vm_area_struct *vma,
 		goto unacct_fail;
 
 	vma_set_anonymous(vma);
-	vma_set_range(vma, addr, addr + len, addr >> PAGE_SHIFT);
+	vma_set_range(vma, addr, addr + len, addr >> MMUPAGE_SHIFT);
 	vma->flags = vma_flags;
 	vma->vm_page_prot = vm_get_page_prot(vma_flags_to_legacy(vma_flags));
 	vma_start_write(vma);
@@ -2937,10 +2937,10 @@ int do_brk_flags(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	validate_mm(mm);
 out:
 	perf_event_mmap(vma);
-	mm->total_vm += len >> PAGE_SHIFT;
-	mm->data_vm += len >> PAGE_SHIFT;
+	mm->total_vm += len >> MMUPAGE_SHIFT;
+	mm->data_vm += len >> MMUPAGE_SHIFT;
 	if (vma_flags_test(&vma_flags, VMA_LOCKED_BIT))
-		mm->locked_vm += (len >> PAGE_SHIFT);
+		mm->locked_vm += (len >> MMUPAGE_SHIFT);
 	if (pgtable_supports_soft_dirty())
 		vma_set_flags(vma, VMA_SOFTDIRTY_BIT);
 	return 0;
@@ -2948,7 +2948,7 @@ out:
 mas_store_fail:
 	vm_area_free(vma);
 unacct_fail:
-	vm_unacct_memory(len >> PAGE_SHIFT);
+	vm_unacct_memory(len >> MMUPAGE_SHIFT);
 	return -ENOMEM;
 }
 
