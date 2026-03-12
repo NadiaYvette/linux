@@ -24,9 +24,9 @@ struct ipl_parameter_block {
 		struct ipl_pb0_ccw ccw;
 		struct ipl_pb0_eckd eckd;
 		struct ipl_pb0_nvme nvme;
-		char raw[PAGE_SIZE - sizeof(struct ipl_pl_hdr)];
+		char raw[MMUPAGE_SIZE - sizeof(struct ipl_pl_hdr)];
 	};
-} __packed __aligned(PAGE_SIZE);
+} __packed __aligned(MMUPAGE_SIZE);
 
 #define NSS_NAME_SIZE 8
 
@@ -53,7 +53,7 @@ struct ipl_parameter_block {
 #define DIAG308_VMPARM_SIZE (64)
 #define DIAG308_SCPDATA_OFFSET offsetof(struct ipl_parameter_block, \
 					fcp.scp_data)
-#define DIAG308_SCPDATA_SIZE (PAGE_SIZE - DIAG308_SCPDATA_OFFSET)
+#define DIAG308_SCPDATA_SIZE (MMUPAGE_SIZE - DIAG308_SCPDATA_OFFSET)
 
 struct save_area;
 struct save_area * __init save_area_alloc(bool is_boot_cpu);

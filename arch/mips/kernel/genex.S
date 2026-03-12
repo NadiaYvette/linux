@@ -656,8 +656,13 @@ isrdhwr:
 	.set	noreorder
 	MFC0	k0, CP0_EPC
 #if defined(CONFIG_CPU_R3000)
+#if _THREAD_MASK < 0x10000
 	ori	k1, _THREAD_MASK
 	xori	k1, _THREAD_MASK
+#else
+	PTR_LI	v1, ~_THREAD_MASK
+	and	k1, k1, v1
+#endif
 	LONG_L	v1, TI_TP_VALUE(k1)
 	LONG_ADDIU	k0, 4
 	jr	k0
@@ -672,8 +677,13 @@ isrdhwr:
 #endif
 	MTC0	k0, CP0_EPC
 	/* I hope three instructions between MTC0 and ERET are enough... */
+#if _THREAD_MASK < 0x10000
 	ori	k1, _THREAD_MASK
 	xori	k1, _THREAD_MASK
+#else
+	PTR_LI	k0, ~_THREAD_MASK
+	and	k1, k1, k0
+#endif
 	LONG_L	v1, TI_TP_VALUE(k1)
 	.set	push
 	.set	arch=r4000

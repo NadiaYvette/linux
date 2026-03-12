@@ -90,10 +90,10 @@ hypersparc_flush_cache_range:
 	ld	[%g2 + %lo(vac_cache_size)], %o3
 
 	/* Here comes the fun part... */
-	add	%o2, (PAGE_SIZE - 1), %o2
-	andn	%o1, (PAGE_SIZE - 1), %o1
+	add	%o2, (MMUPAGE_SIZE - 1), %o2
+	andn	%o1, (MMUPAGE_SIZE - 1), %o1
 	add	%o4, %o4, %o5
-	andn	%o2, (PAGE_SIZE - 1), %o2
+	andn	%o2, (MMUPAGE_SIZE - 1), %o2
 	add	%o4, %o5, %g1
 	sub	%o2, %o1, %g4
 	add	%o4, %g1, %g2
@@ -128,7 +128,7 @@ hypersparc_flush_cache_range:
 	mov	SRMMU_CTX_REG, %g7
 	lda	[%g7] ASI_M_MMUREGS, %o3
 	sta	%o0, [%g7] ASI_M_MMUREGS
-	add	%o2, -PAGE_SIZE, %o0
+	add	%o2, -MMUPAGE_SIZE, %o0
 1:
 	or	%o0, 0x400, %g7
 	lda	[%g7] ASI_M_FLUSH_PROBE, %g7
@@ -151,7 +151,7 @@ hypersparc_flush_cache_range:
 3:
 	cmp	%o2, %o1
 	bne	1b
-	 add	%o2, -PAGE_SIZE, %o0
+	 add	%o2, -MMUPAGE_SIZE, %o0
 	mov	SRMMU_FAULT_STATUS, %g5
 	lda	[%g5] ASI_M_MMUREGS, %g0
 	mov	SRMMU_CTX_REG, %g7
@@ -176,7 +176,7 @@ hypersparc_flush_cache_page:
 	sethi	%hi(vac_line_size), %g1
 	ld	[%g1 + %lo(vac_line_size)], %o4
 	mov	SRMMU_CTX_REG, %o3
-	andn	%o1, (PAGE_SIZE - 1), %o1
+	andn	%o1, (MMUPAGE_SIZE - 1), %o1
 	lda	[%o3] ASI_M_MMUREGS, %o2
 	sta	%g2, [%o3] ASI_M_MMUREGS
 	or	%o1, 0x400, %o5
@@ -184,7 +184,7 @@ hypersparc_flush_cache_page:
 	orcc	%g0, %g1, %g0
 	be	2f
 	 add	%o4, %o4, %o5
-	sub	%o1, -PAGE_SIZE, %o1
+	sub	%o1, -MMUPAGE_SIZE, %o1
 	add	%o4, %o5, %g1
 	add	%o4, %g1, %g2
 	add	%o4, %g2, %g3
@@ -223,7 +223,7 @@ hypersparc_flush_sig_insns:
 hypersparc_flush_page_to_ram:
 	sethi	%hi(vac_line_size), %g1
 	ld	[%g1 + %lo(vac_line_size)], %o4
-	andn	%o0, (PAGE_SIZE - 1), %o0
+	andn	%o0, (MMUPAGE_SIZE - 1), %o0
 	add	%o4, %o4, %o5
 	or	%o0, 0x400, %g7
 	lda	[%g7] ASI_M_FLUSH_PROBE, %g5
@@ -232,7 +232,7 @@ hypersparc_flush_page_to_ram:
 	be	2f
 	 add	%o4, %g1, %g2
 	add	%o4, %g2, %g3
-	sub	%o0, -PAGE_SIZE, %o0
+	sub	%o0, -MMUPAGE_SIZE, %o0
 	add	%o4, %g3, %g4
 	add	%o4, %g4, %g5
 	add	%o4, %g5, %g7
@@ -312,7 +312,7 @@ hypersparc_flush_tlb_page:
 	ld	[%o0 + VMA_VM_MM], %o0
 	mov	SRMMU_CTX_REG, %g1
 	ld	[%o0 + AOFF_mm_context], %o3
-	andn	%o1, (PAGE_SIZE - 1), %o1
+	andn	%o1, (MMUPAGE_SIZE - 1), %o1
 #ifndef CONFIG_SMP
 	cmp	%o3, -1
 	be	hypersparc_flush_tlb_page_out

@@ -2344,7 +2344,7 @@ static struct notifier_block on_panic_nb = {
 
 void __init setup_ipl(void)
 {
-	BUILD_BUG_ON(sizeof(struct ipl_parameter_block) != PAGE_SIZE);
+	BUILD_BUG_ON(sizeof(struct ipl_parameter_block) != MMUPAGE_SIZE);
 
 	ipl_info.type = get_ipl_type();
 	switch (ipl_info.type) {

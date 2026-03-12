@@ -278,8 +278,13 @@
 		sll	k0, 3		/* extract cu0 bit */
 		bltz	k0, 9f
 
+#if _THREAD_MASK < 0x10000
 		ori	$28, sp, _THREAD_MASK
 		xori	$28, _THREAD_MASK
+#else
+		PTR_LI	$28, ~_THREAD_MASK
+		and	$28, sp, $28
+#endif
 #ifdef CONFIG_CPU_CAVIUM_OCTEON
 		.set    mips64
 		pref    0, 0($28)       /* Prefetch the current pointer */
