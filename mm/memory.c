@@ -1220,10 +1220,9 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 				/*
 				 * folio_try_dup_anon_rmap_ptes only does
 				 * atomic_inc(&folio->_mapcount) for non-large
-				 * folios regardless of nr_pages.  With PGCL
-				 * pseudo-compound, all sub-pages resolve to
-				 * the same folio head, so we need nr mappings
-				 * tracked in the head's _mapcount.
+				 * folios regardless of nr_pages.  With PGCL,
+				 * all PTEs within a kernel page map the same
+				 * folio, so we need nr mappings tracked.
 				 */
 				atomic_add(nr - 1, &folio->_mapcount);
 
@@ -5408,6 +5407,7 @@ out:
 		put_swap_device(si);
 
 	/* Issue PGCL swap-in prefetch reads after releasing all locks */
+#ifdef CONFIG_SWAP
 	if (swap_prefetch_nr) {
 		struct swap_iocb *splug = NULL;
 		int i;
@@ -5424,6 +5424,7 @@ out:
 		if (splug)
 			swap_read_unplug(splug);
 	}
+#endif
 
 	return ret;
 out_nomap:
