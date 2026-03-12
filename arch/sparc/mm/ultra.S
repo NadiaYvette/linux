@@ -121,7 +121,7 @@ __flush_tlb_kernel_range:	/* 31 insns */
 	 sub		%o1, %o0, %o3
 	srlx		%o3, 18, %o4
 	brnz,pn		%o4, __spitfire_flush_tlb_kernel_range_slow
-	 sethi		%hi(PAGE_SIZE), %o4
+	 sethi		%hi(MMUPAGE_SIZE), %o4
 	sub		%o3, %o4, %o3
 	or		%o0, 0x20, %o0		! Nucleus
 1:	stxa		%g0, [%o0 + %o3] ASI_DMMU_DEMAP
@@ -193,7 +193,7 @@ __flush_icache_page:	/* %o0 = phys_page */
 	srlx		%o0, PAGE_SHIFT, %o0
 	sethi		%hi(PAGE_OFFSET), %g1
 	sllx		%o0, PAGE_SHIFT, %o0
-	sethi		%hi(PAGE_SIZE), %g2
+	sethi		%hi(MMUPAGE_SIZE), %g2
 	ldx		[%g1 + %lo(PAGE_OFFSET)], %g1
 	add		%o0, %g1, %o0
 1:	subcc		%g2, 32, %g2
@@ -330,7 +330,7 @@ __cheetah_flush_tlb_kernel_range:	/* 31 insns */
 	 sub		%o1, %o0, %o3
 	srlx		%o3, 18, %o4
 	brnz,pn		%o4, 3f
-	 sethi		%hi(PAGE_SIZE), %o4
+	 sethi		%hi(MMUPAGE_SIZE), %o4
 	sub		%o3, %o4, %o3
 	or		%o0, 0x20, %o0		! Nucleus
 1:	stxa		%g0, [%o0 + %o3] ASI_DMMU_DEMAP
@@ -362,7 +362,7 @@ __cheetah_flush_dcache_page: /* 11 insns */
 	sethi		%hi(PAGE_OFFSET), %g1
 	ldx		[%g1 + %lo(PAGE_OFFSET)], %g1
 	sub		%o0, %g1, %o0
-	sethi		%hi(PAGE_SIZE), %o4
+	sethi		%hi(MMUPAGE_SIZE), %o4
 1:	subcc		%o4, (1 << 5), %o4
 	stxa		%g0, [%o0 + %o4] ASI_DCACHE_INVALIDATE
 	membar		#Sync
@@ -465,7 +465,7 @@ __hypervisor_flush_tlb_kernel_range: /* 31 insns */
 	srlx		%g2, 18, %g3
 	brnz,pn		%g3, 4f
 	 mov		%o0, %g1
-	sethi		%hi(PAGE_SIZE), %g3
+	sethi		%hi(MMUPAGE_SIZE), %g3
 	sub		%g2, %g3, %g2
 1:	add		%g1, %g2, %o0	/* ARG0: virtual address */
 	mov		0, %o1		/* ARG1: mmu context */
@@ -580,14 +580,14 @@ xcall_flush_tlb_page:	/* 20 insns */
 
 	.globl		xcall_flush_tlb_kernel_range
 xcall_flush_tlb_kernel_range:	/* 44 insns */
-	sethi		%hi(PAGE_SIZE - 1), %g2
-	or		%g2, %lo(PAGE_SIZE - 1), %g2
+	sethi		%hi(MMUPAGE_SIZE - 1), %g2
+	or		%g2, %lo(MMUPAGE_SIZE - 1), %g2
 	andn		%g1, %g2, %g1
 	andn		%g7, %g2, %g7
 	sub		%g7, %g1, %g3
 	srlx		%g3, 18, %g2
 	brnz,pn		%g2, 2f
-	 sethi		%hi(PAGE_SIZE), %g2
+	 sethi		%hi(MMUPAGE_SIZE), %g2
 	sub		%g3, %g2, %g3
 	or		%g1, 0x20, %g1		! Nucleus
 1:	stxa		%g0, [%g1 + %g3] ASI_DMMU_DEMAP
@@ -744,14 +744,14 @@ xcall_fetch_glob_pmu_n4:
 	retry
 
 __cheetah_xcall_flush_tlb_kernel_range:	/* 44 insns */
-	sethi		%hi(PAGE_SIZE - 1), %g2
-	or		%g2, %lo(PAGE_SIZE - 1), %g2
+	sethi		%hi(MMUPAGE_SIZE - 1), %g2
+	or		%g2, %lo(MMUPAGE_SIZE - 1), %g2
 	andn		%g1, %g2, %g1
 	andn		%g7, %g2, %g7
 	sub		%g7, %g1, %g3
 	srlx		%g3, 18, %g2
 	brnz,pn		%g2, 2f
-	 sethi		%hi(PAGE_SIZE), %g2
+	 sethi		%hi(MMUPAGE_SIZE), %g2
 	sub		%g3, %g2, %g3
 	or		%g1, 0x20, %g1		! Nucleus
 1:	stxa		%g0, [%g1 + %g3] ASI_DMMU_DEMAP
@@ -793,7 +793,7 @@ __cheetah_xcall_flush_tlb_kernel_range:	/* 44 insns */
 	.align		32
 	.globl		xcall_flush_dcache_page_cheetah
 xcall_flush_dcache_page_cheetah: /* %g1 == physical page address */
-	sethi		%hi(PAGE_SIZE), %g3
+	sethi		%hi(MMUPAGE_SIZE), %g3
 1:	subcc		%g3, (1 << 5), %g3
 	stxa		%g0, [%g1 + %g3] ASI_DCACHE_INVALIDATE
 	membar		#Sync
@@ -827,7 +827,7 @@ xcall_flush_dcache_page_spitfire: /* %g1 == physical page address
 
 	brz,pn		%g5, 2f
 #endif /* DCACHE_ALIASING_POSSIBLE */
-	 sethi		%hi(PAGE_SIZE), %g3
+	 sethi		%hi(MMUPAGE_SIZE), %g3
 
 1:	flush		%g7
 	subcc		%g3, (1 << 5), %g3
@@ -906,8 +906,8 @@ __hypervisor_xcall_flush_tlb_page: /* 20 insns */
 	.globl		__hypervisor_xcall_flush_tlb_kernel_range
 __hypervisor_xcall_flush_tlb_kernel_range: /* 44 insns */
 	/* %g1=start, %g7=end, g2,g3,g4,g5,g6=scratch */
-	sethi		%hi(PAGE_SIZE - 1), %g2
-	or		%g2, %lo(PAGE_SIZE - 1), %g2
+	sethi		%hi(MMUPAGE_SIZE - 1), %g2
+	or		%g2, %lo(MMUPAGE_SIZE - 1), %g2
 	andn		%g1, %g2, %g1
 	andn		%g7, %g2, %g7
 	sub		%g7, %g1, %g3
@@ -925,7 +925,7 @@ __hypervisor_xcall_flush_tlb_kernel_range: /* 44 insns */
 	mov		HV_MMU_UNMAP_ADDR_TRAP, %g6
 	brnz,pn		%o0, 1f
 	 mov		%o0, %g5
-	sethi		%hi(PAGE_SIZE), %o2
+	sethi		%hi(MMUPAGE_SIZE), %o2
 	brnz,pt		%g3, 1b
 	 sub		%g3, %o2, %g3
 5:	mov		%g2, %o0

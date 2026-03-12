@@ -132,7 +132,7 @@ swift_flush_cache_page:
 	lda	[%g7] ASI_M_MMUREGS, %g5
 	sta	%g2, [%g7] ASI_M_MMUREGS
 
-	andn	%o1, (PAGE_SIZE - 1), %o1
+	andn	%o1, (MMUPAGE_SIZE - 1), %o1
 #if 1
 	sethi	%hi(0x1000), %o0
 1:	subcc	%o0, 0x10, %o0
@@ -178,7 +178,7 @@ swift_flush_cache_page_out:
 	.globl	swift_flush_page_to_ram
 swift_flush_page_for_dma:
 swift_flush_page_to_ram:
-	andn	%o0, (PAGE_SIZE - 1), %o1
+	andn	%o0, (MMUPAGE_SIZE - 1), %o1
 #if 1
 	sethi	%hi(0x1000), %o0
 1:	subcc	%o0, 0x10, %o0
@@ -237,7 +237,7 @@ swift_flush_tlb_page:
 	ld	[%o0 + VMA_VM_MM], %o0
 	mov	SRMMU_CTX_REG, %g1
 	ld	[%o0 + AOFF_mm_context], %o3
-	andn	%o1, (PAGE_SIZE - 1), %o1
+	andn	%o1, (MMUPAGE_SIZE - 1), %o1
 	cmp	%o3, -1
 	be	swift_flush_tlb_page_out
 	 nop
