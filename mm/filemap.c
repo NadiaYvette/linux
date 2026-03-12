@@ -3794,6 +3794,13 @@ static int filemap_set_ptes_cluster(struct vm_fault *vmf,
 		entry = pte_mksub(base, i * MMUPAGE_SIZE);
 		entry = pte_sw_mkyoung(entry);
 
+		if (sub_addr >= 0x4ad000 && sub_addr < 0x4b3000) {
+			pr_err("PGCL filemap_cluster HIT: sub_addr=%lx addr=%lx i=%d folio=%px pfn=%lx vm=[%lx-%lx]\n",
+			       sub_addr, addr, i, folio, folio_pfn(folio),
+			       vma->vm_start, vma->vm_end);
+			dump_stack();
+		}
+
 		set_pte(ptep + i, entry);
 		nr_set++;
 	}
