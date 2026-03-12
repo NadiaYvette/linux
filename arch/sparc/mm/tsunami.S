@@ -69,7 +69,7 @@ tsunami_flush_tlb_page:
 	ld	[%o0 + VMA_VM_MM], %o0
 	mov	SRMMU_CTX_REG, %g1
 	ld	[%o0 + AOFF_mm_context], %o3
-	andn	%o1, (PAGE_SIZE - 1), %o1
+	andn	%o1, (MMUPAGE_SIZE - 1), %o1
 	cmp	%o3, -1
 	be	tsunami_flush_tlb_page_out
 	 lda	[%g1] ASI_M_MMUREGS, %g5
@@ -96,7 +96,7 @@ tsunami_flush_tlb_page_out:
 
 tsunami_copy_1page:
 /* NOTE: This routine has to be shorter than 70insns --jj */
-	or	%g0, (PAGE_SIZE >> 8), %g1
+	or	%g0, (MMUPAGE_SIZE >> 8), %g1
 1:
 	MIRROR_BLOCK(%o0, %o1, 0x00, %o2, %o3, %o4, %o5)
 	MIRROR_BLOCK(%o0, %o1, 0x20, %o2, %o3, %o4, %o5)

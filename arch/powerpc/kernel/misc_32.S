@@ -316,7 +316,9 @@ EXPORT_SYMBOL(__bswapdi2)
 _GLOBAL(start_secondary_resume)
 	/* Reset stack */
 	rlwinm	r1, r1, 0, 0, 31 - THREAD_SHIFT
-	addi	r1,r1,THREAD_SIZE-STACK_FRAME_MIN_SIZE
+	lis	r0,(THREAD_SIZE-STACK_FRAME_MIN_SIZE)@h
+	ori	r0,r0,(THREAD_SIZE-STACK_FRAME_MIN_SIZE)@l
+	add	r1,r1,r0
 	li	r3,0
 	stw	r3,0(r1)		/* Zero the stack frame pointer	*/
 	bl	start_secondary
