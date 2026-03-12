@@ -390,7 +390,7 @@ static void __init setup_lowcore(void)
 	/*
 	 * Setup lowcore for boot cpu
 	 */
-	BUILD_BUG_ON(sizeof(struct lowcore) != LC_PAGES * PAGE_SIZE);
+	BUILD_BUG_ON(sizeof(struct lowcore) != LC_PAGES * MMUPAGE_SIZE);
 	lc = memblock_alloc_low(sizeof(*lc), sizeof(*lc));
 	if (!lc)
 		panic("%s: Failed to allocate %zu bytes align=%zx\n",

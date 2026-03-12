@@ -429,7 +429,7 @@ struct uv_secret_list {
 	u64 reserved_08;
 	struct uv_secret_list_item secrets[85];
 } __packed __aligned(8);
-static_assert(sizeof(struct uv_secret_list) == PAGE_SIZE);
+static_assert(sizeof(struct uv_secret_list) == MMUPAGE_SIZE);
 
 static inline int __uv_call(unsigned long r1, unsigned long r2)
 {

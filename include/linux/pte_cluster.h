@@ -428,7 +428,7 @@ static inline unsigned long set_pte_cluster(pte_t *cluster[], pte_t pte)
 	for (j = 0; j < PAGE_MMUCOUNT; j++, offset += MMUPAGE_SIZE) {
 		if (!cluster[j])
 			continue;
-		set_pte(cluster[j], pte_mksub(pte, offset));
+		set_ptes(NULL, 0, cluster[j], pte_mksub(pte, offset), 1);
 		rss++;
 	}
 	return rss;
