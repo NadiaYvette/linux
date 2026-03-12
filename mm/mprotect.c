@@ -132,8 +132,14 @@ static __always_inline void prot_commit_flush_ptes(struct vm_area_struct *vma,
 	 */
 	addr += idx * MMUPAGE_SIZE;
 	ptep += idx;
+#if PAGE_MMUSHIFT
+	/* pte_advance_pfn advances by PAGE_SIZE per unit; sub-pages are MMUPAGE apart */
+	oldpte = __pte(pte_val(oldpte) + (unsigned long)idx * MMUPAGE_SIZE);
+	ptent = __pte(pte_val(ptent) + (unsigned long)idx * MMUPAGE_SIZE);
+#else
 	oldpte = pte_advance_pfn(oldpte, idx);
 	ptent = pte_advance_pfn(ptent, idx);
+#endif
 
 	if (set_write)
 		ptent = pte_mkwrite(ptent, vma);
