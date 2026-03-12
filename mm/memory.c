@@ -4141,7 +4141,7 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 			folio_remove_rmap_pte(old_folio, vmf->page, vma);
 		}
 
-#if PAGE_MMUSHIFT && 0 /* DISABLED FOR DEBUG */
+#if PAGE_MMUSHIFT && 0 /* temporarily disabled */
 		/*
 		 * COW clustering: remap neighbor PTEs in the same kernel
 		 * page that still point to the old page.  The new page
@@ -4169,6 +4169,7 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 					(unsigned long)j * MMUPAGE_SIZE;
 				pte_t *ptep = base_pte + j;
 				pte_t pteval;
+				struct page *sub_page;
 
 				/* Skip the PTE we already handled */
 				if (ptep == vmf->pte)
@@ -4185,19 +4186,23 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 				    page_folio(vmf->page))
 					continue;
 
+				sub_page = folio_page(new_folio, 0) + j;
+
 				/* Clear+flush old, set new */
 				ptep_clear_flush(vma, a, ptep);
 				set_pte_at(mm, a, ptep,
 					   pte_mksub(base_entry,
 						     (unsigned long)j *
 						     MMUPAGE_SIZE));
+				folio_ref_add(new_folio, 1);
+				folio_add_anon_rmap_pte(new_folio,
+							sub_page, vma, a,
+							RMAP_NONE);
 				folio_remove_rmap_pte(old_folio,
 						      pte_page(pteval), vma);
 				extra++;
 			}
 			if (extra) {
-				folio_ref_add(new_folio, extra);
-				atomic_add(extra, &new_folio->_mapcount);
 				/*
 				 * Drop old folio refs for the remapped
 				 * neighbor PTEs.  The faulting PTE's ref
@@ -5745,7 +5750,7 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		return handle_userfault(vmf, VM_UFFD_MISSING);
 	}
 #if PAGE_MMUSHIFT
-	if (nr_pages == 1 && 0) { /* DISABLED FOR DEBUG */
+	if (nr_pages == 1) {
 		/*
 		 * Page clustering: map all sub-page PTEs within the
 		 * allocated kernel page that fall inside the VMA and
@@ -5781,6 +5786,7 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		for (j = 0; j < PAGE_MMUCOUNT; j++) {
 			unsigned long a = base_addr + (unsigned long)j * MMUPAGE_SIZE;
 			pte_t *ptep = base_pte + j;
+			struct page *sub_page;
 
 			/* Skip if outside VMA bounds */
 			if (a < vma->vm_start || a >= vma->vm_end)
@@ -5788,16 +5794,23 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 			/* Skip if PTE already occupied */
 			if (!pte_none(ptep_get(ptep)))
 				continue;
+			sub_page = folio_page(folio, 0) + j;
 			set_pte(ptep, pte_mksub(entry, (unsigned long)j * MMUPAGE_SIZE));
 			rss++;
 		}
 		/*
-		 * Adjust refcount and mapcount for the extra PTEs.
+		 * Adjust refcount and rmap for the extra PTEs.
 		 * folio_add_new_anon_rmap set mapcount to 0 (= 1 mapping)
-		 * and PageAnonExclusive.  We need mapcount = rss.
+		 * and PageAnonExclusive.  Add rmap for the extras.
 		 */
 		if (rss > 1) {
 			folio_ref_add(folio, rss - 1);
+			/*
+			 * For a newly allocated exclusive folio, all sub-page
+			 * PTEs map the same folio.  Use atomic_add on _mapcount
+			 * directly since folio_add_new_anon_rmap already set
+			 * up the anon_vma and the folio is exclusively owned.
+			 */
 			atomic_add(rss - 1, &folio->_mapcount);
 		}
 		/* Fix RSS: we added 1 above (nr_pages), need rss total */

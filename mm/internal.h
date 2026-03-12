@@ -395,6 +395,34 @@ unsigned int folio_pte_batch(struct folio *folio, pte_t *ptep, pte_t pte,
 
 #if PAGE_MMUSHIFT
 /**
+ * pgcl_page_folio - get the PGCL kernel page's head folio from any sub-page
+ * @page: any struct page pointer (may be a sub-page within a PGCL kernel page)
+ *
+ * For PGCL, order-0 allocations span PAGE_MMUCOUNT hardware pages but are
+ * NOT compound, so page_folio() returns the sub-page itself instead of the
+ * kernel page's head.  This helper returns the correct head by rounding
+ * down to the nearest PAGE_MMUCOUNT-aligned pfn.
+ *
+ * For compound pages (large folios), compound_head() already returns the
+ * correct head, so we defer to page_folio().
+ */
+static inline struct folio *pgcl_page_folio(struct page *page)
+{
+	unsigned long head = READ_ONCE(page->compound_head);
+
+	if (unlikely(head & 1))
+		return (struct folio *)(head - 1);
+	return (struct folio *)(page - (page_to_pfn(page) & (PAGE_MMUCOUNT - 1)));
+}
+#else
+static inline struct folio *pgcl_page_folio(struct page *page)
+{
+	return page_folio(page);
+}
+#endif
+
+#if PAGE_MMUSHIFT
+/**
  * pgcl_pte_batch - count contiguous PTEs mapping the same kernel page
  * @pte: first PTE value (must be present)
  * @ptep: pointer to first PTE in the page table
