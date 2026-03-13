@@ -233,18 +233,18 @@ SECTIONS
 	}
 
 	idmap_pg_dir = .;
-	. += PAGE_SIZE;
+	. += MMUPAGE_SIZE;
 
 #ifdef CONFIG_UNMAP_KERNEL_AT_EL0
 	tramp_pg_dir = .;
-	. += PAGE_SIZE;
+	. += MMUPAGE_SIZE;
 #endif
 
 	reserved_pg_dir = .;
-	. += PAGE_SIZE;
+	. += MMUPAGE_SIZE;
 
 	swapper_pg_dir = .;
-	. += PAGE_SIZE;
+	. += MMUPAGE_SIZE;
 
 	. = ALIGN(SEGMENT_ALIGN);
 	__init_begin = .;
