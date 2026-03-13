@@ -120,8 +120,12 @@ static int __split_linear_mapping_pmd(pud_t *pudp,
 				return -ENOMEM;
 
 			ptep_new = (pte_t *)page_address(pte_page);
-			for (i = 0; i < PTRS_PER_PTE; ++i, ++ptep_new)
-				set_pte(ptep_new, pfn_pte(pfn + i, prot));
+			{
+				phys_addr_t base = (phys_addr_t)pfn << PAGE_SHIFT;
+				for (i = 0; i < PTRS_PER_PTE; ++i, ++ptep_new)
+					set_pte(ptep_new,
+						__pte(__phys_to_pte_val(base + (unsigned long)i * MMUPAGE_SIZE) | pgprot_val(prot)));
+			}
 
 			smp_wmb();
 
