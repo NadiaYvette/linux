@@ -18,65 +18,47 @@
 static inline void pmd_populate_kernel(struct mm_struct *mm,
 	pmd_t *pmd, pte_t *pte)
 {
-	unsigned long pfn = virt_to_pfn(pte);
-
-	set_pmd(pmd, __pmd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
+	set_pmd(pmd, __pmd(__phys_to_pte_val(__pa(pte)) | _PAGE_TABLE));
 }
 
 static inline void pmd_populate(struct mm_struct *mm,
 	pmd_t *pmd, pgtable_t pte)
 {
-	unsigned long pfn = virt_to_pfn(page_address(pte));
-
-	set_pmd(pmd, __pmd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
+	set_pmd(pmd, __pmd(__phys_to_pte_val(__pa(page_address(pte))) | _PAGE_TABLE));
 }
 
 #ifndef __PAGETABLE_PMD_FOLDED
 static inline void pud_populate(struct mm_struct *mm, pud_t *pud, pmd_t *pmd)
 {
-	unsigned long pfn = virt_to_pfn(pmd);
-
-	set_pud(pud, __pud((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
+	set_pud(pud, __pud(__phys_to_pte_val(__pa(pmd)) | _PAGE_TABLE));
 }
 
 static inline void p4d_populate(struct mm_struct *mm, p4d_t *p4d, pud_t *pud)
 {
-	if (pgtable_l4_enabled) {
-		unsigned long pfn = virt_to_pfn(pud);
-
-		set_p4d(p4d, __p4d((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
-	}
+	if (pgtable_l4_enabled)
+		set_p4d(p4d, __p4d(__phys_to_pte_val(__pa(pud)) | _PAGE_TABLE));
 }
 
 static inline void p4d_populate_safe(struct mm_struct *mm, p4d_t *p4d,
 				     pud_t *pud)
 {
-	if (pgtable_l4_enabled) {
-		unsigned long pfn = virt_to_pfn(pud);
-
+	if (pgtable_l4_enabled)
 		set_p4d_safe(p4d,
-			     __p4d((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
-	}
+			     __p4d(__phys_to_pte_val(__pa(pud)) | _PAGE_TABLE));
 }
 
 static inline void pgd_populate(struct mm_struct *mm, pgd_t *pgd, p4d_t *p4d)
 {
-	if (pgtable_l5_enabled) {
-		unsigned long pfn = virt_to_pfn(p4d);
-
-		set_pgd(pgd, __pgd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
-	}
+	if (pgtable_l5_enabled)
+		set_pgd(pgd, __pgd(__phys_to_pte_val(__pa(p4d)) | _PAGE_TABLE));
 }
 
 static inline void pgd_populate_safe(struct mm_struct *mm, pgd_t *pgd,
 				     p4d_t *p4d)
 {
-	if (pgtable_l5_enabled) {
-		unsigned long pfn = virt_to_pfn(p4d);
-
+	if (pgtable_l5_enabled)
 		set_pgd_safe(pgd,
-			     __pgd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
-	}
+			     __pgd(__phys_to_pte_val(__pa(p4d)) | _PAGE_TABLE));
 }
 
 #define pud_free pud_free

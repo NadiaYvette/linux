@@ -23,7 +23,7 @@ static inline bool kfence_protect_page(unsigned long addr, bool protect)
 		set_pte(pte, __pte(pte_val(ptep_get(pte)) | _PAGE_PRESENT));
 
 	preempt_disable();
-	local_flush_tlb_kernel_range(addr, addr + PAGE_SIZE);
+	local_flush_tlb_kernel_range(addr, addr + MMUPAGE_SIZE);
 	preempt_enable();
 
 	return true;

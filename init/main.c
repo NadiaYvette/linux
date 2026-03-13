@@ -13,6 +13,7 @@
 #define DEBUG		/* Enable initcall_debug */
 
 #include <linux/types.h>
+#include <linux/namei.h>
 #include <linux/export.h>
 #include <linux/extable.h>
 #include <linux/module.h>

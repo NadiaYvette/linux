@@ -486,7 +486,7 @@ void __init kasan_init(void)
 	u64 i;
 
 	create_tmp_mapping();
-	csr_write(CSR_SATP, PFN_DOWN(__pa(tmp_pg_dir)) | satp_mode);
+	csr_write(CSR_SATP, (__pa(tmp_pg_dir) >> MMUPAGE_SHIFT) | satp_mode);
 
 	kasan_early_clear_pgd(pgd_offset_k(KASAN_SHADOW_START),
 			      KASAN_SHADOW_START, KASAN_SHADOW_END);
@@ -531,7 +531,7 @@ void __init kasan_init(void)
 	memset(kasan_early_shadow_page, KASAN_SHADOW_INIT, PAGE_SIZE);
 	init_task.kasan_depth = 0;
 
-	csr_write(CSR_SATP, PFN_DOWN(__pa(swapper_pg_dir)) | satp_mode);
+	csr_write(CSR_SATP, (__pa(swapper_pg_dir) >> MMUPAGE_SHIFT) | satp_mode);
 	local_flush_tlb_all();
 	kasan_init_generic();
 }

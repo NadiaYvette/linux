@@ -27,7 +27,7 @@ enum fixed_addresses {
 	 * using PMD entries in fixmap_pmd in 64-bit and a PGD entry in 32-bit.
 	 */
 	FIX_FDT_END,
-	FIX_FDT = FIX_FDT_END + FIX_FDT_SIZE / PAGE_SIZE - 1,
+	FIX_FDT = FIX_FDT_END + FIX_FDT_SIZE / MMUPAGE_SIZE - 1,
 
 	/* Below fixmaps will be mapped using fixmap_pte */
 	FIX_PTE,
@@ -43,7 +43,7 @@ enum fixed_addresses {
 	 * Temporary boot-time mappings, used by early_ioremap(),
 	 * before ioremap() is functional.
 	 */
-#define NR_FIX_BTMAPS		(SZ_256K / PAGE_SIZE)
+#define NR_FIX_BTMAPS		(SZ_256K / MMUPAGE_SIZE)
 #define FIX_BTMAPS_SLOTS	7
 #define TOTAL_FIX_BTMAPS	(NR_FIX_BTMAPS * FIX_BTMAPS_SLOTS)
 

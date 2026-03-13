@@ -48,7 +48,7 @@ typedef struct {
 
 #define p4d_val(x)	((x).p4d)
 #define __p4d(x)	((p4d_t) { (x) })
-#define PTRS_PER_P4D	(PAGE_SIZE / sizeof(p4d_t))
+#define PTRS_PER_P4D	(MMUPAGE_SIZE / sizeof(p4d_t))
 
 /* Page Upper Directory entry */
 typedef struct {
@@ -57,7 +57,7 @@ typedef struct {
 
 #define pud_val(x)      ((x).pud)
 #define __pud(x)        ((pud_t) { (x) })
-#define PTRS_PER_PUD    (PAGE_SIZE / sizeof(pud_t))
+#define PTRS_PER_PUD    (MMUPAGE_SIZE / sizeof(pud_t))
 
 /* Page Middle Directory entry */
 typedef struct {
@@ -67,7 +67,7 @@ typedef struct {
 #define pmd_val(x)      ((x).pmd)
 #define __pmd(x)        ((pmd_t) { (x) })
 
-#define PTRS_PER_PMD    (PAGE_SIZE / sizeof(pmd_t))
+#define PTRS_PER_PMD    (MMUPAGE_SIZE / sizeof(pmd_t))
 
 #define MAX_POSSIBLE_PHYSMEM_BITS 56
 
@@ -101,7 +101,7 @@ enum napot_cont_order {
 	     order >= NAPOT_CONT_ORDER_BASE; order--)
 #define napot_cont_order(val)	(__builtin_ctzl((val.pte >> _PAGE_PFN_SHIFT) << 1))
 
-#define napot_cont_shift(order)	((order) + PAGE_SHIFT)
+#define napot_cont_shift(order)	((order) + MMUPAGE_SHIFT)
 #define napot_cont_size(order)	BIT(napot_cont_shift(order))
 #define napot_cont_mask(order)	(~(napot_cont_size(order) - 1UL))
 #define napot_pte_num(order)	BIT(order)
@@ -212,7 +212,7 @@ static inline void pud_clear(pud_t *pudp)
 
 static inline pud_t pfn_pud(unsigned long pfn, pgprot_t prot)
 {
-	return __pud((pfn << _PAGE_PFN_SHIFT) | pgprot_val(prot));
+	return __pud(__phys_to_pte_val((phys_addr_t)pfn << PAGE_SHIFT) | pgprot_val(prot));
 }
 
 static inline unsigned long _pud_pfn(pud_t pud)
@@ -222,7 +222,7 @@ static inline unsigned long _pud_pfn(pud_t pud)
 
 static inline pmd_t *pud_pgtable(pud_t pud)
 {
-	return (pmd_t *)pfn_to_virt(__page_val_to_pfn(pud_val(pud)));
+	return (pmd_t *)__va(__pte_val_to_phys(pud_val(pud)));
 }
 
 static inline struct page *pud_page(pud_t pud)
@@ -256,7 +256,7 @@ static inline pmd_t pfn_pmd(unsigned long pfn, pgprot_t prot)
 
 	ALT_THEAD_PMA(prot_val);
 
-	return __pmd((pfn << _PAGE_PFN_SHIFT) | prot_val);
+	return __pmd(__phys_to_pte_val((phys_addr_t)pfn << PAGE_SHIFT) | prot_val);
 }
 
 static inline unsigned long _pmd_pfn(pmd_t pmd)
@@ -313,7 +313,7 @@ static inline void p4d_clear(p4d_t *p4d)
 
 static inline p4d_t pfn_p4d(unsigned long pfn, pgprot_t prot)
 {
-	return __p4d((pfn << _PAGE_PFN_SHIFT) | pgprot_val(prot));
+	return __p4d(__phys_to_pte_val((phys_addr_t)pfn << PAGE_SHIFT) | pgprot_val(prot));
 }
 
 static inline unsigned long _p4d_pfn(p4d_t p4d)
@@ -324,7 +324,7 @@ static inline unsigned long _p4d_pfn(p4d_t p4d)
 static inline pud_t *p4d_pgtable(p4d_t p4d)
 {
 	if (pgtable_l4_enabled)
-		return (pud_t *)pfn_to_virt(__page_val_to_pfn(p4d_val(p4d)));
+		return (pud_t *)__va(__pte_val_to_phys(p4d_val(p4d)));
 
 	return (pud_t *)pud_pgtable((pud_t) { p4d_val(p4d) });
 }
@@ -381,7 +381,7 @@ static inline void pgd_clear(pgd_t *pgd)
 static inline p4d_t *pgd_pgtable(pgd_t pgd)
 {
 	if (pgtable_l5_enabled)
-		return (p4d_t *)pfn_to_virt(__page_val_to_pfn(pgd_val(pgd)));
+		return (p4d_t *)__va(__pte_val_to_phys(pgd_val(pgd)));
 
 	return (p4d_t *)p4d_pgtable((p4d_t) { pgd_val(pgd) });
 }

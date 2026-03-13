@@ -189,7 +189,7 @@ static void set_mm_asid(struct mm_struct *mm, unsigned int cpu)
 	raw_spin_unlock_irqrestore(&context_lock, flags);
 
 switch_mm_fast:
-	csr_write(CSR_SATP, virt_to_pfn(mm->pgd) |
+	csr_write(CSR_SATP, (__pa(mm->pgd) >> MMUPAGE_SHIFT) |
 		  (cntx2asid(cntx) << SATP_ASID_SHIFT) |
 		  satp_mode);
 
@@ -200,7 +200,7 @@ switch_mm_fast:
 static void set_mm_noasid(struct mm_struct *mm)
 {
 	/* Switch the page table and blindly nuke entire local TLB */
-	csr_write(CSR_SATP, virt_to_pfn(mm->pgd) | satp_mode);
+	csr_write(CSR_SATP, (__pa(mm->pgd) >> MMUPAGE_SHIFT) | satp_mode);
 	local_flush_tlb_all_asid(0);
 }
 
