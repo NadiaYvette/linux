@@ -43,7 +43,7 @@ enum fixed_addresses {
 	 * whether it crosses any page boundary.
 	 */
 	FIX_FDT_END,
-	FIX_FDT = FIX_FDT_END + DIV_ROUND_UP(MAX_FDT_SIZE, PAGE_SIZE) + 1,
+	FIX_FDT = FIX_FDT_END + DIV_ROUND_UP(MAX_FDT_SIZE, MMUPAGE_SIZE) + 1,
 
 	FIX_EARLYCON_MEM_BASE,
 	FIX_TEXT_POKE0,
@@ -79,7 +79,7 @@ enum fixed_addresses {
 	 * Temporary boot-time mappings, used by early_ioremap(),
 	 * before ioremap() is functional.
 	 */
-#define NR_FIX_BTMAPS		(SZ_256K / PAGE_SIZE)
+#define NR_FIX_BTMAPS		(SZ_256K / MMUPAGE_SIZE)
 #define FIX_BTMAPS_SLOTS	7
 #define TOTAL_FIX_BTMAPS	(NR_FIX_BTMAPS * FIX_BTMAPS_SLOTS)
 
@@ -99,9 +99,9 @@ enum fixed_addresses {
 	__end_of_fixed_addresses
 };
 
-#define FIXADDR_SIZE		(__end_of_permanent_fixed_addresses << PAGE_SHIFT)
+#define FIXADDR_SIZE		(__end_of_permanent_fixed_addresses << MMUPAGE_SHIFT)
 #define FIXADDR_START		(FIXADDR_TOP - FIXADDR_SIZE)
-#define FIXADDR_TOT_SIZE	(__end_of_fixed_addresses << PAGE_SHIFT)
+#define FIXADDR_TOT_SIZE	(__end_of_fixed_addresses << MMUPAGE_SHIFT)
 #define FIXADDR_TOT_START	(FIXADDR_TOP - FIXADDR_TOT_SIZE)
 
 #define FIXMAP_PAGE_IO     __pgprot(PROT_DEVICE_nGnRE)
