@@ -116,7 +116,7 @@ static phys_addr_t __init early_pgtable_alloc(enum pgtable_type pgtable_type)
 {
 	phys_addr_t phys;
 
-	phys = memblock_phys_alloc_range(PAGE_SIZE, PAGE_SIZE, 0,
+	phys = memblock_phys_alloc_range(MMUPAGE_SIZE, MMUPAGE_SIZE, 0,
 					 MEMBLOCK_ALLOC_NOLEAKTRACE);
 	if (!phys)
 		panic("Failed to allocate page table page\n");
@@ -165,7 +165,7 @@ bool pgattr_change_is_safe(pteval_t old, pteval_t new)
 
 static void init_clear_pgtable(void *table)
 {
-	clear_page(table);
+	memset(table, 0, MMUPAGE_SIZE);
 
 	/* Ensure the zeroing is observed by page table walks. */
 	dsb(ishst);
@@ -181,7 +181,7 @@ static void init_pte(pte_t *ptep, unsigned long addr, unsigned long end,
 		 * Required barriers to make this visible to the table walker
 		 * are deferred to the end of alloc_init_cont_pte().
 		 */
-		__set_pte_nosync(ptep, pfn_pte(__phys_to_pfn(phys), prot));
+		__set_pte_nosync(ptep, __pte(__phys_to_pte_val(phys) | pgprot_val(prot)));
 
 		/*
 		 * After the PTE entry has been populated once, we
@@ -190,8 +190,8 @@ static void init_pte(pte_t *ptep, unsigned long addr, unsigned long end,
 		BUG_ON(!pgattr_change_is_safe(pte_val(old_pte),
 					      pte_val(__ptep_get(ptep))));
 
-		phys += PAGE_SIZE;
-	} while (ptep++, addr += PAGE_SIZE, addr != end);
+		phys += MMUPAGE_SIZE;
+	} while (ptep++, addr += MMUPAGE_SIZE, addr != end);
 }
 
 static int alloc_init_cont_pte(pmd_t *pmdp, unsigned long addr,
@@ -478,12 +478,12 @@ static int __create_pgd_mapping_locked(pgd_t *pgdir, phys_addr_t phys,
 	 * If the virtual and physical address don't have the same offset
 	 * within a page, we cannot map the region as the caller expects.
 	 */
-	if (WARN_ON((phys ^ virt) & ~PAGE_MASK))
+	if (WARN_ON((phys ^ virt) & ~MMUPAGE_MASK))
 		return -EINVAL;
 
-	phys &= PAGE_MASK;
-	addr = virt & PAGE_MASK;
-	end = PAGE_ALIGN(virt + size);
+	phys &= MMUPAGE_MASK;
+	addr = virt & MMUPAGE_MASK;
+	end = ALIGN(virt + size, MMUPAGE_SIZE);
 
 	do {
 		next = pgd_addr_end(addr, end);
@@ -631,7 +631,7 @@ static void split_contpmd(pmd_t *pmdp)
 static int split_pud(pud_t *pudp, pud_t pud, gfp_t gfp, bool to_cont)
 {
 	pudval_t tableprot = PUD_TYPE_TABLE | PUD_TABLE_UXN | PUD_TABLE_AF;
-	unsigned int step = PMD_SIZE >> PAGE_SHIFT;
+	unsigned int step = PMD_SIZE >> MMUPAGE_SHIFT;
 	unsigned long pfn = pud_pfn(pud);
 	pgprot_t prot = pud_pgprot(pud);
 	phys_addr_t pmd_phys;
@@ -796,7 +796,7 @@ int split_kernel_leaf_mapping(unsigned long start, unsigned long end)
 	 * Ensure start and end are at least page-aligned since this is the
 	 * finest granularity we can split to.
 	 */
-	if (start != PAGE_ALIGN(start) || end != PAGE_ALIGN(end))
+	if (!IS_ALIGNED(start, MMUPAGE_SIZE) || !IS_ALIGNED(end, MMUPAGE_SIZE))
 		return -EINVAL;
 
 	mutex_lock(&pgtable_split_lock);
@@ -813,7 +813,7 @@ int split_kernel_leaf_mapping(unsigned long start, unsigned long end)
 	 * on the more aligned address since the both addresses must be in the
 	 * same contpte block and it must have been split to ptes.
 	 */
-	if (end - start == PAGE_SIZE) {
+	if (end - start == MMUPAGE_SIZE) {
 		start = __ffs(start) < __ffs(end) ? start : end;
 		ret = split_kernel_leaf_mapping_locked(start);
 	} else {
@@ -1228,7 +1228,7 @@ static phys_addr_t kpti_ng_temp_alloc __initdata;
 
 static phys_addr_t __init kpti_ng_pgd_alloc(enum pgtable_type type)
 {
-	kpti_ng_temp_alloc -= PAGE_SIZE;
+	kpti_ng_temp_alloc -= MMUPAGE_SIZE;
 	return kpti_ng_temp_alloc;
 }
 
@@ -1256,7 +1256,7 @@ static int __init __kpti_install_ng_mappings(void *__unused)
 		int ret;
 
 		alloc = __get_free_pages(GFP_ATOMIC | __GFP_ZERO, order);
-		kpti_ng_temp_pgd = (pgd_t *)(alloc + (levels - 1) * PAGE_SIZE);
+		kpti_ng_temp_pgd = (pgd_t *)(alloc + (levels - 1) * MMUPAGE_SIZE);
 		kpti_ng_temp_alloc = kpti_ng_temp_pgd_pa = __pa(kpti_ng_temp_pgd);
 
 		//
@@ -1276,7 +1276,7 @@ static int __init __kpti_install_ng_mappings(void *__unused)
 		// to be used as a ad-hoc fixmap.
 		//
 		ret = __create_pgd_mapping_locked(kpti_ng_temp_pgd, __pa(alloc),
-						  KPTI_NG_TEMP_VA, PAGE_SIZE, PAGE_KERNEL,
+						  KPTI_NG_TEMP_VA, MMUPAGE_SIZE, PAGE_KERNEL,
 						  kpti_ng_pgd_alloc, 0);
 		if (ret)
 			panic("Failed to create page tables\n");
@@ -1337,13 +1337,13 @@ static int __init map_entry_trampoline(void)
 				 pgd_pgtable_alloc_init_mm, NO_BLOCK_MAPPINGS);
 
 	/* Map both the text and data into the kernel page table */
-	for (i = 0; i < DIV_ROUND_UP(entry_tramp_text_size(), PAGE_SIZE); i++)
+	for (i = 0; i < DIV_ROUND_UP(entry_tramp_text_size(), MMUPAGE_SIZE); i++)
 		__set_fixmap(FIX_ENTRY_TRAMP_TEXT1 - i,
-			     pa_start + i * PAGE_SIZE, prot);
+			     pa_start + i * MMUPAGE_SIZE, prot);
 
 	if (IS_ENABLED(CONFIG_RELOCATABLE))
 		__set_fixmap(FIX_ENTRY_TRAMP_TEXT1 - i,
-			     pa_start + i * PAGE_SIZE, PAGE_KERNEL_RO);
+			     pa_start + i * MMUPAGE_SIZE, PAGE_KERNEL_RO);
 
 	return 0;
 }
@@ -1368,8 +1368,8 @@ void __pi_map_range(phys_addr_t *pte, u64 start, u64 end, phys_addr_t pa,
 		    pgprot_t prot, int level, pte_t *tbl, bool may_use_cont,
 		    u64 va_offset);
 
-static u8 idmap_ptes[IDMAP_LEVELS - 1][PAGE_SIZE] __aligned(PAGE_SIZE) __ro_after_init,
-	  kpti_bbml2_ptes[IDMAP_LEVELS - 1][PAGE_SIZE] __aligned(PAGE_SIZE) __ro_after_init;
+static u8 idmap_ptes[IDMAP_LEVELS - 1][MMUPAGE_SIZE] __aligned(MMUPAGE_SIZE) __ro_after_init,
+	  kpti_bbml2_ptes[IDMAP_LEVELS - 1][MMUPAGE_SIZE] __aligned(MMUPAGE_SIZE) __ro_after_init;
 
 static void __init create_idmap(void)
 {
@@ -1422,7 +1422,7 @@ static void free_hotplug_page_range(struct page *page, size_t size,
 
 static void free_hotplug_pgtable_page(struct page *page)
 {
-	free_hotplug_page_range(page, PAGE_SIZE, NULL);
+	free_hotplug_page_range(page, MMUPAGE_SIZE, NULL);
 }
 
 static bool pgtable_range_aligned(unsigned long start, unsigned long end,
@@ -1458,11 +1458,11 @@ static void unmap_hotplug_pte_range(pmd_t *pmdp, unsigned long addr,
 
 		WARN_ON(!pte_present(pte));
 		__pte_clear(&init_mm, addr, ptep);
-		flush_tlb_kernel_range(addr, addr + PAGE_SIZE);
+		flush_tlb_kernel_range(addr, addr + MMUPAGE_SIZE);
 		if (free_mapped)
 			free_hotplug_page_range(pte_page(pte),
-						PAGE_SIZE, altmap);
-	} while (addr += PAGE_SIZE, addr < end);
+						MMUPAGE_SIZE, altmap);
+	} while (addr += MMUPAGE_SIZE, addr < end);
 }
 
 static void unmap_hotplug_pmd_range(pud_t *pudp, unsigned long addr,
@@ -1487,7 +1487,7 @@ static void unmap_hotplug_pmd_range(pud_t *pudp, unsigned long addr,
 			 * One TLBI should be sufficient here as the PMD_SIZE
 			 * range is mapped with a single block entry.
 			 */
-			flush_tlb_kernel_range(addr, addr + PAGE_SIZE);
+			flush_tlb_kernel_range(addr, addr + MMUPAGE_SIZE);
 			if (free_mapped)
 				free_hotplug_page_range(pmd_page(pmd),
 							PMD_SIZE, altmap);
@@ -1520,7 +1520,7 @@ static void unmap_hotplug_pud_range(p4d_t *p4dp, unsigned long addr,
 			 * One TLBI should be sufficient here as the PUD_SIZE
 			 * range is mapped with a single block entry.
 			 */
-			flush_tlb_kernel_range(addr, addr + PAGE_SIZE);
+			flush_tlb_kernel_range(addr, addr + MMUPAGE_SIZE);
 			if (free_mapped)
 				free_hotplug_page_range(pud_page(pud),
 							PUD_SIZE, altmap);
@@ -1592,7 +1592,7 @@ static void free_empty_pte_table(pmd_t *pmdp, unsigned long addr,
 		 * pte clearing has been done by earlier unmap loops.
 		 */
 		WARN_ON(!pte_none(pte));
-	} while (addr += PAGE_SIZE, addr < end);
+	} while (addr += MMUPAGE_SIZE, addr < end);
 
 	if (!pgtable_range_aligned(start, end, floor, ceiling, PMD_MASK))
 		return;
@@ -2148,8 +2148,8 @@ pte_t modify_prot_start_ptes(struct vm_area_struct *vma, unsigned long addr,
 		 * in cases where cpu is affected with errata #2645198.
 		 */
 		if (pte_accessible(vma->vm_mm, pte) && pte_user_exec(pte))
-			__flush_tlb_range(vma, addr, nr * PAGE_SIZE,
-					  PAGE_SIZE, true, 3);
+			__flush_tlb_range(vma, addr, nr * MMUPAGE_SIZE,
+					  MMUPAGE_SIZE, true, 3);
 	}
 
 	return pte;

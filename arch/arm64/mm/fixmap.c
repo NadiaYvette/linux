@@ -127,10 +127,10 @@ void __set_fixmap(enum fixed_addresses idx,
 	ptep = fixmap_pte(addr);
 
 	if (pgprot_val(flags)) {
-		__set_pte(ptep, pfn_pte(phys >> PAGE_SHIFT, flags));
+		__set_pte(ptep, __pte(__phys_to_pte_val(phys) | pgprot_val(flags)));
 	} else {
 		__pte_clear(&init_mm, addr, ptep);
-		flush_tlb_kernel_range(addr, addr+PAGE_SIZE);
+		flush_tlb_kernel_range(addr, addr+MMUPAGE_SIZE);
 	}
 }
 
@@ -152,12 +152,12 @@ void *__init fixmap_remap_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot)
 	if (!dt_phys || dt_phys % MIN_FDT_ALIGN)
 		return NULL;
 
-	dt_phys_base = round_down(dt_phys, PAGE_SIZE);
-	offset = dt_phys % PAGE_SIZE;
+	dt_phys_base = round_down(dt_phys, MMUPAGE_SIZE);
+	offset = dt_phys % MMUPAGE_SIZE;
 	dt_virt = (void *)dt_virt_base + offset;
 
 	/* map the first chunk so we can read the size from the header */
-	create_mapping_noalloc(dt_phys_base, dt_virt_base, PAGE_SIZE, prot);
+	create_mapping_noalloc(dt_phys_base, dt_virt_base, MMUPAGE_SIZE, prot);
 
 	if (fdt_magic(dt_virt) != FDT_MAGIC)
 		return NULL;
@@ -166,7 +166,7 @@ void *__init fixmap_remap_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot)
 	if (*size > MAX_FDT_SIZE)
 		return NULL;
 
-	if (offset + *size > PAGE_SIZE) {
+	if (offset + *size > MMUPAGE_SIZE) {
 		create_mapping_noalloc(dt_phys_base, dt_virt_base,
 				       offset + *size, prot);
 	}

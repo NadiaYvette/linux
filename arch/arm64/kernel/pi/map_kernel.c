@@ -40,7 +40,7 @@ static void __init map_kernel(u64 kaslr_offset, u64 va_offset, int root_level)
 {
 	bool enable_scs = IS_ENABLED(CONFIG_UNWIND_PATCH_PAC_INTO_SCS);
 	bool twopass = IS_ENABLED(CONFIG_RELOCATABLE);
-	phys_addr_t pgdp = (phys_addr_t)init_pg_dir + PAGE_SIZE;
+	phys_addr_t pgdp = (phys_addr_t)init_pg_dir + MMUPAGE_SIZE;
 	pgprot_t text_prot = PAGE_KERNEL_ROX;
 	pgprot_t data_prot = PAGE_KERNEL;
 	pgprot_t prot;
@@ -133,7 +133,7 @@ static void __init map_kernel(u64 kaslr_offset, u64 va_offset, int root_level)
 	}
 
 	/* Copy the root page table to its final location */
-	memcpy((void *)swapper_pg_dir + va_offset, init_pg_dir, PAGE_SIZE);
+	memcpy((void *)swapper_pg_dir + va_offset, init_pg_dir, MMUPAGE_SIZE);
 	dsb(ishst);
 	idmap_cpu_replace_ttbr1((phys_addr_t)swapper_pg_dir);
 }
@@ -199,7 +199,7 @@ static void __init remap_idmap_for_lpa2(void)
 
 static void *__init map_fdt(phys_addr_t fdt)
 {
-	static u8 ptes[INIT_IDMAP_FDT_SIZE] __initdata __aligned(PAGE_SIZE);
+	static u8 ptes[INIT_IDMAP_FDT_SIZE] __initdata __aligned(MMUPAGE_SIZE);
 	phys_addr_t efdt = fdt + MAX_FDT_SIZE;
 	phys_addr_t ptep = (phys_addr_t)ptes; /* We're idmapped when called */
 
