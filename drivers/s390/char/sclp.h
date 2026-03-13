@@ -144,11 +144,11 @@ struct read_cpu_info_sccb {
 	u16	nr_standby;
 	u16	offset_standby;
 	/*
-	 * Without ext sccb, struct size is PAGE_SIZE.
+	 * Without ext sccb, struct size is MMUPAGE_SIZE.
 	 * With ext sccb, struct size is EXT_SCCB_READ_CPU.
 	 */
 	u8	reserved[];
-} __attribute__((packed, aligned(PAGE_SIZE)));
+} __attribute__((packed, aligned(MMUPAGE_SIZE)));
 
 struct read_info_sccb {
 	struct	sccb_header header;	/* 0-7 */
@@ -193,7 +193,7 @@ struct read_info_sccb {
 	u8	byte_138;		/* 138 */
 	u8	byte_139;		/* 139 */
 	u8	_pad_140[EXT_SCCB_READ_SCP - 140];
-} __packed __aligned(PAGE_SIZE);
+} __packed __aligned(MMUPAGE_SIZE);
 
 struct read_storage_sccb {
 	struct sccb_header header;

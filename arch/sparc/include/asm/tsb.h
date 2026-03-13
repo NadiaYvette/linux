@@ -157,12 +157,12 @@ extern struct tsb_phys_patch_entry __tsb_phys_patch, __tsb_phys_patch_end;
 	sethi		%hi(swapper_pg_dir), REG1; \
 	or		REG1, %lo(swapper_pg_dir), REG1; \
 	sllx		VADDR, 64 - (PGDIR_SHIFT + PGDIR_BITS), REG2; \
-	srlx		REG2, 64 - PAGE_SHIFT, REG2; \
+	srlx		REG2, 64 - MMUPAGE_SHIFT, REG2; \
 	andn		REG2, 0x7, REG2; \
 	ldx		[REG1 + REG2], REG1; \
 	brz,pn		REG1, FAIL_LABEL; \
 	 sllx		VADDR, 64 - (PUD_SHIFT + PUD_BITS), REG2; \
-	srlx		REG2, 64 - PAGE_SHIFT, REG2; \
+	srlx		REG2, 64 - MMUPAGE_SHIFT, REG2; \
 	andn		REG2, 0x7, REG2; \
 	ldxa		[REG1 + REG2] ASI_PHYS_USE_EC, REG1; \
 	brz,pn		REG1, FAIL_LABEL; \
@@ -174,7 +174,7 @@ extern struct tsb_phys_patch_entry __tsb_phys_patch, __tsb_phys_patch_end;
 	bne,pt		%xcc, 697f; \
 	 sllx		REG2, 1, REG2; \
 	sllx		VADDR, 64 - (PMD_SHIFT + PMD_BITS), REG2; \
-	srlx		REG2, 64 - PAGE_SHIFT, REG2; \
+	srlx		REG2, 64 - MMUPAGE_SHIFT, REG2; \
 	andn		REG2, 0x7, REG2; \
 	ldxa		[REG1 + REG2] ASI_PHYS_USE_EC, REG1; \
 	sethi		%uhi(_PAGE_PMD_HUGE), REG2; \
@@ -189,7 +189,7 @@ extern struct tsb_phys_patch_entry __tsb_phys_patch, __tsb_phys_patch_end;
 	ba,pt		%xcc, 699f; \
 	 or		REG1, REG2, REG1; \
 698:	sllx		VADDR, 64 - PMD_SHIFT, REG2; \
-	srlx		REG2, 64 - PAGE_SHIFT, REG2; \
+	srlx		REG2, 64 - MMUPAGE_SHIFT, REG2; \
 	andn		REG2, 0x7, REG2; \
 	ldxa		[REG1 + REG2] ASI_PHYS_USE_EC, REG1; \
 	brgez,pn	REG1, FAIL_LABEL; \
@@ -270,23 +270,23 @@ extern struct tsb_phys_patch_entry __tsb_phys_patch, __tsb_phys_patch_end;
 	 */
 #define USER_PGTABLE_WALK_TL1(VADDR, PHYS_PGD, REG1, REG2, FAIL_LABEL)	\
 	sllx		VADDR, 64 - (PGDIR_SHIFT + PGDIR_BITS), REG2; \
-	srlx		REG2, 64 - PAGE_SHIFT, REG2; \
+	srlx		REG2, 64 - MMUPAGE_SHIFT, REG2; \
 	andn		REG2, 0x7, REG2; \
 	ldxa		[PHYS_PGD + REG2] ASI_PHYS_USE_EC, REG1; \
 	brz,pn		REG1, FAIL_LABEL; \
 	 sllx		VADDR, 64 - (PUD_SHIFT + PUD_BITS), REG2; \
-	srlx		REG2, 64 - PAGE_SHIFT, REG2; \
+	srlx		REG2, 64 - MMUPAGE_SHIFT, REG2; \
 	andn		REG2, 0x7, REG2; \
 	ldxa		[REG1 + REG2] ASI_PHYS_USE_EC, REG1; \
 	USER_PGTABLE_CHECK_PUD_HUGE(VADDR, REG1, REG2, FAIL_LABEL, 800f) \
 	brz,pn		REG1, FAIL_LABEL; \
 	 sllx		VADDR, 64 - (PMD_SHIFT + PMD_BITS), REG2; \
-	srlx		REG2, 64 - PAGE_SHIFT, REG2; \
+	srlx		REG2, 64 - MMUPAGE_SHIFT, REG2; \
 	andn		REG2, 0x7, REG2; \
 	ldxa		[REG1 + REG2] ASI_PHYS_USE_EC, REG1; \
 	USER_PGTABLE_CHECK_PMD_HUGE(VADDR, REG1, REG2, FAIL_LABEL, 800f) \
 	sllx		VADDR, 64 - PMD_SHIFT, REG2; \
-	srlx		REG2, 64 - PAGE_SHIFT, REG2; \
+	srlx		REG2, 64 - MMUPAGE_SHIFT, REG2; \
 	andn		REG2, 0x7, REG2; \
 	add		REG1, REG2, REG1; \
 	ldxa		[REG1] ASI_PHYS_USE_EC, REG1; \
@@ -345,7 +345,7 @@ extern struct tsb_phys_patch_entry __tsb_phys_patch, __tsb_phys_patch_end;
 	.previous; \
 	sllx		REG1, 32, REG1; \
 	or		REG1, REG2, REG1; \
-	srlx		VADDR, PAGE_SHIFT, REG2; \
+	srlx		VADDR, MMUPAGE_SHIFT, REG2; \
 	and		REG2, (KERNEL_TSB_NENTRIES - 1), REG2; \
 	sllx		REG2, 4, REG2; \
 	add		REG1, REG2, REG2; \
