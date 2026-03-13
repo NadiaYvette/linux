@@ -1711,7 +1711,7 @@ static int pkvm_mem_abort(const struct kvm_s2_fault_desc *s2fd)
 	}
 
 	write_lock(&kvm->mmu_lock);
-	ret = pkvm_pgtable_stage2_map(pgt, s2fd->fault_ipa, PAGE_SIZE,
+	ret = pkvm_pgtable_stage2_map(pgt, s2fd->fault_ipa, MMUPAGE_SIZE,
 				      page_to_phys(page), KVM_PGTABLE_PROT_RWX,
 				      hyp_memcache, 0);
 	write_unlock(&kvm->mmu_lock);
@@ -1736,8 +1736,8 @@ static short kvm_s2_resolve_vma_size(const struct kvm_s2_fault_desc *s2fd,
 	short vma_shift;
 
 	if (memslot_is_logging(s2fd->memslot)) {
-		s2vi->max_map_size = PAGE_SIZE;
-		vma_shift = PAGE_SHIFT;
+		s2vi->max_map_size = MMUPAGE_SIZE;
+		vma_shift = MMUPAGE_SHIFT;
 	} else {
 		s2vi->max_map_size = PUD_SIZE;
 		vma_shift = get_vma_page_shift(vma, s2fd->hva);
@@ -1757,11 +1757,13 @@ static short kvm_s2_resolve_vma_size(const struct kvm_s2_fault_desc *s2fd,
 		if (fault_supports_stage2_huge_mapping(s2fd->memslot, s2fd->hva, PMD_SIZE))
 			break;
 		fallthrough;
+#if CONT_PTE_SHIFT != MMUPAGE_SHIFT
 	case CONT_PTE_SHIFT:
-		vma_shift = PAGE_SHIFT;
-		s2vi->max_map_size = PAGE_SIZE;
+		vma_shift = MMUPAGE_SHIFT;
+		s2vi->max_map_size = MMUPAGE_SIZE;
 		fallthrough;
-	case PAGE_SHIFT:
+#endif
+	case MMUPAGE_SHIFT:
 		break;
 	default:
 		WARN_ONCE(1, "Unknown vma_shift %d", vma_shift);
@@ -1785,8 +1787,8 @@ static short kvm_s2_resolve_vma_size(const struct kvm_s2_fault_desc *s2fd,
 		 */
 		if (max_map_size >= PMD_SIZE && max_map_size < PUD_SIZE)
 			max_map_size = PMD_SIZE;
-		else if (max_map_size >= PAGE_SIZE && max_map_size < PMD_SIZE)
-			max_map_size = PAGE_SIZE;
+		else if (max_map_size >= MMUPAGE_SIZE && max_map_size < PMD_SIZE)
+			max_map_size = MMUPAGE_SIZE;
 
 		s2vi->max_map_size = max_map_size;
 		vma_shift = min_t(short, vma_shift, __ffs(max_map_size));
