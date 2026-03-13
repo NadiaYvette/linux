@@ -29,16 +29,16 @@ static inline unsigned long arch_vmap_pte_range_map_size(unsigned long addr,
 	 * block using the PTE_CONT bit for more efficient use of the TLB.
 	 */
 	if (max_page_shift < CONT_PTE_SHIFT)
-		return PAGE_SIZE;
+		return MMUPAGE_SIZE;
 
 	if (end - addr < CONT_PTE_SIZE)
-		return PAGE_SIZE;
+		return MMUPAGE_SIZE;
 
 	if (!IS_ALIGNED(addr, CONT_PTE_SIZE))
-		return PAGE_SIZE;
+		return MMUPAGE_SIZE;
 
 	if (!IS_ALIGNED(PFN_PHYS(pfn), CONT_PTE_SIZE))
-		return PAGE_SIZE;
+		return MMUPAGE_SIZE;
 
 	return CONT_PTE_SIZE;
 }
@@ -51,7 +51,7 @@ static inline unsigned long arch_vmap_pte_range_unmap_size(unsigned long addr,
 	 * The caller handles alignment so it's sufficient just to check
 	 * PTE_CONT.
 	 */
-	return pte_valid_cont(__ptep_get(ptep)) ? CONT_PTE_SIZE : PAGE_SIZE;
+	return pte_valid_cont(__ptep_get(ptep)) ? CONT_PTE_SIZE : MMUPAGE_SIZE;
 }
 
 #define arch_vmap_pte_supported_shift arch_vmap_pte_supported_shift
@@ -60,7 +60,7 @@ static inline int arch_vmap_pte_supported_shift(unsigned long size)
 	if (size >= CONT_PTE_SIZE)
 		return CONT_PTE_SHIFT;
 
-	return PAGE_SHIFT;
+	return MMUPAGE_SHIFT;
 }
 
 #endif
