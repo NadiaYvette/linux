@@ -7,14 +7,15 @@
 #define _ASM_S390_SCLP_H
 
 #include <linux/types.h>
+#include <vdso/page.h>
 
 #define SCLP_CHP_INFO_MASK_SIZE		32
-#define EARLY_SCCB_SIZE		PAGE_SIZE
+#define EARLY_SCCB_SIZE		MMUPAGE_SIZE
 #define SCLP_MAX_CORES		512
 /* 144 + 16 * SCLP_MAX_CORES + 2 * (SCLP_MAX_CORES - 1) */
-#define EXT_SCCB_READ_SCP	(3 * PAGE_SIZE)
+#define EXT_SCCB_READ_SCP	(3 * MMUPAGE_SIZE)
 /* 24 + 16 * SCLP_MAX_CORES */
-#define EXT_SCCB_READ_CPU	(3 * PAGE_SIZE)
+#define EXT_SCCB_READ_CPU	(3 * MMUPAGE_SIZE)
 
 #define SCLP_ERRNOTIFY_AQ_RESET			0
 #define SCLP_ERRNOTIFY_AQ_REPAIR		1

@@ -9,22 +9,29 @@
 
 #define PTDESC_ORDER 3
 
-/* Number of VA bits resolved by a single translation table level */
-#define PTDESC_TABLE_SHIFT	(PAGE_SHIFT - PTDESC_ORDER)
+/*
+ * Number of VA bits resolved by a single translation table level.
+ *
+ * Page table pages are always MMUPAGE_SIZE (hardware MMU page size),
+ * not PAGE_SIZE (which may be larger with PGCL/page clustering).
+ * Each page table page holds MMUPAGE_SIZE/sizeof(u64) = 2^(MMUPAGE_SHIFT-3)
+ * entries, so each level resolves (MMUPAGE_SHIFT - PTDESC_ORDER) bits.
+ */
+#define PTDESC_TABLE_SHIFT	(MMUPAGE_SHIFT - PTDESC_ORDER)
 
 /*
  * Number of page-table levels required to address 'va_bits' wide
- * address, without section mapping. We resolve the top (va_bits - PAGE_SHIFT)
+ * address, without section mapping. We resolve the top (va_bits - MMUPAGE_SHIFT)
  * bits with PTDESC_TABLE_SHIFT bits at each page table level. Hence:
  *
- *  levels = DIV_ROUND_UP((va_bits - PAGE_SHIFT), PTDESC_TABLE_SHIFT)
+ *  levels = DIV_ROUND_UP((va_bits - MMUPAGE_SHIFT), PTDESC_TABLE_SHIFT)
  *
  * where DIV_ROUND_UP(n, d) => (((n) + (d) - 1) / (d))
  *
  * We cannot include linux/kernel.h which defines DIV_ROUND_UP here
  * due to build issues. So we open code DIV_ROUND_UP here:
  *
- *	((((va_bits) - PAGE_SHIFT) + PTDESC_TABLE_SHIFT - 1) / PTDESC_TABLE_SHIFT)
+ *	((((va_bits) - MMUPAGE_SHIFT) + PTDESC_TABLE_SHIFT - 1) / PTDESC_TABLE_SHIFT)
  *
  * which gets simplified as :
  */
@@ -33,13 +40,13 @@
 
 /*
  * Size mapped by an entry at level n ( -1 <= n <= 3)
- * We map PTDESC_TABLE_SHIFT at all translation levels and PAGE_SHIFT bits
+ * We map PTDESC_TABLE_SHIFT at all translation levels and MMUPAGE_SHIFT bits
  * in the final page. The maximum number of translation levels supported by
  * the architecture is 5. Hence, starting at level n, we have further
  * ((4 - n) - 1) levels of translation excluding the offset within the page.
  * So, the total number of bits mapped by an entry at level n is :
  *
- *  ((4 - n) - 1) * PTDESC_TABLE_SHIFT + PAGE_SHIFT
+ *  ((4 - n) - 1) * PTDESC_TABLE_SHIFT + MMUPAGE_SHIFT
  *
  * Rearranging it a bit we get :
  *   (4 - n) * PTDESC_TABLE_SHIFT + PTDESC_ORDER
@@ -87,9 +94,9 @@
 /*
  * Contiguous page definitions.
  */
-#define CONT_PTE_SHIFT		(CONFIG_ARM64_CONT_PTE_SHIFT + PAGE_SHIFT)
-#define CONT_PTES		(1 << (CONT_PTE_SHIFT - PAGE_SHIFT))
-#define CONT_PTE_SIZE		(CONT_PTES * PAGE_SIZE)
+#define CONT_PTE_SHIFT		(CONFIG_ARM64_CONT_PTE_SHIFT + MMUPAGE_SHIFT)
+#define CONT_PTES		(1 << (CONT_PTE_SHIFT - MMUPAGE_SHIFT))
+#define CONT_PTE_SIZE		(CONT_PTES * MMUPAGE_SIZE)
 #define CONT_PTE_MASK		(~(CONT_PTE_SIZE - 1))
 
 #define CONT_PMD_SHIFT		(CONFIG_ARM64_CONT_PMD_SHIFT + PMD_SHIFT)
@@ -176,7 +183,7 @@
 #define PTE_UXN			(_AT(pteval_t, 1) << 54)	/* User XN */
 #define PTE_SWBITS_MASK		_AT(pteval_t, (BIT(63) | GENMASK(58, 55)))
 
-#define PTE_ADDR_LOW		(((_AT(pteval_t, 1) << (50 - PAGE_SHIFT)) - 1) << PAGE_SHIFT)
+#define PTE_ADDR_LOW		(((_AT(pteval_t, 1) << (50 - MMUPAGE_SHIFT)) - 1) << MMUPAGE_SHIFT)
 #ifdef CONFIG_ARM64_PA_BITS_52
 #ifdef CONFIG_ARM64_64K_PAGES
 #define PTE_ADDR_HIGH		(_AT(pteval_t, 0xf) << 12)

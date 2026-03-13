@@ -33,13 +33,13 @@ void __init map_range(phys_addr_t *pte, u64 start, u64 end, phys_addr_t pa,
 	u64 cmask = (level == 3) ? CONT_PTE_SIZE - 1 : U64_MAX;
 	ptdesc_t protval = pgprot_val(prot) & ~PTE_TYPE_MASK;
 	int lshift = (3 - level) * PTDESC_TABLE_SHIFT;
-	u64 lmask = (PAGE_SIZE << lshift) - 1;
+	u64 lmask = (MMUPAGE_SIZE << lshift) - 1;
 
-	start	&= PAGE_MASK;
-	pa	&= PAGE_MASK;
+	start	&= MMUPAGE_MASK;
+	pa	&= MMUPAGE_MASK;
 
 	/* Advance tbl to the entry that covers start */
-	tbl += (start >> (lshift + PAGE_SHIFT)) % PTRS_PER_PTE;
+	tbl += (start >> (lshift + MMUPAGE_SHIFT)) % PTRS_PER_PTE;
 
 	/*
 	 * Set the right block/page bits for this level unless we are
@@ -49,7 +49,7 @@ void __init map_range(phys_addr_t *pte, u64 start, u64 end, phys_addr_t pa,
 		protval |= (level == 2) ? PMD_TYPE_SECT : PTE_TYPE_PAGE;
 
 	while (start < end) {
-		u64 next = min((start | lmask) + 1, PAGE_ALIGN(end));
+		u64 next = min((start | lmask) + 1, ALIGN(end, MMUPAGE_SIZE));
 
 		if (level < 2 || (level == 2 && (start | next | pa) & lmask)) {
 			/*
@@ -90,7 +90,7 @@ void __init map_range(phys_addr_t *pte, u64 start, u64 end, phys_addr_t pa,
 
 asmlinkage phys_addr_t __init create_init_idmap(pgd_t *pg_dir, ptdesc_t clrmask)
 {
-	phys_addr_t ptep = (phys_addr_t)pg_dir + PAGE_SIZE; /* MMU is off */
+	phys_addr_t ptep = (phys_addr_t)pg_dir + MMUPAGE_SIZE; /* MMU is off */
 	pgprot_t text_prot = PAGE_KERNEL_ROX;
 	pgprot_t data_prot = PAGE_KERNEL;
 

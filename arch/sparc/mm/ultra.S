@@ -204,8 +204,8 @@ __flush_icache_page:	/* %o0 = phys_page */
 
 #ifdef DCACHE_ALIASING_POSSIBLE
 
-#if (PAGE_SHIFT != 13)
-#error only page shift of 13 is supported by dcache flush
+#if (MMUPAGE_SHIFT != 13)
+#error only MMU page shift of 13 is supported by dcache flush
 #endif
 
 #define DTAG_MASK 0x3

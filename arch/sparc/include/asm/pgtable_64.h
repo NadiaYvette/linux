@@ -45,13 +45,16 @@
 #define VMALLOC_START		_AC(0x0000000100000000,UL)
 #define VMEMMAP_BASE		VMALLOC_END
 
-/* PMD_SHIFT determines the size of the area a second-level page
- * table can map
+/* Page table pages are MMUPAGE_SIZE (hardware page), each entry is 8 bytes.
+ * With PGCL, PAGE_SHIFT > MMUPAGE_SHIFT, but page table geometry must use
+ * MMUPAGE_SHIFT since PT pages are hardware-page-sized.
+ *
+ * PMD_SHIFT determines the size of the area a second-level page table can map.
  */
-#define PMD_SHIFT	(PAGE_SHIFT + (PAGE_SHIFT-3))
+#define PMD_SHIFT	(MMUPAGE_SHIFT + (MMUPAGE_SHIFT-3))
 #define PMD_SIZE	(_AC(1,UL) << PMD_SHIFT)
 #define PMD_MASK	(~(PMD_SIZE-1))
-#define PMD_BITS	(PAGE_SHIFT - 3)
+#define PMD_BITS	(MMUPAGE_SHIFT - 3)
 
 /* PUD_SHIFT determines the size of the area a third-level page
  * table can map
@@ -59,13 +62,13 @@
 #define PUD_SHIFT	(PMD_SHIFT + PMD_BITS)
 #define PUD_SIZE	(_AC(1,UL) << PUD_SHIFT)
 #define PUD_MASK	(~(PUD_SIZE-1))
-#define PUD_BITS	(PAGE_SHIFT - 3)
+#define PUD_BITS	(MMUPAGE_SHIFT - 3)
 
 /* PGDIR_SHIFT determines what a fourth-level page table entry can map */
 #define PGDIR_SHIFT	(PUD_SHIFT + PUD_BITS)
 #define PGDIR_SIZE	(_AC(1,UL) << PGDIR_SHIFT)
 #define PGDIR_MASK	(~(PGDIR_SIZE-1))
-#define PGDIR_BITS	(PAGE_SHIFT - 3)
+#define PGDIR_BITS	(MMUPAGE_SHIFT - 3)
 
 #if (MAX_PHYS_ADDRESS_BITS > PGDIR_SHIFT + PGDIR_BITS)
 #error MAX_PHYS_ADDRESS_BITS exceeds what kernel page tables can support
@@ -91,7 +94,7 @@ extern unsigned long VMALLOC_END;
 bool kern_addr_valid(unsigned long addr);
 
 /* Entries per page directory level. */
-#define PTRS_PER_PTE	(1UL << (PAGE_SHIFT-3))
+#define PTRS_PER_PTE	(1UL << (MMUPAGE_SHIFT-3))
 #define PTRS_PER_PMD	(1UL << PMD_BITS)
 #define PTRS_PER_PUD	(1UL << PUD_BITS)
 #define PTRS_PER_PGD	(1UL << PGDIR_BITS)

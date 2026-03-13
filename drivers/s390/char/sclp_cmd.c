@@ -101,7 +101,7 @@ int _sclp_get_core_info(struct sclp_core_info *info)
 	if (!SCLP_HAS_CPU_INFO)
 		return -EOPNOTSUPP;
 
-	length = test_facility(140) ? EXT_SCCB_READ_CPU : PAGE_SIZE;
+	length = test_facility(140) ? EXT_SCCB_READ_CPU : MMUPAGE_SIZE;
 	sccb = (void *)__get_free_pages(GFP_KERNEL | GFP_DMA | __GFP_ZERO, get_order(length));
 	if (!sccb)
 		return -ENOMEM;

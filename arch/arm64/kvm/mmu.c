@@ -1696,7 +1696,7 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 	}
 
 	if (force_pte)
-		vma_shift = PAGE_SHIFT;
+		vma_shift = MMUPAGE_SHIFT;
 	else
 		vma_shift = get_vma_page_shift(vma, hva);
 
@@ -1714,11 +1714,13 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 		if (fault_supports_stage2_huge_mapping(memslot, hva, PMD_SIZE))
 			break;
 		fallthrough;
+#if CONT_PTE_SHIFT != MMUPAGE_SHIFT
 	case CONT_PTE_SHIFT:
-		vma_shift = PAGE_SHIFT;
+		vma_shift = MMUPAGE_SHIFT;
 		force_pte = true;
 		fallthrough;
-	case PAGE_SHIFT:
+#endif
+	case MMUPAGE_SHIFT:
 		break;
 	default:
 		WARN_ONCE(1, "Unknown vma_shift %d", vma_shift);
@@ -1729,7 +1731,7 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 	if (nested) {
 		unsigned long max_map_size;
 
-		max_map_size = force_pte ? PAGE_SIZE : PUD_SIZE;
+		max_map_size = force_pte ? MMUPAGE_SIZE : PUD_SIZE;
 
 		ipa = kvm_s2_trans_output(nested);
 

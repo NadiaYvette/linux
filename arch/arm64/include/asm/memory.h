@@ -118,8 +118,8 @@
  * VMAP'd stacks are allocated at page granularity, so we must ensure that such
  * stacks are a multiple of page size.
  */
-#if (MIN_THREAD_SHIFT < PAGE_SHIFT)
-#define THREAD_SHIFT		PAGE_SHIFT
+#if (MIN_THREAD_SHIFT < MMUPAGE_SHIFT)
+#define THREAD_SHIFT		MMUPAGE_SHIFT
 #else
 #define THREAD_SHIFT		MIN_THREAD_SHIFT
 #endif
@@ -141,7 +141,7 @@
 
 #define OVERFLOW_STACK_SIZE	SZ_4K
 
-#define NVHE_STACK_SHIFT       PAGE_SHIFT
+#define NVHE_STACK_SHIFT       MMUPAGE_SHIFT
 #define NVHE_STACK_SIZE        (UL(1) << NVHE_STACK_SHIFT)
 
 /*
@@ -204,13 +204,13 @@
  *  Open-coded (swapper_pg_dir - reserved_pg_dir) as this cannot be calculated
  *  until link time.
  */
-#define RESERVED_SWAPPER_OFFSET	(PAGE_SIZE)
+#define RESERVED_SWAPPER_OFFSET	(MMUPAGE_SIZE)
 
 /*
  *  Open-coded (swapper_pg_dir - tramp_pg_dir) as this cannot be calculated
  *  until link time.
  */
-#define TRAMP_SWAPPER_OFFSET	(2 * PAGE_SIZE)
+#define TRAMP_SWAPPER_OFFSET	(2 * MMUPAGE_SIZE)
 
 #ifndef __ASSEMBLER__
 

@@ -278,7 +278,7 @@ void sclp_emergency_printk(const char *str)
 int __init sclp_early_read_info(void)
 {
 	int i;
-	int length = test_facility(140) ? EXT_SCCB_READ_SCP : PAGE_SIZE;
+	int length = test_facility(140) ? EXT_SCCB_READ_SCP : MMUPAGE_SIZE;
 	struct read_info_sccb *sccb = (struct read_info_sccb *)sclp_early_sccb;
 	sclp_cmdw_t commands[] = {SCLP_CMDW_READ_SCP_INFO_FORCED,
 				  SCLP_CMDW_READ_SCP_INFO};
