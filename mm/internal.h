@@ -438,13 +438,16 @@ static inline unsigned int pgcl_pte_batch(pte_t pte, pte_t *ptep,
 					  unsigned int max_nr)
 {
 	/*
-	 * Use pte_pfn (PAGE-granular) for the kernel page identity,
-	 * and extract the MMUPAGE sub-offset from pte_val directly.
-	 * For present PTEs, protnone_mask is 0, so pte_val's physical
-	 * bits between MMUPAGE_SHIFT and PAGE_SHIFT give the sub-offset.
+	 * Use pte_pfn (PAGE-granular) for the kernel page identity.
+	 * Extract the sub-page index portably using __phys_to_pte_val():
+	 * dividing the raw PTE value by the PTE-encoded MMUPAGE step
+	 * strips permission bits (which are below the PFN field) and
+	 * yields a value whose low PAGE_MMUSHIFT bits are the sub-index.
+	 * This works on all architectures regardless of _PAGE_PFN_SHIFT.
 	 */
 	unsigned long base_page_pfn = pte_pfn(pte);
-	unsigned int sub = (unsigned int)((pte_val(pte) >> MMUPAGE_SHIFT) &
+	unsigned long mmu_step = __phys_to_pte_val(MMUPAGE_SIZE);
+	unsigned int sub = (unsigned int)((pte_val(pte) / mmu_step) &
 					  (PAGE_MMUCOUNT - 1));
 	unsigned int remaining = PAGE_MMUCOUNT - sub;
 	unsigned int nr;
@@ -459,7 +462,7 @@ static inline unsigned int pgcl_pte_batch(pte_t pte, pte_t *ptep,
 		if (pte_pfn(next) != base_page_pfn)
 			break;
 		/* Must be next consecutive sub-page */
-		if (((pte_val(next) >> MMUPAGE_SHIFT) &
+		if (((pte_val(next) / mmu_step) &
 		     (PAGE_MMUCOUNT - 1)) != sub + nr)
 			break;
 	}
