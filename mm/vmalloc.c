@@ -150,7 +150,7 @@ static int vmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 			   pfn_pte(paddr >> PAGE_SHIFT, prot));
 #endif
 		paddr += MMUPAGE_SIZE;
-	} while (pte++, addr += MMUPAGE_SIZE, addr != end);
+	} while (pte += (size >> MMUPAGE_SHIFT), addr += size, addr != end);
 
 	lazy_mmu_mode_disable();
 	*mask |= PGTBL_PTE_MODIFIED;
