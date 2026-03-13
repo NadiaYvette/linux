@@ -30,9 +30,9 @@
 #endif
 
 /* Number of entries in the page global directory */
-#define PTRS_PER_PGD    (PAGE_SIZE / sizeof(pgd_t))
+#define PTRS_PER_PGD    (MMUPAGE_SIZE / sizeof(pgd_t))
 /* Number of entries in the page table */
-#define PTRS_PER_PTE    (PAGE_SIZE / sizeof(pte_t))
+#define PTRS_PER_PTE    (MMUPAGE_SIZE / sizeof(pte_t))
 
 /*
  * Half of the kernel address space (1/4 of the entries of the page global
@@ -119,7 +119,16 @@
 #include <asm/compat.h>
 #include <asm/cpufeature.h>
 
-#define __page_val_to_pfn(_val)  (((_val) & _PAGE_PFN_MASK) >> _PAGE_PFN_SHIFT)
+/*
+ * Convert between physical addresses and PTE values.
+ * With PGCL, the kernel PFN (phys >> PAGE_SHIFT) differs from the hardware
+ * PPN (phys >> MMUPAGE_SHIFT). These helpers preserve MMUPAGE granularity.
+ */
+#define __phys_to_pte_val(phys)  (((phys) >> MMUPAGE_SHIFT) << _PAGE_PFN_SHIFT)
+#define __pte_val_to_phys(val)   ((((val) & _PAGE_PFN_MASK) >> _PAGE_PFN_SHIFT) << MMUPAGE_SHIFT)
+
+/* Extract kernel PFN (phys >> PAGE_SHIFT) from a page table entry value */
+#define __page_val_to_pfn(_val)  (__pte_val_to_phys(_val) >> PAGE_SHIFT)
 
 #ifdef CONFIG_64BIT
 #include <asm/pgtable-64.h>
@@ -243,7 +252,7 @@ static inline pgd_t pfn_pgd(unsigned long pfn, pgprot_t prot)
 
 	ALT_THEAD_PMA(prot_val);
 
-	return __pgd((pfn << _PAGE_PFN_SHIFT) | prot_val);
+	return __pgd(__phys_to_pte_val((phys_addr_t)pfn << PAGE_SHIFT) | prot_val);
 }
 
 static inline unsigned long _pgd_pfn(pgd_t pgd)
@@ -258,7 +267,7 @@ static inline struct page *pmd_page(pmd_t pmd)
 
 static inline unsigned long pmd_page_vaddr(pmd_t pmd)
 {
-	return (unsigned long)pfn_to_virt(__page_val_to_pfn(pmd_val(pmd)));
+	return (unsigned long)__va(__pte_val_to_phys(pmd_val(pmd)));
 }
 
 static inline pte_t pmd_pte(pmd_t pmd)
@@ -323,7 +332,7 @@ static inline pte_t pfn_pte(unsigned long pfn, pgprot_t prot)
 
 	ALT_THEAD_PMA(prot_val);
 
-	return __pte((pfn << _PAGE_PFN_SHIFT) | prot_val);
+	return __pte(__phys_to_pte_val((phys_addr_t)pfn << PAGE_SHIFT) | prot_val);
 }
 
 #define pte_pgprot pte_pgprot
@@ -574,7 +583,7 @@ static inline void update_mmu_cache_range(struct vm_fault *vmf,
 	 * the extra traps reduce performance.  So, eagerly SFENCE.VMA.
 	 */
 	while (nr--)
-		local_flush_tlb_page(address + nr * PAGE_SIZE);
+		local_flush_tlb_page(address + nr * MMUPAGE_SIZE);
 
 }
 #define update_mmu_cache(vma, addr, ptep) \
