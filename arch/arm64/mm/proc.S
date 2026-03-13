@@ -244,14 +244,14 @@ SYM_FUNC_ALIAS(__pi_idmap_cpu_replace_ttbr1, idmap_cpu_replace_ttbr1)
 	.macro	kpti_map_pgtbl, type, level
 	str	xzr, [temp_pte, #8 * (\level + 2)]	// break before make
 	dsb	nshst
-	add	pte, temp_pte, #PAGE_SIZE * (\level + 2)
+	add	pte, temp_pte, #MMUPAGE_SIZE * (\level + 2)
 	lsr	pte, pte, #12
 	tlbi	vaae1, pte
 	dsb	nsh
 	isb
 
 	phys_to_pte pte, cur_\type\()p
-	add	cur_\type\()p, temp_pte, #PAGE_SIZE * (\level + 2)
+	add	cur_\type\()p, temp_pte, #MMUPAGE_SIZE * (\level + 2)
 	orr	pte, pte, pte_flags
 	str	pte, [temp_pte, #8 * (\level + 2)]
 	dsb	nshst
