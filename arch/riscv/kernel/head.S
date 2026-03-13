@@ -85,7 +85,7 @@ relocate_enable_mmu:
 	csrw CSR_TVEC, a2
 
 	/* Compute satp for kernel page tables, but don't load it yet */
-	srl a2, a0, PAGE_SHIFT
+	srl a2, a0, MMUPAGE_SHIFT
 	la a1, satp_mode
 	REG_L a1, 0(a1)
 	or a2, a2, a1
@@ -97,7 +97,7 @@ relocate_enable_mmu:
 	 * to ensure the new translations are in use.
 	 */
 	la a0, trampoline_pg_dir
-	srl a0, a0, PAGE_SHIFT
+	srl a0, a0, MMUPAGE_SHIFT
 	or a0, a0, a1
 	sfence.vma
 	csrw CSR_SATP, a0

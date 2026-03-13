@@ -189,7 +189,7 @@ static inline void vmalloc_fault(struct pt_regs *regs, int code, unsigned long a
 	 */
 	index = pgd_index(addr);
 	pfn = csr_read(CSR_SATP) & SATP_PPN;
-	pgd = (pgd_t *)pfn_to_virt(pfn) + index;
+	pgd = (pgd_t *)__va((phys_addr_t)pfn << MMUPAGE_SHIFT) + index;
 	pgd_k = init_mm.pgd + index;
 
 	if (!pgd_present(pgdp_get(pgd_k))) {

@@ -1050,6 +1050,15 @@ static inline pte_t pte_mkwrite(pte_t pte, struct vm_area_struct *vma)
 #endif
 
 /*
+ * Generic fallback for __phys_to_pte_val: identity transform.
+ * Architectures where the PTE PFN field is not a direct physical address
+ * (e.g. riscv with _PAGE_PFN_SHIFT != MMUPAGE_SHIFT) must define their own.
+ */
+#ifndef __phys_to_pte_val
+#define __phys_to_pte_val(phys)	(phys)
+#endif
+
+/*
  * pte_mksub - adjust a PTE to address a sub-page (MMU page) within a
  * kernel page.  offset is in bytes, always a multiple of MMUPAGE_SIZE.
  * When PAGE_MMUSHIFT == 0, this is a no-op (offset is always 0).
@@ -1060,7 +1069,7 @@ static inline pte_t pte_mkwrite(pte_t pte, struct vm_area_struct *vma)
 static inline pte_t pte_mksub(pte_t pte, unsigned long offset)
 {
 #if PAGE_MMUSHIFT
-	return __pte(pte_val(pte) + offset);
+	return __pte(pte_val(pte) + __phys_to_pte_val(offset));
 #else
 	return pte;
 #endif
@@ -1077,6 +1086,10 @@ static inline pte_t pte_mksub(pte_t pte, unsigned long offset)
 static inline unsigned long pte_suboffset(pte_t pte)
 {
 #if PAGE_MMUSHIFT
+	/* NOTE: assumes __phys_to_pte_val(x) == x (true for x86).
+	 * Arches where PTE PFN encoding differs (e.g. riscv) should
+	 * override this.
+	 */
 	return (pte_val(pte) & (PAGE_SIZE - 1)) & MMUPAGE_MASK;
 #else
 	return 0;
@@ -1727,8 +1740,8 @@ static inline void modify_prot_commit_ptes(struct vm_area_struct *vma, unsigned 
 		 * sub-pages differ by MMUPAGE_SIZE, not PAGE_SIZE.
 		 */
 #if PAGE_MMUSHIFT
-		old_pte = __pte(pte_val(old_pte) + MMUPAGE_SIZE);
-		pte = __pte(pte_val(pte) + MMUPAGE_SIZE);
+		old_pte = __pte(pte_val(old_pte) + __phys_to_pte_val(MMUPAGE_SIZE));
+		pte = __pte(pte_val(pte) + __phys_to_pte_val(MMUPAGE_SIZE));
 #else
 		old_pte = pte_next_pfn(old_pte);
 		pte = pte_next_pfn(pte);

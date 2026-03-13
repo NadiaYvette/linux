@@ -1098,7 +1098,7 @@ copy_present_page(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 		pgoff_t pgoff = dst_vma->vm_pgoff +
 			((addr - dst_vma->vm_start) >> MMUPAGE_SHIFT);
 		unsigned int sub = pgoff_sub_page_index(pgoff);
-		pte = __pte(pte_val(pte) + sub * MMUPAGE_SIZE);
+		pte = __pte(pte_val(pte) + __phys_to_pte_val((phys_addr_t)sub * MMUPAGE_SIZE));
 	}
 	pte = maybe_mkwrite(pte_mkdirty(pte), dst_vma);
 	if (userfaultfd_pte_wp(dst_vma, ptep_get(src_pte)))
@@ -1140,7 +1140,7 @@ static __always_inline void __copy_present_ptes(struct vm_area_struct *dst_vma,
 
 		for (i = 0; i < nr; i++) {
 			set_ptes(dst_vma->vm_mm, addr + (unsigned long)i * MMUPAGE_SIZE, dst_pte + i, pte, 1);
-			pte = __pte(pte_val(pte) + MMUPAGE_SIZE);
+			pte = __pte(pte_val(pte) + __phys_to_pte_val(MMUPAGE_SIZE));
 		}
 		return;
 	}
@@ -2526,7 +2526,7 @@ static int insert_page(struct vm_area_struct *vma, unsigned long addr,
 		struct folio *folio = page_folio(page);
 		pte_t pteval = mk_pte(page, prot);
 
-		pteval = __pte(pte_val(pteval) + j * MMUPAGE_SIZE);
+		pteval = __pte(pte_val(pteval) + __phys_to_pte_val((phys_addr_t)j * MMUPAGE_SIZE));
 		if (mkwrite) {
 			pteval = pte_mkyoung(pteval);
 			pteval = maybe_mkwrite(pte_mkdirty(pteval), vma);
@@ -4099,7 +4099,7 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 			pgoff_t pgoff = vma->vm_pgoff +
 				((vmf->address - vma->vm_start) >> MMUPAGE_SHIFT);
 			unsigned int sub = pgoff_sub_page_index(pgoff);
-			entry = __pte(pte_val(entry) + sub * MMUPAGE_SIZE);
+			entry = __pte(pte_val(entry) + __phys_to_pte_val((phys_addr_t)sub * MMUPAGE_SIZE));
 		}
 		entry = pte_sw_mkyoung(entry);
 		if (unlikely(unshare)) {
@@ -5743,7 +5743,6 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	__folio_mark_uptodate(folio);
 
 
-
 	vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd, addr, &vmf->ptl);
 	if (!vmf->pte)
 		goto release;
@@ -6036,7 +6035,7 @@ void set_pte_range(struct vm_fault *vmf, struct folio *folio,
 		pgoff_t effective_pgoff = vma->vm_pgoff +
 			((addr - vma->vm_start) >> MMUPAGE_SHIFT);
 		unsigned int sub = pgoff_sub_page_index(effective_pgoff);
-		entry = __pte(pte_val(entry) + sub * MMUPAGE_SIZE);
+		entry = __pte(pte_val(entry) + __phys_to_pte_val((phys_addr_t)sub * MMUPAGE_SIZE));
 	}
 
 	if (prefault && arch_wants_old_prefaulted_pte())
