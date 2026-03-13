@@ -9,7 +9,7 @@
 /* Flushing for D-cache alias handling is only needed if
  * the page size is smaller than 16K.
  */
-#if PAGE_SHIFT < 14
+#if MMUPAGE_SHIFT < 14
 #define DCACHE_ALIASING_POSSIBLE
 #endif
 

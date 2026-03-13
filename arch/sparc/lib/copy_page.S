@@ -27,12 +27,20 @@
 
 #define	DCACHE_SIZE	(PAGE_SIZE * 2)
 
-#if (PAGE_SHIFT == 13)
+/*
+ * PAGE_SIZE_REM = PAGE_SIZE mod 0xC0 (192).  The copy loop processes
+ * 3 x 64-byte blocks per iteration; the remainder is handled in the
+ * epilogue.  Values that yield 0x80 use a 2-block epilogue; 0x100
+ * uses a 4-block epilogue.
+ */
+#if (PAGE_SIZE % 192) == 128
 #define PAGE_SIZE_REM	0x80
-#elif (PAGE_SHIFT == 16)
+#elif (PAGE_SIZE % 192) == 64
+/* PAGE_SHIFT==16 (64K): 65536 mod 192 = 64, but the original code
+ * used 0x100 with a 4-block epilogue.  Preserve that. */
 #define PAGE_SIZE_REM	0x100
 #else
-#error Wrong PAGE_SHIFT specified
+#error PAGE_SIZE not supported by copy_page loop structure
 #endif
 
 #define TOUCH(reg0, reg1, reg2, reg3, reg4, reg5, reg6, reg7)	\
@@ -201,7 +209,7 @@ cheetah_copy_page_insn:
 	cmp		%o2, PAGE_SIZE_REM
 	bne,pt		%xcc, 1b
 	 add		%o0, 0x40, %o0
-#if (PAGE_SHIFT == 16)
+#if (PAGE_SIZE_REM == 0x100)
 	TOUCH(f0, f2, f4, f6, f8, f10, f12, f14)
 	ldda		[%o1] ASI_BLK_P, %f32
 	stda		%f48, [%o0] %asi
