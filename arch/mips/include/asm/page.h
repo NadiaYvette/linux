@@ -24,15 +24,15 @@ static inline unsigned int page_size_ftlb(unsigned int mmuextdef)
 {
 	switch (mmuextdef) {
 	case MIPS_CONF4_MMUEXTDEF_FTLBSIZEEXT:
-		if (PAGE_SIZE == (1 << 30))
+		if (MMUPAGE_SIZE == (1 << 30))
 			return 5;
-		if (PAGE_SIZE == (1llu << 32))
+		if (MMUPAGE_SIZE == (1llu << 32))
 			return 6;
-		if (PAGE_SIZE > (256 << 10))
+		if (MMUPAGE_SIZE > (256 << 10))
 			return 7; /* reserved */
 		fallthrough;
 	case MIPS_CONF4_MMUEXTDEF_VTLBSIZEEXT:
-		return (PAGE_SHIFT - 10) / 2;
+		return (MMUPAGE_SHIFT - 10) / 2;
 	default:
 		panic("Invalid FTLB configuration with Conf4_mmuextdef=%d value\n",
 		      mmuextdef >> 14);
@@ -40,7 +40,7 @@ static inline unsigned int page_size_ftlb(unsigned int mmuextdef)
 }
 
 #ifdef CONFIG_MIPS_HUGE_TLB_SUPPORT
-#define HPAGE_SHIFT	(PAGE_SHIFT + PAGE_SHIFT - 3)
+#define HPAGE_SHIFT	(PAGE_SHIFT + MMUPAGE_SHIFT - 3)
 #define HPAGE_SIZE	(_AC(1,UL) << HPAGE_SHIFT)
 #define HPAGE_MASK	(~(HPAGE_SIZE - 1))
 #define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)

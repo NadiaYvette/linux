@@ -62,9 +62,9 @@ extern int add_temporary_entry(unsigned long entrylo0, unsigned long entrylo1,
 
 /* PGDIR_SHIFT determines what a third-level page table entry can map */
 #if defined(CONFIG_MIPS_HUGE_TLB_SUPPORT) && !defined(CONFIG_PHYS_ADDR_T_64BIT)
-# define PGDIR_SHIFT	(2 * PAGE_SHIFT - PTE_T_LOG2 - 1)
+# define PGDIR_SHIFT	(PAGE_SHIFT + MMUPAGE_SHIFT - PTE_T_LOG2 - 1)
 #else
-# define PGDIR_SHIFT	(2 * PAGE_SHIFT - PTE_T_LOG2)
+# define PGDIR_SHIFT	(PAGE_SHIFT + MMUPAGE_SHIFT - PTE_T_LOG2)
 #endif
 
 #define PGDIR_SIZE	(1UL << PGDIR_SHIFT)
@@ -75,9 +75,9 @@ extern int add_temporary_entry(unsigned long entrylo0, unsigned long entrylo1,
  * we don't really have any PUD/PMD directory physically.
  */
 #if defined(CONFIG_MIPS_HUGE_TLB_SUPPORT) && !defined(CONFIG_PHYS_ADDR_T_64BIT)
-# define __PGD_TABLE_ORDER (32 - 3 * PAGE_SHIFT + PGD_T_LOG2 + PTE_T_LOG2 + 1)
+# define __PGD_TABLE_ORDER (32 - 2 * PAGE_SHIFT - MMUPAGE_SHIFT + PGD_T_LOG2 + PTE_T_LOG2 + 1)
 #else
-# define __PGD_TABLE_ORDER (32 - 3 * PAGE_SHIFT + PGD_T_LOG2 + PTE_T_LOG2)
+# define __PGD_TABLE_ORDER (32 - 2 * PAGE_SHIFT - MMUPAGE_SHIFT + PGD_T_LOG2 + PTE_T_LOG2)
 #endif
 
 #define PGD_TABLE_ORDER	(__PGD_TABLE_ORDER >= 0 ? __PGD_TABLE_ORDER : 0)
