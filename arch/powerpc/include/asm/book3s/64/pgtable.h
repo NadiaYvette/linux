@@ -100,7 +100,7 @@
  * we are limited by _PAGE_PA_MAX. Clear everything above _PAGE_PA_MAX
  * and every thing below PAGE_SHIFT;
  */
-#define PTE_RPN_MASK	(((1UL << _PAGE_PA_MAX) - 1) & (PAGE_MASK))
+#define PTE_RPN_MASK	(((1UL << _PAGE_PA_MAX) - 1) & (MMUPAGE_MASK))
 #define PTE_RPN_SHIFT	PAGE_SHIFT
 /*
  * set of bits not changed in pmd_modify. Even though we have hash specific bits
