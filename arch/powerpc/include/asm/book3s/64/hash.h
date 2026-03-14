@@ -32,7 +32,7 @@
  * Size of EA range mapped by our pagetables.
  */
 #define H_PGTABLE_EADDR_SIZE	(H_PTE_INDEX_SIZE + H_PMD_INDEX_SIZE + \
-				 H_PUD_INDEX_SIZE + H_PGD_INDEX_SIZE + PAGE_SHIFT)
+				 H_PUD_INDEX_SIZE + H_PGD_INDEX_SIZE + MMUPAGE_SHIFT)
 #define H_PGTABLE_RANGE		(ASM_CONST(1) << H_PGTABLE_EADDR_SIZE)
 /*
  * Top 2 bits are ignored in page table walk.
