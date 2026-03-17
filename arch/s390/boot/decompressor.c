@@ -73,7 +73,7 @@ static void decompress_error(char *m)
 
 unsigned long mem_safe_offset(void)
 {
-	return ALIGN(free_mem_end_ptr, PAGE_SIZE);
+	return ALIGN(free_mem_end_ptr, MMUPAGE_SIZE);
 }
 
 void deploy_kernel(void *output)
