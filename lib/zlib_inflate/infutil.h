@@ -23,7 +23,7 @@ struct inflate_workspace {
 	struct inflate_state inflate_state;
 #ifdef CONFIG_ZLIB_DFLTCC
 	struct dfltcc_state dfltcc_state;
-	unsigned char working_window[(1 << MAX_WBITS) + PAGE_SIZE];
+	unsigned char working_window[(1 << MAX_WBITS) + MMUPAGE_SIZE];
 #else
 	unsigned char working_window[(1 << MAX_WBITS)];
 #endif
