@@ -4306,7 +4306,7 @@ static inline unsigned long vm_end_gap(const struct vm_area_struct *vma)
 
 static inline unsigned long vma_pages(const struct vm_area_struct *vma)
 {
-	return (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
+	return (vma->vm_end - vma->vm_start) >> MMUPAGE_SHIFT;
 }
 
 static inline unsigned long vma_last_pgoff(struct vm_area_struct *vma)
@@ -4321,7 +4321,7 @@ static inline unsigned long vma_desc_size(const struct vm_area_desc *desc)
 
 static inline unsigned long vma_desc_pages(const struct vm_area_desc *desc)
 {
-	return vma_desc_size(desc) >> PAGE_SHIFT;
+	return vma_desc_size(desc) >> MMUPAGE_SHIFT;
 }
 
 /**
