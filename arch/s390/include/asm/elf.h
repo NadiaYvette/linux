@@ -187,7 +187,7 @@ typedef s390_regs elf_gregset_t;
 	} while (0)
 
 #define CORE_DUMP_USE_REGSET
-#define ELF_EXEC_PAGESIZE	PAGE_SIZE
+#define ELF_EXEC_PAGESIZE	MMUPAGE_SIZE
 
 /* This is the location that an ET_DYN program is loaded if exec'ed.  Typical
    use of this is to invoke "./ld.so someprog" to test out a new version of

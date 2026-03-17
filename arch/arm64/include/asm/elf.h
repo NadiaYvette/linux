@@ -120,7 +120,7 @@
 #define compat_elf_read_implies_exec(ex, stk)	(stk == EXSTACK_DEFAULT)
 
 #define CORE_DUMP_USE_REGSET
-#define ELF_EXEC_PAGESIZE	PAGE_SIZE
+#define ELF_EXEC_PAGESIZE	MMUPAGE_SIZE
 
 /*
  * This is the base location for PIE (ET_DYN with INTERP) loads. On

@@ -42,7 +42,7 @@ extern bool compat_elf_check_arch(Elf32_Ehdr *hdr);
 
 #define CORE_DUMP_USE_REGSET
 #define ELF_FDPIC_CORE_EFLAGS	0
-#define ELF_EXEC_PAGESIZE	(PAGE_SIZE)
+#define ELF_EXEC_PAGESIZE	(MMUPAGE_SIZE)
 
 /*
  * This is the location that an ET_DYN program is loaded if exec'ed.  Typical
