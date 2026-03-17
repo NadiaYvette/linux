@@ -182,7 +182,7 @@ typedef struct {
 					 (x)->e_machine == EM_SPARC32PLUS)
 #define compat_start_thread		start_thread32
 
-#define ELF_EXEC_PAGESIZE	PAGE_SIZE
+#define ELF_EXEC_PAGESIZE	MMUPAGE_SIZE
 
 /* This is the location that an ET_DYN program is loaded if exec'ed.  Typical
    use of this is to invoke "./ld.so someprog" to test out a new version of
