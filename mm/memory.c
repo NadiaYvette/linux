@@ -1826,7 +1826,7 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 			if (nr > 1)
 				folio_ref_sub(folio, nr - 1);
 			if (unlikely(__tlb_remove_page_size(tlb,
-					page, false,
+					page,
 					MMUPAGE_SIZE))) {
 				*force_flush = true;
 				*force_break = true;
