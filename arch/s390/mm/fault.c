@@ -62,7 +62,7 @@ static unsigned long get_fault_address(struct pt_regs *regs)
 {
 	union teid teid = { .val = regs->int_parm_long };
 
-	return teid.addr * PAGE_SIZE;
+	return teid.addr * MMUPAGE_SIZE;
 }
 
 static __always_inline bool fault_is_write(struct pt_regs *regs)
@@ -116,7 +116,7 @@ static void dump_pagetable(unsigned long asce, unsigned long address)
 			goto out;
 		table = __va(entry & _SEGMENT_ENTRY_ORIGIN);
 	}
-	table += (address & _PAGE_INDEX) >> PAGE_SHIFT;
+	table += (address & _PAGE_INDEX) >> MMUPAGE_SHIFT;
 	if (get_kernel_nofault(entry, table))
 		goto bad;
 	pr_cont("P:%016lx ", entry);
@@ -390,7 +390,7 @@ void do_protection_exception(struct pt_regs *regs)
 		return handle_fault_error_nolock(regs, 0);
 	}
 	if (unlikely(cpu_has_nx() && teid.b56)) {
-		regs->int_parm_long = (teid.addr * PAGE_SIZE) | (regs->psw.addr & PAGE_MASK);
+		regs->int_parm_long = (teid.addr * MMUPAGE_SIZE) | (regs->psw.addr & MMUPAGE_MASK);
 		return handle_fault_error_nolock(regs, SEGV_ACCERR);
 	}
 	do_exception(regs, VM_WRITE);

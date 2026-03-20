@@ -543,7 +543,7 @@ static inline void tlb_change_page_size(struct mmu_gather *tlb,
 static inline unsigned long tlb_get_unmap_shift(struct mmu_gather *tlb)
 {
 	if (tlb->cleared_ptes)
-		return PAGE_SHIFT;
+		return MMUPAGE_SHIFT;
 	if (tlb->cleared_pmds)
 		return PMD_SHIFT;
 	if (tlb->cleared_puds)
@@ -551,7 +551,7 @@ static inline unsigned long tlb_get_unmap_shift(struct mmu_gather *tlb)
 	if (tlb->cleared_p4ds)
 		return P4D_SHIFT;
 
-	return PAGE_SHIFT;
+	return MMUPAGE_SHIFT;
 }
 
 static inline unsigned long tlb_get_unmap_size(struct mmu_gather *tlb)
@@ -658,7 +658,7 @@ static inline void __tlb_remove_tlb_entry(struct mmu_gather *tlb, pte_t *ptep, u
  */
 #define tlb_remove_tlb_entry(tlb, ptep, address)		\
 	do {							\
-		tlb_flush_pte_range(tlb, address, PAGE_SIZE);	\
+		tlb_flush_pte_range(tlb, address, MMUPAGE_SIZE);\
 		__tlb_remove_tlb_entry(tlb, ptep, address);	\
 	} while (0)
 
@@ -672,13 +672,13 @@ static inline void __tlb_remove_tlb_entry(struct mmu_gather *tlb, pte_t *ptep, u
 static inline void tlb_remove_tlb_entries(struct mmu_gather *tlb,
 		pte_t *ptep, unsigned int nr, unsigned long address)
 {
-	tlb_flush_pte_range(tlb, address, PAGE_SIZE * nr);
+	tlb_flush_pte_range(tlb, address, MMUPAGE_SIZE * nr);
 	for (;;) {
 		__tlb_remove_tlb_entry(tlb, ptep, address);
 		if (--nr == 0)
 			break;
 		ptep++;
-		address += PAGE_SIZE;
+		address += MMUPAGE_SIZE;
 	}
 }
 
