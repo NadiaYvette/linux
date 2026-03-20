@@ -223,8 +223,8 @@ void set_ptes(struct mm_struct *mm, unsigned long addr, pte_t *ptep,
 		if (--nr == 0)
 			break;
 		ptep++;
-		addr += PAGE_SIZE;
-		pte = pte_next_pfn(pte);
+		addr += MMUPAGE_SIZE;
+		pte = __pte(pte_val(pte) + __phys_to_pte_val(MMUPAGE_SIZE));
 	}
 }
 

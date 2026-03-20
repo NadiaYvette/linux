@@ -1008,9 +1008,9 @@ static bool vrm_calc_charge(struct vma_remap_struct *vrm)
 	 * the length of the new one. Otherwise it's just the delta in size.
 	 */
 	if (vrm->flags & MREMAP_DONTUNMAP)
-		charged = vrm->new_len >> PAGE_SHIFT;
+		charged = vrm->new_len >> MMUPAGE_SHIFT;
 	else
-		charged = vrm->delta >> PAGE_SHIFT;
+		charged = vrm->delta >> MMUPAGE_SHIFT;
 
 
 	/* This accounts 'charged' pages of memory. */
@@ -1042,7 +1042,7 @@ static void vrm_uncharge(struct vma_remap_struct *vrm)
 static void vrm_stat_account(struct vma_remap_struct *vrm,
 			     unsigned long bytes)
 {
-	unsigned long pages = bytes >> PAGE_SHIFT;
+	unsigned long pages = bytes >> MMUPAGE_SHIFT;
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma = vrm->vma;
 
@@ -1221,7 +1221,7 @@ static void unmap_source_vma(struct vma_remap_struct *vrm)
 	vrm->vmi_needs_invalidate = true;
 	if (err) {
 		/* OOM: unable to split vma, just get accounts right */
-		vm_acct_memory(len >> PAGE_SHIFT);
+		vm_acct_memory(len >> MMUPAGE_SHIFT);
 		return;
 	}
 
@@ -1496,7 +1496,7 @@ static unsigned long mremap_to(struct vma_remap_struct *vrm)
 	/* MREMAP_DONTUNMAP expands by old_len since old_len == new_len */
 	if (vrm->flags & MREMAP_DONTUNMAP) {
 		vma_flags_t vma_flags = vrm->vma->flags;
-		unsigned long pages = vrm->old_len >> PAGE_SHIFT;
+		unsigned long pages = vrm->old_len >> MMUPAGE_SHIFT;
 
 		if (!may_expand_vm(mm, &vma_flags, pages))
 			return -ENOMEM;
@@ -1836,7 +1836,7 @@ static int check_prep_vma(struct vma_remap_struct *vrm)
 	if (!mlock_future_ok(mm, vma->vm_flags & VM_LOCKED, vrm->delta))
 		return -EAGAIN;
 
-	if (!may_expand_vm(mm, &vma->flags, vrm->delta >> PAGE_SHIFT))
+	if (!may_expand_vm(mm, &vma->flags, vrm->delta >> MMUPAGE_SHIFT))
 		return -ENOMEM;
 
 	return 0;
@@ -1856,8 +1856,8 @@ static unsigned long check_mremap_params(struct vma_remap_struct *vrm)
 	if (flags & ~(MREMAP_FIXED | MREMAP_MAYMOVE | MREMAP_DONTUNMAP))
 		return -EINVAL;
 
-	/* Start address must be page-aligned. */
-	if (offset_in_page(addr))
+	/* Start address must be page-aligned (MMUPAGE for PGCL). */
+	if (addr & ~MMUPAGE_MASK)
 		return -EINVAL;
 
 	/*
@@ -1880,8 +1880,8 @@ static unsigned long check_mremap_params(struct vma_remap_struct *vrm)
 	if (vrm->new_addr > TASK_SIZE - vrm->new_len)
 		return -EINVAL;
 
-	/* The new address must be page-aligned. */
-	if (offset_in_page(vrm->new_addr))
+	/* The new address must be page-aligned (MMUPAGE for PGCL). */
+	if (vrm->new_addr & ~MMUPAGE_MASK)
 		return -EINVAL;
 
 	/* A fixed address implies a move. */
