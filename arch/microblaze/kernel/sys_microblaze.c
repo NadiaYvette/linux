@@ -37,19 +37,19 @@ SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
 		unsigned long, prot, unsigned long, flags, unsigned long, fd,
 		unsigned long, pgoff)
 {
-	if (pgoff & ~PAGE_MASK)
+	if (pgoff & ~MMUPAGE_MASK)
 		return -EINVAL;
 
-	return ksys_mmap_pgoff(addr, len, prot, flags, fd, pgoff >> PAGE_SHIFT);
+	return ksys_mmap_pgoff(addr, len, prot, flags, fd, pgoff >> MMUPAGE_SHIFT);
 }
 
 SYSCALL_DEFINE6(mmap2, unsigned long, addr, unsigned long, len,
 		unsigned long, prot, unsigned long, flags, unsigned long, fd,
 		unsigned long, pgoff)
 {
-	if (pgoff & (~PAGE_MASK >> 12))
+	if (pgoff & (~MMUPAGE_MASK >> 12))
 		return -EINVAL;
 
 	return ksys_mmap_pgoff(addr, len, prot, flags, fd,
-			       pgoff >> (PAGE_SHIFT - 12));
+			       pgoff >> (MMUPAGE_SHIFT - 12));
 }
