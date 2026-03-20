@@ -108,7 +108,7 @@ static int text_area_cpu_up(unsigned int cpu)
 	unsigned long addr;
 	int err;
 
-	area = get_vm_area(PAGE_SIZE, 0);
+	area = get_vm_area(MMUPAGE_SIZE, 0);
 	if (!area) {
 		WARN_ONCE(1, "Failed to create text area for cpu %d\n",
 			cpu);
@@ -144,7 +144,7 @@ static void put_patching_mm(struct mm_struct *mm, unsigned long patching_addr)
 	struct mmu_gather tlb;
 
 	tlb_gather_mmu(&tlb, mm);
-	free_pgd_range(&tlb, patching_addr, patching_addr + PAGE_SIZE, 0, 0);
+	free_pgd_range(&tlb, patching_addr, patching_addr + MMUPAGE_SIZE, 0, 0);
 	mmput(mm);
 }
 
@@ -164,7 +164,7 @@ static int text_area_cpu_up_mm(unsigned int cpu)
 	 * [PAGE_SIZE .. DEFAULT_MAP_WINDOW - PAGE_SIZE].
 	 * The lower address bound is PAGE_SIZE to avoid the zero-page.
 	 */
-	addr = (1 + (get_random_long() % (DEFAULT_MAP_WINDOW / PAGE_SIZE - 2))) << PAGE_SHIFT;
+	addr = (1 + (get_random_long() % (DEFAULT_MAP_WINDOW / MMUPAGE_SIZE - 2))) << MMUPAGE_SHIFT;
 
 	/*
 	 * PTE allocation uses GFP_KERNEL which means we need to
@@ -230,7 +230,7 @@ static unsigned long get_patch_pfn(void *addr)
 	if (IS_ENABLED(CONFIG_EXECMEM) && is_vmalloc_or_module_addr(addr))
 		return vmalloc_to_pfn(addr);
 	else
-		return __pa_symbol(addr) >> PAGE_SHIFT;
+		return __pa_symbol(addr) >> MMUPAGE_SHIFT;
 }
 
 /*
@@ -240,7 +240,7 @@ static int map_patch_area(void *addr, unsigned long text_poke_addr)
 {
 	unsigned long pfn = get_patch_pfn(addr);
 
-	return map_kernel_page(text_poke_addr, (pfn << PAGE_SHIFT), PAGE_KERNEL);
+	return map_kernel_page(text_poke_addr, (pfn << MMUPAGE_SHIFT), PAGE_KERNEL);
 }
 
 static void unmap_patch_area(unsigned long addr)
@@ -275,7 +275,7 @@ static void unmap_patch_area(unsigned long addr)
 	 * In hash, pte_clear flushes the tlb, in radix, we have to
 	 */
 	pte_clear(&init_mm, addr, ptep);
-	flush_tlb_kernel_range(addr, addr + PAGE_SIZE);
+	flush_tlb_kernel_range(addr, addr + MMUPAGE_SIZE);
 }
 
 static int __do_patch_mem_mm(void *addr, unsigned long val, bool is_dword)
@@ -291,7 +291,7 @@ static int __do_patch_mem_mm(void *addr, unsigned long val, bool is_dword)
 
 	patching_mm = __this_cpu_read(cpu_patching_context.mm);
 	text_poke_addr = __this_cpu_read(cpu_patching_context.addr);
-	patch_addr = (u32 *)(text_poke_addr + offset_in_page(addr));
+	patch_addr = (u32 *)(text_poke_addr + ((unsigned long)(addr) & ~MMUPAGE_MASK));
 
 	pte = get_locked_pte(patching_mm, text_poke_addr, &ptl);
 	if (!pte)
@@ -332,8 +332,8 @@ static int __do_patch_mem(void *addr, unsigned long val, bool is_dword)
 	pte_t *pte;
 	unsigned long pfn = get_patch_pfn(addr);
 
-	text_poke_addr = (unsigned long)__this_cpu_read(cpu_patching_context.addr) & PAGE_MASK;
-	patch_addr = (u32 *)(text_poke_addr + offset_in_page(addr));
+	text_poke_addr = (unsigned long)__this_cpu_read(cpu_patching_context.addr) & MMUPAGE_MASK;
+	patch_addr = (u32 *)(text_poke_addr + ((unsigned long)(addr) & ~MMUPAGE_MASK));
 
 	pte = __this_cpu_read(cpu_patching_context.pte);
 	__set_pte_at(&init_mm, text_poke_addr, pte, pfn_pte(pfn, PAGE_KERNEL), 0);
@@ -344,7 +344,7 @@ static int __do_patch_mem(void *addr, unsigned long val, bool is_dword)
 	err = __patch_mem(addr, val, patch_addr, is_dword);
 
 	pte_clear(&init_mm, text_poke_addr, pte);
-	flush_tlb_kernel_range(text_poke_addr, text_poke_addr + PAGE_SIZE);
+	flush_tlb_kernel_range(text_poke_addr, text_poke_addr + MMUPAGE_SIZE);
 
 	return err;
 }
@@ -463,7 +463,7 @@ static int __patch_instructions(u32 *patch_addr, u32 *code, size_t len, bool rep
 
 /*
  * A page is mapped and instructions that fit the page are patched.
- * Assumes 'len' to be (PAGE_SIZE - offset_in_page(addr)) or below.
+ * Assumes 'len' to be (PAGE_SIZE - ((unsigned long)(addr) & ~MMUPAGE_MASK)) or below.
  */
 static int __do_patch_instructions_mm(u32 *addr, u32 *code, size_t len, bool repeat_instr)
 {
@@ -477,7 +477,7 @@ static int __do_patch_instructions_mm(u32 *addr, u32 *code, size_t len, bool rep
 
 	patching_mm = __this_cpu_read(cpu_patching_context.mm);
 	text_poke_addr = __this_cpu_read(cpu_patching_context.addr);
-	patch_addr = (u32 *)(text_poke_addr + offset_in_page(addr));
+	patch_addr = (u32 *)(text_poke_addr + ((unsigned long)(addr) & ~MMUPAGE_MASK));
 
 	pte = get_locked_pte(patching_mm, text_poke_addr, &ptl);
 	if (!pte)
@@ -514,7 +514,7 @@ static int __do_patch_instructions_mm(u32 *addr, u32 *code, size_t len, bool rep
 
 /*
  * A page is mapped and instructions that fit the page are patched.
- * Assumes 'len' to be (PAGE_SIZE - offset_in_page(addr)) or below.
+ * Assumes 'len' to be (PAGE_SIZE - ((unsigned long)(addr) & ~MMUPAGE_MASK)) or below.
  */
 static int __do_patch_instructions(u32 *addr, u32 *code, size_t len, bool repeat_instr)
 {
@@ -524,8 +524,8 @@ static int __do_patch_instructions(u32 *addr, u32 *code, size_t len, bool repeat
 	pte_t *pte;
 	int err;
 
-	text_poke_addr = (unsigned long)__this_cpu_read(cpu_patching_context.addr) & PAGE_MASK;
-	patch_addr = (u32 *)(text_poke_addr + offset_in_page(addr));
+	text_poke_addr = (unsigned long)__this_cpu_read(cpu_patching_context.addr) & MMUPAGE_MASK;
+	patch_addr = (u32 *)(text_poke_addr + ((unsigned long)(addr) & ~MMUPAGE_MASK));
 
 	pte = __this_cpu_read(cpu_patching_context.pte);
 	__set_pte_at(&init_mm, text_poke_addr, pte, pfn_pte(pfn, PAGE_KERNEL), 0);
@@ -536,7 +536,7 @@ static int __do_patch_instructions(u32 *addr, u32 *code, size_t len, bool repeat
 	err = __patch_instructions(patch_addr, code, len, repeat_instr);
 
 	pte_clear(&init_mm, text_poke_addr, pte);
-	flush_tlb_kernel_range(text_poke_addr, text_poke_addr + PAGE_SIZE);
+	flush_tlb_kernel_range(text_poke_addr, text_poke_addr + MMUPAGE_SIZE);
 
 	return err;
 }
@@ -554,7 +554,7 @@ int patch_instructions(u32 *addr, u32 *code, size_t len, bool repeat_instr)
 		size_t plen;
 		int err;
 
-		plen = min_t(size_t, PAGE_SIZE - offset_in_page(addr), len);
+		plen = min_t(size_t, MMUPAGE_SIZE - ((unsigned long)(addr) & ~MMUPAGE_MASK), len);
 
 		local_irq_save(flags);
 		if (mm_patch_enabled())
