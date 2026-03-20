@@ -4467,7 +4467,7 @@ bool kvm_arch_setup_async_pf(struct kvm_vcpu *vcpu)
 	if (read_guest_real(vcpu, vcpu->arch.pfault_token, &arch.pfault_token, 8))
 		return false;
 
-	return kvm_setup_async_pf(vcpu, current->thread.gmap_teid.addr * PAGE_SIZE, hva, &arch);
+	return kvm_setup_async_pf(vcpu, current->thread.gmap_teid.addr * MMUPAGE_SIZE, hva, &arch);
 }
 
 static int vcpu_pre_run(struct kvm_vcpu *vcpu)
@@ -4580,7 +4580,7 @@ static int vcpu_post_run_handle_fault(struct kvm_vcpu *vcpu)
 	unsigned long gaddr;
 	int rc;
 
-	gaddr = current->thread.gmap_teid.addr * PAGE_SIZE;
+	gaddr = current->thread.gmap_teid.addr * MMUPAGE_SIZE;
 	if (kvm_s390_cur_gmap_fault_is_write())
 		foll = FOLL_WRITE;
 

@@ -66,13 +66,13 @@ NOKPROBE_SYMBOL(patch_unmap);
 
 static int __patch_insn_set(void *addr, u8 c, size_t len)
 {
-	bool across_pages = (offset_in_page(addr) + len) > PAGE_SIZE;
+	bool across_pages = (((uintptr_t)addr & ~MMUPAGE_MASK) + len) > MMUPAGE_SIZE;
 	void *waddr = addr;
 
 	/*
 	 * Only two pages can be mapped at a time for writing.
 	 */
-	if (len + offset_in_page(addr) > 2 * PAGE_SIZE)
+	if (len + ((uintptr_t)addr & ~MMUPAGE_MASK) > 2 * MMUPAGE_SIZE)
 		return -EINVAL;
 	/*
 	 * Before reaching here, it was expected to lock the text_mutex
@@ -84,7 +84,7 @@ static int __patch_insn_set(void *addr, u8 c, size_t len)
 	preempt_disable();
 
 	if (across_pages)
-		patch_map(addr + PAGE_SIZE, FIX_TEXT_POKE1);
+		patch_map(addr + MMUPAGE_SIZE, FIX_TEXT_POKE1);
 
 	waddr = patch_map(addr, FIX_TEXT_POKE0);
 
@@ -111,14 +111,14 @@ NOKPROBE_SYMBOL(__patch_insn_set);
 
 static int __patch_insn_write(void *addr, const void *insn, size_t len)
 {
-	bool across_pages = (offset_in_page(addr) + len) > PAGE_SIZE;
+	bool across_pages = (((uintptr_t)addr & ~MMUPAGE_MASK) + len) > MMUPAGE_SIZE;
 	void *waddr = addr;
 	int ret;
 
 	/*
 	 * Only two pages can be mapped at a time for writing.
 	 */
-	if (len + offset_in_page(addr) > 2 * PAGE_SIZE)
+	if (len + ((uintptr_t)addr & ~MMUPAGE_MASK) > 2 * MMUPAGE_SIZE)
 		return -EINVAL;
 
 	/*
@@ -138,7 +138,7 @@ static int __patch_insn_write(void *addr, const void *insn, size_t len)
 	preempt_disable();
 
 	if (across_pages)
-		patch_map(addr + PAGE_SIZE, FIX_TEXT_POKE1);
+		patch_map(addr + MMUPAGE_SIZE, FIX_TEXT_POKE1);
 
 	waddr = patch_map(addr, FIX_TEXT_POKE0);
 
@@ -188,7 +188,7 @@ static int patch_insn_set(void *addr, u8 c, size_t len)
 	 * loop with len <= 2 * PAGE_SIZE.
 	 */
 	while (len) {
-		size = min(len, PAGE_SIZE * 2 - offset_in_page(addr));
+		size = min(len, MMUPAGE_SIZE * 2 - ((uintptr_t)addr & ~MMUPAGE_MASK));
 		ret = __patch_insn_set(addr, c, size);
 		if (ret)
 			return ret;
@@ -223,7 +223,7 @@ int patch_insn_write(void *addr, const void *insn, size_t len)
 	 * because __patch_insn_write() can only handle len <= 2 * PAGE_SIZE.
 	 */
 	while (len) {
-		size = min(len, PAGE_SIZE * 2 - offset_in_page(addr));
+		size = min(len, MMUPAGE_SIZE * 2 - ((uintptr_t)addr & ~MMUPAGE_MASK));
 		ret = __patch_insn_write(addr, insn, size);
 		if (ret)
 			return ret;
