@@ -381,7 +381,7 @@ static int trans_exc_ending(struct kvm_vcpu *vcpu, int code, unsigned long gva, 
 		 * exc_access_id has to be set to 0 for some instructions. Both
 		 * cases have to be handled by the caller.
 		 */
-		teid->addr = gva >> PAGE_SHIFT;
+		teid->addr = gva >> MMUPAGE_SHIFT;
 		teid->fsi = mode == GACC_STORE ? TEID_FSI_STORE : TEID_FSI_FETCH;
 		teid->as = psw_bits(vcpu->arch.sie_block->gpsw).as;
 		fallthrough;

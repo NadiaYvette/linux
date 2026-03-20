@@ -175,16 +175,16 @@ static int __ref modify_pte_table(pmd_t *pmd, unsigned long addr,
 
 	prot = pgprot_val(PAGE_KERNEL);
 	pte = pte_offset_kernel(pmd, addr);
-	for (; addr < end; addr += PAGE_SIZE, pte++) {
+	for (; addr < end; addr += MMUPAGE_SIZE, pte++) {
 		if (!add) {
 			if (pte_none(*pte))
 				continue;
 			if (!direct)
-				vmem_free_pages((unsigned long)pfn_to_virt(pte_pfn(*pte)), get_order(PAGE_SIZE), altmap);
+				vmem_free_pages((unsigned long)pfn_to_virt(pte_pfn(*pte)), get_order(MMUPAGE_SIZE), altmap);
 			pte_clear(&init_mm, addr, pte);
 		} else if (pte_none(*pte)) {
 			if (!direct) {
-				void *new_page = vmemmap_alloc_block_buf(PAGE_SIZE, NUMA_NO_NODE, altmap);
+				void *new_page = vmemmap_alloc_block_buf(MMUPAGE_SIZE, NUMA_NO_NODE, altmap);
 
 				if (!new_page)
 					goto out;
@@ -630,7 +630,7 @@ int __vmem_map_4k_page(unsigned long addr, unsigned long phys, pgprot_t prot, bo
 {
 	pte_t *ptep, pte;
 
-	if (!IS_ALIGNED(addr, PAGE_SIZE))
+	if (!IS_ALIGNED(addr, MMUPAGE_SIZE))
 		return -EINVAL;
 	ptep = vmem_get_alloc_pte(addr, alloc);
 	if (!ptep)

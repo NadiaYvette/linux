@@ -246,8 +246,8 @@ static pte_t *boot_pte_alloc(void)
 {
 	pte_t *pte;
 
-	pte = (void *)physmem_alloc_or_die(RR_VMEM, PAGE_SIZE, PAGE_SIZE);
-	__arch_set_page_dat(pte, 1);
+	pte = (void *)physmem_alloc_or_die(RR_VMEM, _PAGE_TABLE_SIZE, _PAGE_TABLE_SIZE);
+	__arch_set_page_dat(pte, DIV_ROUND_UP(_PAGE_TABLE_SIZE, PAGE_SIZE));
 	memset64((u64 *)pte, _PAGE_INVALID, PTRS_PER_PTE);
 	return pte;
 }
@@ -271,7 +271,7 @@ static unsigned long resolve_pa_may_alloc(unsigned long addr, unsigned long size
 #ifdef CONFIG_KASAN
 	case POPULATE_KASAN_MAP_SHADOW:
 		/* Allow to fail large page allocations, this will fall back to 1mb/4k pages */
-		addr = physmem_alloc(RR_VMEM, size, size, size == PAGE_SIZE);
+		addr = physmem_alloc(RR_VMEM, size, size, size == MMUPAGE_SIZE);
 		if (addr) {
 			memset((void *)addr, 0, size);
 			return addr;
@@ -337,11 +337,11 @@ static void pgtable_pte_populate(pmd_t *pmd, unsigned long addr, unsigned long e
 	pte_t *pte, entry;
 
 	pte = pte_offset_kernel(pmd, addr);
-	for (; addr < end; addr += PAGE_SIZE, pte++) {
+	for (; addr < end; addr += MMUPAGE_SIZE, pte++) {
 		if (pte_none(*pte)) {
 			if (kasan_pte_populate_zero_shadow(pte, mode))
 				continue;
-			entry = __pte(resolve_pa_may_alloc(addr, PAGE_SIZE, mode));
+			entry = __pte(resolve_pa_may_alloc(addr, MMUPAGE_SIZE, mode));
 			entry = set_pte_bit(entry, PAGE_KERNEL);
 			set_pte(pte, entry);
 			pages++;
@@ -538,7 +538,7 @@ void setup_vmem(unsigned long kernel_start, unsigned long kernel_end, unsigned l
 	pgtable_populate(AMODE31_START, AMODE31_END, POPULATE_DIRECT);
 	pgtable_populate(__abs_lowcore, __abs_lowcore + sizeof(struct lowcore),
 			 POPULATE_ABS_LOWCORE);
-	pgtable_populate(__memcpy_real_area, __memcpy_real_area + PAGE_SIZE,
+	pgtable_populate(__memcpy_real_area, __memcpy_real_area + MMUPAGE_SIZE,
 			 POPULATE_NONE);
 	memcpy_real_ptep = __identity_va(__virt_to_kpte(__memcpy_real_area));
 

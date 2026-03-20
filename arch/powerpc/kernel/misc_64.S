@@ -386,7 +386,9 @@ _GLOBAL(kexec_sequence)
 	std	r0,16(r1)
 
 	/* switch stacks to newstack -- &kexec_stack.stack */
-	stdu	r1,THREAD_SIZE-STACK_FRAME_MIN_SIZE(r3)
+	LOAD_REG_IMMEDIATE(r0, THREAD_SIZE-STACK_FRAME_MIN_SIZE)
+	add	r3,r3,r0
+	std	r1,0(r3)
 	mr	r1,r3
 
 	li	r0,0

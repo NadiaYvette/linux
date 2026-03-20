@@ -99,7 +99,7 @@ static int __arch_setup_additional_pages(struct linux_binprm *bprm, int uses_int
 {
 	unsigned long vdso_size, vdso_base, mappings_size;
 	struct vm_special_mapping *vdso_spec;
-	unsigned long vvar_size = VDSO_NR_PAGES * PAGE_SIZE;
+	unsigned long vvar_size = VDSO_NR_PAGES * MMUPAGE_SIZE;
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
 
@@ -243,14 +243,14 @@ static struct page ** __init vdso_setup_pages(void *start, void *end)
 {
 	int i;
 	struct page **pagelist;
-	int pages = (end - start) >> PAGE_SHIFT;
+	int pages = (end - start) >> MMUPAGE_SHIFT;
 
 	pagelist = kzalloc_objs(struct page *, pages + 1);
 	if (!pagelist)
 		panic("%s: Cannot allocate page list for VDSO", __func__);
 
 	for (i = 0; i < pages; i++)
-		pagelist[i] = virt_to_page(start + i * PAGE_SIZE);
+		pagelist[i] = virt_to_page(start + i * MMUPAGE_SIZE);
 
 	return pagelist;
 }

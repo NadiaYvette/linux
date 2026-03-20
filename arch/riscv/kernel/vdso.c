@@ -17,7 +17,7 @@
 #include <vdso/datapage.h>
 #include <vdso/vsyscall.h>
 
-#define VVAR_SIZE  (VDSO_NR_PAGES << PAGE_SHIFT)
+#define VVAR_SIZE  (VDSO_NR_PAGES << MMUPAGE_SHIFT)
 
 struct __vdso_info {
 	const char *name;
@@ -53,17 +53,22 @@ static void __init __vdso_init(struct __vdso_info *vdso_info)
 	vdso_info->vdso_pages = (
 		vdso_info->vdso_code_end -
 		vdso_info->vdso_code_start) >>
-		PAGE_SHIFT;
+		MMUPAGE_SHIFT;
 
 	vdso_pagelist = kzalloc_objs(struct page *, vdso_info->vdso_pages);
 	if (vdso_pagelist == NULL)
 		panic("vDSO kcalloc failed!\n");
 
-	/* Grab the vDSO code pages. */
+	/*
+	 * Grab the vDSO code pages.  With PGCL, iterate at MMUPAGE
+	 * granularity: multiple hardware pages may share one struct page.
+	 */
 	pfn = sym_to_pfn(vdso_info->vdso_code_start);
 
-	for (i = 0; i < vdso_info->vdso_pages; i++)
-		vdso_pagelist[i] = pfn_to_page(pfn + i);
+	for (i = 0; i < vdso_info->vdso_pages; i++) {
+		unsigned long offset = i << MMUPAGE_SHIFT;
+		vdso_pagelist[i] = pfn_to_page(pfn + (offset >> PAGE_SHIFT));
+	}
 
 	vdso_info->cm->pages = vdso_pagelist;
 }
@@ -122,7 +127,7 @@ static int __setup_additional_pages(struct mm_struct *mm,
 
 	BUILD_BUG_ON(VDSO_NR_PAGES != __VDSO_PAGES);
 
-	vdso_text_len = vdso_info->vdso_pages << PAGE_SHIFT;
+	vdso_text_len = vdso_info->vdso_pages << MMUPAGE_SHIFT;
 	/* Be sure to map the data page */
 	vdso_mapping_len = vdso_text_len + VVAR_SIZE;
 

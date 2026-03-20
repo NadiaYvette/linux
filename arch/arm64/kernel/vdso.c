@@ -79,17 +79,19 @@ static int __init __vdso_init(enum vdso_abi abi)
 	vdso_info[abi].vdso_pages = (
 			vdso_info[abi].vdso_code_end -
 			vdso_info[abi].vdso_code_start) >>
-			PAGE_SHIFT;
+			MMUPAGE_SHIFT;
 
 	vdso_pagelist = kzalloc_objs(struct page *, vdso_info[abi].vdso_pages);
 	if (vdso_pagelist == NULL)
 		return -ENOMEM;
 
-	/* Grab the vDSO code pages. */
+	/* Grab the vDSO code pages (MMUPAGE granularity for PGCL). */
 	pfn = sym_to_pfn(vdso_info[abi].vdso_code_start);
 
-	for (i = 0; i < vdso_info[abi].vdso_pages; i++)
-		vdso_pagelist[i] = pfn_to_page(pfn + i);
+	for (i = 0; i < vdso_info[abi].vdso_pages; i++) {
+		unsigned long offset = i << MMUPAGE_SHIFT;
+		vdso_pagelist[i] = pfn_to_page(pfn + (offset >> PAGE_SHIFT));
+	}
 
 	vdso_info[abi].cm->pages = vdso_pagelist;
 
@@ -107,9 +109,9 @@ static int __setup_additional_pages(enum vdso_abi abi,
 
 	BUILD_BUG_ON(VDSO_NR_PAGES != __VDSO_PAGES);
 
-	vdso_text_len = vdso_info[abi].vdso_pages << PAGE_SHIFT;
+	vdso_text_len = vdso_info[abi].vdso_pages << MMUPAGE_SHIFT;
 	/* Be sure to map the data page */
-	vdso_mapping_len = vdso_text_len + VDSO_NR_PAGES * PAGE_SIZE;
+	vdso_mapping_len = vdso_text_len + VDSO_NR_PAGES * MMUPAGE_SIZE;
 
 	vdso_base = get_unmapped_area(NULL, 0, vdso_mapping_len, 0, 0);
 	if (IS_ERR_VALUE(vdso_base)) {
@@ -124,7 +126,7 @@ static int __setup_additional_pages(enum vdso_abi abi,
 	if (system_supports_bti_kernel())
 		gp_flags = VM_ARM64_BTI;
 
-	vdso_base += VDSO_NR_PAGES * PAGE_SIZE;
+	vdso_base += VDSO_NR_PAGES * MMUPAGE_SIZE;
 	mm->context.vdso = (void *)vdso_base;
 	ret = _install_special_mapping(mm, vdso_base, vdso_text_len,
 				       VM_READ|VM_EXEC|gp_flags|
@@ -253,7 +255,7 @@ static int aarch32_kuser_helpers_setup(struct mm_struct *mm)
 	 * Avoid VM_MAYWRITE for compatibility with arch/arm/, where it's
 	 * not safe to CoW the page containing the CPU exception vectors.
 	 */
-	ret = _install_special_mapping(mm, AARCH32_VECTORS_BASE, PAGE_SIZE,
+	ret = _install_special_mapping(mm, AARCH32_VECTORS_BASE, MMUPAGE_SIZE,
 				       VM_READ | VM_EXEC |
 				       VM_MAYREAD | VM_MAYEXEC |
 				       VM_SEALED_SYSMAP,
@@ -267,7 +269,7 @@ static int aarch32_sigreturn_setup(struct mm_struct *mm)
 	unsigned long addr;
 	void *ret;
 
-	addr = get_unmapped_area(NULL, 0, PAGE_SIZE, 0, 0);
+	addr = get_unmapped_area(NULL, 0, MMUPAGE_SIZE, 0, 0);
 	if (IS_ERR_VALUE(addr)) {
 		ret = ERR_PTR(addr);
 		goto out;
@@ -277,7 +279,7 @@ static int aarch32_sigreturn_setup(struct mm_struct *mm)
 	 * VM_MAYWRITE is required to allow gdb to Copy-on-Write and
 	 * set breakpoints.
 	 */
-	ret = _install_special_mapping(mm, addr, PAGE_SIZE,
+	ret = _install_special_mapping(mm, addr, MMUPAGE_SIZE,
 				       VM_READ | VM_EXEC | VM_MAYREAD |
 				       VM_MAYWRITE | VM_MAYEXEC |
 				       VM_SEALED_SYSMAP,

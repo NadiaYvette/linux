@@ -86,7 +86,7 @@ static struct vfsmount *shm_mnt __ro_after_init;
 
 #include "internal.h"
 
-#define VM_ACCT(size)    (PAGE_ALIGN(size) >> PAGE_SHIFT)
+#define VM_ACCT(size)    (MMUPAGE_ALIGN(size) >> MMUPAGE_SHIFT)
 
 /* Pretend that each entry is of this size in directory's i_size */
 #define BOGO_DIRENT_SIZE 20

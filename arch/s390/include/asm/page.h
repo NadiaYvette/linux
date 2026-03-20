@@ -55,9 +55,9 @@ static inline void copy_page(void *to, void *from)
 	union register_pair dst, src;
 
 	dst.even = (unsigned long) to;
-	dst.odd  = 0x1000;
+	dst.odd  = PAGE_SIZE;
 	src.even = (unsigned long) from;
-	src.odd  = 0xb0001000;
+	src.odd  = 0xb0000000UL | PAGE_SIZE;
 
 	asm volatile(
 		"	mvcl	%[dst],%[src]"

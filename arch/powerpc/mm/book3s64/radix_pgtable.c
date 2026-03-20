@@ -75,7 +75,6 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 			  int nid,
 			  unsigned long region_start, unsigned long region_end)
 {
-	unsigned long pfn = pa >> PAGE_SHIFT;
 	pgd_t *pgdp;
 	p4d_t *p4dp;
 	pud_t *pudp;
@@ -85,7 +84,7 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 	pgdp = pgd_offset_k(ea);
 	p4dp = p4d_offset(pgdp, ea);
 	if (p4d_none(*p4dp)) {
-		pudp = early_alloc_pgtable(PAGE_SIZE, nid,
+		pudp = early_alloc_pgtable(PUD_TABLE_SIZE, nid,
 					   region_start, region_end);
 		p4d_populate(&init_mm, p4dp, pudp);
 	}
@@ -95,7 +94,7 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 		goto set_the_pte;
 	}
 	if (pud_none(*pudp)) {
-		pmdp = early_alloc_pgtable(PAGE_SIZE, nid, region_start,
+		pmdp = early_alloc_pgtable(PMD_TABLE_SIZE, nid, region_start,
 					   region_end);
 		pud_populate(&init_mm, pudp, pmdp);
 	}
@@ -105,14 +104,15 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 		goto set_the_pte;
 	}
 	if (!pmd_present(*pmdp)) {
-		ptep = early_alloc_pgtable(PAGE_SIZE, nid,
+		ptep = early_alloc_pgtable(PTE_TABLE_SIZE, nid,
 						region_start, region_end);
 		pmd_populate_kernel(&init_mm, pmdp, ptep);
 	}
 	ptep = pte_offset_kernel(pmdp, ea);
 
 set_the_pte:
-	set_pte_at(&init_mm, ea, ptep, pfn_pte(pfn, flags));
+	set_pte_at(&init_mm, ea, ptep,
+		   __pte(__phys_to_pte_val(pa) | pgprot_val(flags) | _PAGE_PTE));
 	asm volatile("ptesync": : :"memory");
 	return 0;
 }
@@ -127,7 +127,6 @@ static int __map_kernel_page(unsigned long ea, unsigned long pa,
 			  int nid,
 			  unsigned long region_start, unsigned long region_end)
 {
-	unsigned long pfn = pa >> PAGE_SHIFT;
 	pgd_t *pgdp;
 	p4d_t *p4dp;
 	pud_t *pudp;
@@ -172,7 +171,8 @@ static int __map_kernel_page(unsigned long ea, unsigned long pa,
 		return -ENOMEM;
 
 set_the_pte:
-	set_pte_at(&init_mm, ea, ptep, pfn_pte(pfn, flags));
+	set_pte_at(&init_mm, ea, ptep,
+		   __pte(__phys_to_pte_val(pa) | pgprot_val(flags) | _PAGE_PTE));
 	asm volatile("ptesync": : :"memory");
 	return 0;
 }
@@ -309,10 +309,10 @@ static int __meminit create_physical_mapping(unsigned long start,
 		max_mapping_size = mapping_sz_limit;
 
 	if (debug_pagealloc_enabled())
-		max_mapping_size = PAGE_SIZE;
+		max_mapping_size = MMUPAGE_SIZE;
 
-	start = ALIGN(start, PAGE_SIZE);
-	end   = ALIGN_DOWN(end, PAGE_SIZE);
+	start = ALIGN(start, MMUPAGE_SIZE);
+	end   = ALIGN_DOWN(end, MMUPAGE_SIZE);
 	for (addr = start; addr < end; addr += mapping_size) {
 		unsigned long gap, previous_size;
 		int rc;
@@ -332,7 +332,7 @@ static int __meminit create_physical_mapping(unsigned long start,
 			mapping_size = PMD_SIZE;
 			psize = MMU_PAGE_2M;
 		} else {
-			mapping_size = PAGE_SIZE;
+			mapping_size = MMUPAGE_SIZE;
 			psize = mmu_virtual_psize;
 		}
 

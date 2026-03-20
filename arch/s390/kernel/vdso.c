@@ -63,14 +63,14 @@ static int map_vdso(unsigned long addr, unsigned long vdso_mapping_len)
 	rc = PTR_ERR(vma);
 	if (IS_ERR(vma))
 		goto out;
-	vdso_text_start = vvar_start + VDSO_NR_PAGES * PAGE_SIZE;
+	vdso_text_start = vvar_start + VDSO_NR_PAGES * MMUPAGE_SIZE;
 	/* VM_MAYWRITE for COW so gdb can set breakpoints */
 	vma = _install_special_mapping(mm, vdso_text_start, vdso_text_len,
 				       VM_READ|VM_EXEC|VM_SEALED_SYSMAP|
 				       VM_MAYREAD|VM_MAYWRITE|VM_MAYEXEC,
 				       &vdso_mapping);
 	if (IS_ERR(vma)) {
-		do_munmap(mm, vvar_start, PAGE_SIZE, NULL);
+		do_munmap(mm, vvar_start, VDSO_NR_PAGES * MMUPAGE_SIZE, NULL);
 		rc = PTR_ERR(vma);
 	} else {
 		current->mm->context.vdso_base = vdso_text_start;
@@ -89,7 +89,7 @@ static unsigned long vdso_addr(unsigned long start, unsigned long len)
 	 * Round up the start address. It can start out unaligned as a result
 	 * of stack start randomization.
 	 */
-	start = PAGE_ALIGN(start);
+	start = MMUPAGE_ALIGN(start);
 
 	/* Round the lowest possible end address up to a PMD boundary. */
 	end = (start + len + PMD_SIZE - 1) & PMD_MASK;
@@ -98,8 +98,8 @@ static unsigned long vdso_addr(unsigned long start, unsigned long len)
 	end -= len;
 
 	if (end > start) {
-		offset = get_random_u32_below(((end - start) >> PAGE_SHIFT) + 1);
-		addr = start + (offset << PAGE_SHIFT);
+		offset = get_random_u32_below(((end - start) >> MMUPAGE_SHIFT) + 1);
+		addr = start + (offset << MMUPAGE_SHIFT);
 	} else {
 		addr = start;
 	}
@@ -108,12 +108,12 @@ static unsigned long vdso_addr(unsigned long start, unsigned long len)
 
 unsigned long vdso_text_size(void)
 {
-	return PAGE_ALIGN(vdso_end - vdso_start);
+	return MMUPAGE_ALIGN(vdso_end - vdso_start);
 }
 
 unsigned long vdso_size(void)
 {
-	return vdso_text_size() + VDSO_NR_PAGES * PAGE_SIZE;
+	return vdso_text_size() + VDSO_NR_PAGES * MMUPAGE_SIZE;
 }
 
 int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
@@ -122,13 +122,13 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	unsigned long size = vdso_size();
 
 	if (current->flags & PF_RANDOMIZE)
-		addr = vdso_addr(current->mm->start_stack + PAGE_SIZE, size);
+		addr = vdso_addr(current->mm->start_stack + MMUPAGE_SIZE, size);
 	return map_vdso(addr, size);
 }
 
 static struct page ** __init vdso_setup_pages(void *start, void *end)
 {
-	int pages = (end - start) >> PAGE_SHIFT;
+	int pages = (end - start) >> MMUPAGE_SHIFT;
 	struct page **pagelist;
 	int i;
 
@@ -136,7 +136,7 @@ static struct page ** __init vdso_setup_pages(void *start, void *end)
 	if (!pagelist)
 		panic("%s: Cannot allocate page list for VDSO", __func__);
 	for (i = 0; i < pages; i++)
-		pagelist[i] = virt_to_page(start + i * PAGE_SIZE);
+		pagelist[i] = virt_to_page(start + i * MMUPAGE_SIZE);
 	return pagelist;
 }
 

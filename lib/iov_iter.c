@@ -1075,6 +1075,7 @@ static ssize_t __iov_iter_get_pages_alloc(struct iov_iter *i,
 
 	if (likely(user_backed_iter(i))) {
 		unsigned long addr;
+		size_t mmu_off;
 		int res;
 
 		if (iov_iter_rw(i) != WRITE)
@@ -1083,15 +1084,22 @@ static ssize_t __iov_iter_get_pages_alloc(struct iov_iter *i,
 			gup_flags |= FOLL_NOFAULT;
 
 		addr = first_iovec_segment(i, &maxsize);
-		*start = addr % PAGE_SIZE;
-		addr &= PAGE_MASK;
-		n = want_pages_array(pages, maxsize, *start, maxpages);
-		if (!n)
-			return -ENOMEM;
+		*start = addr % PAGE_SIZE; /* kernel-page offset for bvec */
+		mmu_off = addr & ~MMUPAGE_MASK; /* sub-MMUPAGE offset */
+		addr &= MMUPAGE_MASK;
+		n = DIV_ROUND_UP(maxsize + mmu_off, MMUPAGE_SIZE);
+		if (n > maxpages)
+			n = maxpages;
+		WARN_ON(!n);
+		if (!*pages) {
+			*pages = kvmalloc_objs(struct page *, n);
+			if (!*pages)
+				return -ENOMEM;
+		}
 		res = get_user_pages_fast(addr, n, gup_flags, *pages);
 		if (unlikely(res <= 0))
 			return res;
-		maxsize = min_t(size_t, maxsize, res * PAGE_SIZE - *start);
+		maxsize = min_t(size_t, maxsize, res * MMUPAGE_SIZE - mmu_off);
 		iov_iter_advance(i, maxsize);
 		return maxsize;
 	}
@@ -1161,12 +1169,12 @@ static int iov_npages(const struct iov_iter *i, int maxpages)
 	int npages = 0;
 
 	for (p = iter_iov(i); size; skip = 0, p++) {
-		unsigned offs = offset_in_page(p->iov_base + skip);
+		unsigned offs = (unsigned long)(p->iov_base + skip) & ~MMUPAGE_MASK;
 		size_t len = min(p->iov_len - skip, size);
 
 		if (len) {
 			size -= len;
-			npages += DIV_ROUND_UP(offs + len, PAGE_SIZE);
+			npages += DIV_ROUND_UP(offs + len, MMUPAGE_SIZE);
 			if (unlikely(npages > maxpages))
 				return maxpages;
 		}
@@ -1197,8 +1205,8 @@ int iov_iter_npages(const struct iov_iter *i, int maxpages)
 	if (unlikely(!i->count))
 		return 0;
 	if (likely(iter_is_ubuf(i))) {
-		unsigned offs = offset_in_page(i->ubuf + i->iov_offset);
-		int npages = DIV_ROUND_UP(offs + i->count, PAGE_SIZE);
+		unsigned offs = (unsigned long)(i->ubuf + i->iov_offset) & ~MMUPAGE_MASK;
+		int npages = DIV_ROUND_UP(offs + i->count, MMUPAGE_SIZE);
 		return min(npages, maxpages);
 	}
 	/* iovec and kvec have identical layouts */
@@ -1744,7 +1752,7 @@ static ssize_t iov_iter_extract_user_pages(struct iov_iter *i,
 {
 	unsigned long addr;
 	unsigned int gup_flags = 0;
-	size_t offset;
+	size_t mmu_off;
 	int res;
 
 	if (i->data_source == ITER_DEST)
@@ -1755,15 +1763,21 @@ static ssize_t iov_iter_extract_user_pages(struct iov_iter *i,
 		gup_flags |= FOLL_NOFAULT;
 
 	addr = first_iovec_segment(i, &maxsize);
-	*offset0 = offset = addr % PAGE_SIZE;
-	addr &= PAGE_MASK;
-	maxpages = want_pages_array(pages, maxsize, offset, maxpages);
+	*offset0 = addr % PAGE_SIZE; /* kernel-page offset for bvec consumers */
+	mmu_off = addr & ~MMUPAGE_MASK; /* sub-MMUPAGE offset */
+	addr &= MMUPAGE_MASK;
+	maxpages = DIV_ROUND_UP(maxsize + mmu_off, MMUPAGE_SIZE);
 	if (!maxpages)
 		return -ENOMEM;
+	if (!*pages) {
+		*pages = kvmalloc_objs(struct page *, maxpages);
+		if (!*pages)
+			return -ENOMEM;
+	}
 	res = pin_user_pages_fast(addr, maxpages, gup_flags, *pages);
 	if (unlikely(res <= 0))
 		return res;
-	maxsize = min_t(size_t, maxsize, res * PAGE_SIZE - offset);
+	maxsize = min_t(size_t, maxsize, res * MMUPAGE_SIZE - mmu_off);
 	iov_iter_advance(i, maxsize);
 	return maxsize;
 }

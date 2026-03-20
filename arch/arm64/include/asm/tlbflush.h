@@ -434,7 +434,7 @@ do {									\
 	typeof(pages) __flush_pages = pages;				\
 	int num = 0;							\
 	int scale = 3;							\
-	int shift = lpa2 ? 16 : PAGE_SHIFT;				\
+	int shift = lpa2 ? 16 : MMUPAGE_SHIFT;				\
 	unsigned long addr;						\
 									\
 	while (__flush_pages > 0) {					\
@@ -446,7 +446,7 @@ do {									\
 			if (tlbi_user)					\
 				__tlbi_user_level(op, addr, tlb_level);	\
 			__flush_start += stride;			\
-			__flush_pages -= stride >> PAGE_SHIFT;		\
+			__flush_pages -= stride >> MMUPAGE_SHIFT;	\
 			continue;					\
 		}							\
 									\
@@ -457,7 +457,7 @@ do {									\
 			__tlbi(r##op, addr);				\
 			if (tlbi_user)					\
 				__tlbi_user(r##op, addr);		\
-			__flush_start += __TLBI_RANGE_PAGES(num, scale) << PAGE_SHIFT; \
+			__flush_start += __TLBI_RANGE_PAGES(num, scale) << MMUPAGE_SHIFT; \
 			__flush_pages -= __TLBI_RANGE_PAGES(num, scale);\
 		}							\
 		scale--;						\
@@ -493,7 +493,7 @@ static inline void __flush_tlb_range_nosync(struct mm_struct *mm,
 
 	start = round_down(start, stride);
 	end = round_up(end, stride);
-	pages = (end - start) >> PAGE_SHIFT;
+	pages = (end - start) >> MMUPAGE_SHIFT;
 
 	if (__flush_tlb_range_limit_excess(start, end, pages, stride)) {
 		flush_tlb_mm(mm);
@@ -532,7 +532,7 @@ static inline void local_flush_tlb_contpte(struct vm_area_struct *vma,
 
 	dsb(nshst);
 	asid = ASID(vma->vm_mm);
-	__flush_tlb_range_op(vale1, addr, CONT_PTES, PAGE_SIZE, asid,
+	__flush_tlb_range_op(vale1, addr, CONT_PTES, MMUPAGE_SIZE, asid,
 			     3, true, lpa2_is_enabled());
 	mmu_notifier_arch_invalidate_secondary_tlbs(vma->vm_mm, addr,
 						    addr + CONT_PTE_SIZE);
@@ -548,17 +548,17 @@ static inline void flush_tlb_range(struct vm_area_struct *vma,
 	 * Set the tlb_level to TLBI_TTL_UNKNOWN because we can not get enough
 	 * information here.
 	 */
-	__flush_tlb_range(vma, start, end, PAGE_SIZE, false, TLBI_TTL_UNKNOWN);
+	__flush_tlb_range(vma, start, end, MMUPAGE_SIZE, false, TLBI_TTL_UNKNOWN);
 }
 
 static inline void flush_tlb_kernel_range(unsigned long start, unsigned long end)
 {
-	const unsigned long stride = PAGE_SIZE;
+	const unsigned long stride = MMUPAGE_SIZE;
 	unsigned long pages;
 
 	start = round_down(start, stride);
 	end = round_up(end, stride);
-	pages = (end - start) >> PAGE_SHIFT;
+	pages = (end - start) >> MMUPAGE_SHIFT;
 
 	if (__flush_tlb_range_limit_excess(start, end, pages, stride)) {
 		flush_tlb_all();
@@ -589,7 +589,7 @@ static inline void __flush_tlb_kernel_pgtable(unsigned long kaddr)
 static inline void arch_tlbbatch_add_pending(struct arch_tlbflush_unmap_batch *batch,
 		struct mm_struct *mm, unsigned long start, unsigned long end)
 {
-	__flush_tlb_range_nosync(mm, start, end, PAGE_SIZE, true, 3);
+	__flush_tlb_range_nosync(mm, start, end, MMUPAGE_SIZE, true, 3);
 }
 
 static inline bool __pte_flags_need_flush(ptdesc_t oldval, ptdesc_t newval)

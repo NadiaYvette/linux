@@ -210,31 +210,34 @@ static int p9_virtio_cancelled(struct p9_client *client, struct p9_req_t *req)
  * @limit: maximum number of pages in sg list.
  * @pdata: a list of pages to add into sg.
  * @nr_pages: number of pages to pack into the scatter/gather list
- * @offs: amount of data in the beginning of first page _not_ to pack
+ * @offs: offset in first page where data starts
  * @count: amount of data to pack into the scatter/gather list
+ * @pstep: page step size — MMUPAGE_SIZE for GUP user pages,
+ *         PAGE_SIZE for kernel/bvec pages.
+ *
+ * With PGCL, GUP returns one page pointer per MMUPAGE.  Multiple
+ * consecutive entries may reference the same struct page at different
+ * kernel-page offsets.  @pstep controls the stride per entry.
  */
 static int
 pack_sg_list_p(struct scatterlist *sg, int start, int limit,
-	       struct page **pdata, int nr_pages, size_t offs, int count)
+	       struct page **pdata, int nr_pages, size_t offs, int count,
+	       size_t pstep)
 {
 	int i = 0, s;
 	int data_off = offs;
 	int index = start;
 
 	BUG_ON(nr_pages > (limit - start));
-	/*
-	 * if the first page doesn't start at
-	 * page boundary find the offset
-	 */
 	while (nr_pages) {
-		s = PAGE_SIZE - data_off;
+		s = pstep - (data_off & (pstep - 1));
 		if (s > count)
 			s = count;
 		BUG_ON(index >= limit);
 		/* Make sure we don't terminate early. */
 		sg_unmark_end(&sg[index]);
 		sg_set_page(&sg[index++], pdata[i++], s, data_off);
-		data_off = 0;
+		data_off = (data_off + s) & (PAGE_SIZE - 1);
 		count -= s;
 		nr_pages--;
 	}
@@ -310,7 +313,8 @@ static int p9_get_mapped_pages(struct virtio_chan *chan,
 			       struct iov_iter *data,
 			       int count,
 			       size_t *offs,
-			       int *need_drop)
+			       int *need_drop,
+			       size_t *pstep)
 {
 	int nr_pages;
 	int err;
@@ -320,6 +324,7 @@ static int p9_get_mapped_pages(struct virtio_chan *chan,
 
 	if (!iov_iter_is_kvec(data)) {
 		int n;
+		bool is_user = user_backed_iter(data);
 		/*
 		 * We allow only p9_max_pages pinned. We wait for the
 		 * Other zc request to finish here
@@ -334,7 +339,18 @@ static int p9_get_mapped_pages(struct virtio_chan *chan,
 		if (n < 0)
 			return n;
 		*need_drop = 1;
-		nr_pages = DIV_ROUND_UP(n + *offs, PAGE_SIZE);
+		/*
+		 * GUP (user-backed) returns MMUPAGE-count entries;
+		 * bvec/folioq/xarray paths return PAGE-count entries.
+		 */
+		if (is_user) {
+			*pstep = MMUPAGE_SIZE;
+			nr_pages = DIV_ROUND_UP(n + (*offs & ~MMUPAGE_MASK),
+						MMUPAGE_SIZE);
+		} else {
+			*pstep = PAGE_SIZE;
+			nr_pages = DIV_ROUND_UP(n + *offs, PAGE_SIZE);
+		}
 		atomic_add(nr_pages, &vp_pinned);
 		return n;
 	} else {
@@ -363,6 +379,7 @@ static int p9_get_mapped_pages(struct virtio_chan *chan,
 			return -ENOMEM;
 
 		*need_drop = 0;
+		*pstep = PAGE_SIZE;
 		p -= (*offs = offset_in_page(p));
 		for (index = 0; index < nr_pages; index++) {
 			if (is_vmalloc_addr(p))
@@ -428,6 +445,7 @@ p9_virtio_zc_request(struct p9_client *client, struct p9_req_t *req,
 	struct virtio_chan *chan = client->trans;
 	struct scatterlist *sgs[4];
 	size_t offs = 0;
+	size_t pstep = PAGE_SIZE;
 	int need_drop = 0;
 	int kicked = 0;
 
@@ -436,12 +454,13 @@ p9_virtio_zc_request(struct p9_client *client, struct p9_req_t *req,
 	if (uodata) {
 		__le32 sz;
 		int n = p9_get_mapped_pages(chan, &out_pages, uodata,
-					    outlen, &offs, &need_drop);
+					    outlen, &offs, &need_drop,
+					    &pstep);
 		if (n < 0) {
 			err = n;
 			goto err_out;
 		}
-		out_nr_pages = DIV_ROUND_UP(n + offs, PAGE_SIZE);
+		out_nr_pages = DIV_ROUND_UP(n + (offs & (pstep - 1)), pstep);
 		if (n != outlen) {
 			__le32 v = cpu_to_le32(n);
 			memcpy(&req->tc.sdata[req->tc.size - 4], &v, 4);
@@ -455,12 +474,13 @@ p9_virtio_zc_request(struct p9_client *client, struct p9_req_t *req,
 		memcpy(&req->tc.sdata[0], &sz, sizeof(sz));
 	} else if (uidata) {
 		int n = p9_get_mapped_pages(chan, &in_pages, uidata,
-					    inlen, &offs, &need_drop);
+					    inlen, &offs, &need_drop,
+					    &pstep);
 		if (n < 0) {
 			err = n;
 			goto err_out;
 		}
-		in_nr_pages = DIV_ROUND_UP(n + offs, PAGE_SIZE);
+		in_nr_pages = DIV_ROUND_UP(n + (offs & (pstep - 1)), pstep);
 		if (n != inlen) {
 			__le32 v = cpu_to_le32(n);
 			memcpy(&req->tc.sdata[req->tc.size - 4], &v, 4);
@@ -483,7 +503,8 @@ req_retry_pinned:
 	if (out_pages) {
 		sgs[out_sgs++] = chan->sg + out;
 		out += pack_sg_list_p(chan->sg, out, VIRTQUEUE_NUM,
-				      out_pages, out_nr_pages, offs, outlen);
+				      out_pages, out_nr_pages, offs, outlen,
+				      pstep);
 	}
 
 	/*
@@ -501,7 +522,8 @@ req_retry_pinned:
 	if (in_pages) {
 		sgs[out_sgs + in_sgs++] = chan->sg + out + in;
 		pack_sg_list_p(chan->sg, out + in, VIRTQUEUE_NUM,
-			       in_pages, in_nr_pages, offs, inlen);
+			       in_pages, in_nr_pages, offs, inlen,
+			       pstep);
 	}
 
 	BUG_ON(out_sgs + in_sgs > ARRAY_SIZE(sgs));

@@ -23,14 +23,14 @@ int abs_lowcore_map(int cpu, struct lowcore *lc, bool alloc)
 			 */
 			if (alloc) {
 				for (--i; i >= 0; i--) {
-					addr -= PAGE_SIZE;
+					addr -= MMUPAGE_SIZE;
 					vmem_unmap_4k_page(addr);
 				}
 			}
 			return rc;
 		}
-		addr += PAGE_SIZE;
-		phys += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
+		phys += MMUPAGE_SIZE;
 	}
 	return 0;
 }
@@ -42,6 +42,6 @@ void abs_lowcore_unmap(int cpu)
 
 	for (i = 0; i < LC_PAGES; i++) {
 		vmem_unmap_4k_page(addr);
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 	}
 }
