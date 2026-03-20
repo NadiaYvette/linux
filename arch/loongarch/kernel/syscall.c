@@ -29,19 +29,19 @@
 SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len, unsigned long,
 		prot, unsigned long, flags, unsigned long, fd, unsigned long, offset)
 {
-	if (offset & ~PAGE_MASK)
+	if (offset & ~MMUPAGE_MASK)
 		return -EINVAL;
 
-	return ksys_mmap_pgoff(addr, len, prot, flags, fd, offset >> PAGE_SHIFT);
+	return ksys_mmap_pgoff(addr, len, prot, flags, fd, offset >> MMUPAGE_SHIFT);
 }
 
 SYSCALL_DEFINE6(mmap2, unsigned long, addr, unsigned long, len, unsigned long,
 		 prot, unsigned long, flags, unsigned long, fd, unsigned long, offset)
 {
-	if (offset & (~PAGE_MASK >> 12))
+	if (offset & (~MMUPAGE_MASK >> 12))
 		return -EINVAL;
 
-	return ksys_mmap_pgoff(addr, len, prot, flags, fd, offset >> (PAGE_SHIFT - 12));
+	return ksys_mmap_pgoff(addr, len, prot, flags, fd, offset >> (MMUPAGE_SHIFT - 12));
 }
 
 void *sys_call_table[__NR_syscalls] = {

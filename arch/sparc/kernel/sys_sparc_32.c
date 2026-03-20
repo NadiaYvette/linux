@@ -113,7 +113,7 @@ SYSCALL_DEFINE6(mmap2, unsigned long, addr, unsigned long, len,
 	/* Make sure the shift for mmap2 is constant (12), no matter what PAGE_SIZE
 	   we have. */
 	return ksys_mmap_pgoff(addr, len, prot, flags, fd,
-			       pgoff >> (PAGE_SHIFT - 12));
+			       pgoff >> (MMUPAGE_SHIFT - 12));
 }
 
 SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
@@ -121,7 +121,7 @@ SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
 	unsigned long, off)
 {
 	/* no alignment check? */
-	return ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> PAGE_SHIFT);
+	return ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> MMUPAGE_SHIFT);
 }
 
 SYSCALL_DEFINE5(sparc_remap_file_pages, unsigned long, start, unsigned long, size,

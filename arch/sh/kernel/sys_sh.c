@@ -33,9 +33,9 @@ asmlinkage int old_mmap(unsigned long addr, unsigned long len,
 	unsigned long prot, unsigned long flags,
 	int fd, unsigned long off)
 {
-	if (off & ~PAGE_MASK)
+	if (off & ~MMUPAGE_MASK)
 		return -EINVAL;
-	return ksys_mmap_pgoff(addr, len, prot, flags, fd, off>>PAGE_SHIFT);
+	return ksys_mmap_pgoff(addr, len, prot, flags, fd, off>>MMUPAGE_SHIFT);
 }
 
 asmlinkage long sys_mmap2(unsigned long addr, unsigned long len,
@@ -46,10 +46,10 @@ asmlinkage long sys_mmap2(unsigned long addr, unsigned long len,
 	 * The shift for mmap2 is constant, regardless of PAGE_SIZE
 	 * setting.
 	 */
-	if (pgoff & ((1 << (PAGE_SHIFT - 12)) - 1))
+	if (pgoff & ((1 << (MMUPAGE_SHIFT - 12)) - 1))
 		return -EINVAL;
 
-	pgoff >>= PAGE_SHIFT - 12;
+	pgoff >>= MMUPAGE_SHIFT - 12;
 
 	return ksys_mmap_pgoff(addr, len, prot, flags, fd, pgoff);
 }
