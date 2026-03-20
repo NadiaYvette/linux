@@ -475,11 +475,11 @@ SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
 {
 	unsigned long retval = -EINVAL;
 
-	if ((off + PAGE_ALIGN(len)) < off)
+	if ((off + MMUPAGE_ALIGN(len)) < off)
 		goto out;
-	if (off & ~PAGE_MASK)
+	if (off & ~MMUPAGE_MASK)
 		goto out;
-	retval = ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> PAGE_SHIFT);
+	retval = ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> MMUPAGE_SHIFT);
 out:
 	return retval;
 }

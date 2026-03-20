@@ -14,7 +14,7 @@ static long riscv_sys_mmap(unsigned long addr, unsigned long len,
 			   unsigned long fd, unsigned long offset,
 			   unsigned long page_shift_offset)
 {
-	if (unlikely(offset & (~PAGE_MASK >> page_shift_offset)))
+	if (unlikely(offset & (~MMUPAGE_MASK >> page_shift_offset)))
 		return -EINVAL;
 
 	/*
@@ -27,7 +27,7 @@ static long riscv_sys_mmap(unsigned long addr, unsigned long len,
 		prot |= PROT_READ;
 
 	return ksys_mmap_pgoff(addr, len, prot, flags, fd,
-			       offset >> (PAGE_SHIFT - page_shift_offset));
+			       offset >> (MMUPAGE_SHIFT - page_shift_offset));
 }
 
 #ifdef CONFIG_64BIT

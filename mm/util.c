@@ -609,7 +609,7 @@ unsigned long vm_mmap(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
 	unsigned long flag, unsigned long offset)
 {
-	if (unlikely(offset + PAGE_ALIGN(len) < offset))
+	if (unlikely(offset + MMUPAGE_ALIGN(len) < offset))
 		return -EINVAL;
 	if (unlikely(offset & ~MMUPAGE_MASK))
 		return -EINVAL;

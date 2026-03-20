@@ -1352,10 +1352,10 @@ out_free_interp:
 		   and some applications "depend" upon this behavior.
 		   Since we do not have the power to recompile these, we
 		   emulate the SVr4 behavior. Sigh. */
-		error = vm_mmap(NULL, 0, PAGE_SIZE, PROT_READ | PROT_EXEC,
+		error = vm_mmap(NULL, 0, MMUPAGE_SIZE, PROT_READ | PROT_EXEC,
 				MAP_FIXED | MAP_PRIVATE, 0);
 
-		retval = do_mseal(0, PAGE_SIZE, 0);
+		retval = do_mseal(0, MMUPAGE_SIZE, 0);
 		if (retval)
 			pr_warn_ratelimited("pid=%d, couldn't seal address 0, ret=%d.\n",
 					    task_pid_nr(current), retval);
