@@ -204,7 +204,7 @@ void setup_protection_map(void);
 #define _PAGE_SWP_EXCLUSIVE _PAGE_LARGE	/* SW pte exclusive swap bit */
 
 /* Set of bits not changed in pte_modify */
-#define _PAGE_CHG_MASK		(PAGE_MASK | _PAGE_SPECIAL | _PAGE_DIRTY | \
+#define _PAGE_CHG_MASK		(MMUPAGE_MASK | _PAGE_SPECIAL | _PAGE_DIRTY | \
 				 _PAGE_YOUNG | _PAGE_SOFT_DIRTY)
 
 /*
@@ -358,7 +358,7 @@ void setup_protection_map(void);
 #define _REGION2_INDEX	(0x7ffUL << _REGION2_SHIFT)
 #define _REGION3_INDEX	(0x7ffUL << _REGION3_SHIFT)
 #define _SEGMENT_INDEX	(0x7ffUL << _SEGMENT_SHIFT)
-#define _PAGE_INDEX	(0xffUL  << PAGE_SHIFT)
+#define _PAGE_INDEX	(0xffUL  << MMUPAGE_SHIFT)
 
 #define _REGION1_SIZE	(1UL << _REGION1_SHIFT)
 #define _REGION2_SIZE	(1UL << _REGION2_SHIFT)
@@ -1106,7 +1106,7 @@ static __always_inline void __ptep_rdp(unsigned long addr, pte_t *ptep, int loca
 	pto = __pa(ptep) & ~(PTRS_PER_PTE * sizeof(pte_t) - 1);
 	asm volatile(".insn	rrf,0xb98b0000,%[r1],%[r2],%%r0,%[m4]"
 		     : "+m" (*ptep)
-		     : [r1] "a" (pto), [r2] "a" (addr & PAGE_MASK),
+		     : [r1] "a" (pto), [r2] "a" (addr & MMUPAGE_MASK),
 		       [m4] "i" (local));
 }
 
@@ -1316,7 +1316,7 @@ static inline int ptep_set_access_flags(struct vm_area_struct *vma,
 #define pgprot_writecombine	pgprot_writecombine
 pgprot_t pgprot_writecombine(pgprot_t prot);
 
-#define PFN_PTE_SHIFT		PAGE_SHIFT
+#define PFN_PTE_SHIFT		MMUPAGE_SHIFT
 
 /*
  * Set multiple PTEs to consecutive pages with a single call.  All PTEs
@@ -1332,7 +1332,7 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 		if (--nr == 0)
 			break;
 		ptep++;
-		entry = __pte(pte_val(entry) + PAGE_SIZE);
+		entry = __pte(pte_val(entry) + MMUPAGE_SIZE);
 	}
 }
 #define set_ptes set_ptes

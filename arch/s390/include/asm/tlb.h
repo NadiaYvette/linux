@@ -82,7 +82,17 @@ static inline void pte_free_tlb(struct mmu_gather *tlb, pgtable_t pte,
 	tlb->mm->context.flush_mm = 1;
 	tlb->freed_tables = 1;
 	tlb->cleared_pmds = 1;
+#if PAGE_MMUSHIFT
+	/*
+	 * With PGCL, PTE tables are slab-allocated and cannot use
+	 * tlb_remove_ptdesc (which expects a per-table ptdesc).
+	 * Free directly — s390x PTEs were already invalidated via IPTE,
+	 * and flush_mm=1 ensures a full TLB flush before mm reuse.
+	 */
+	page_table_free(tlb->mm, (unsigned long *)pte);
+#else
 	tlb_remove_ptdesc(tlb, virt_to_ptdesc(pte));
+#endif
 }
 
 /*

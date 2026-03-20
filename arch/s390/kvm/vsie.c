@@ -67,7 +67,7 @@ struct vsie_page {
 	__u8 fac[S390_ARCH_FAC_LIST_SIZE_BYTE];	/* 0x0800 */
 };
 
-static_assert(sizeof(struct vsie_page) == PAGE_SIZE);
+static_assert(sizeof(struct vsie_page) == MMUPAGE_SIZE);
 
 /* trigger a validity icpt for the given scb */
 static int set_validity_icpt(struct kvm_s390_sie_block *scb,
@@ -933,14 +933,14 @@ static int handle_fault(struct kvm_vcpu *vcpu, struct vsie_page *vsie_page, stru
 	if ((current->thread.gmap_int_code & PGM_INT_CODE_MASK) == PGM_PROTECTION)
 		/* we can directly forward all protection exceptions */
 		return inject_fault(vcpu, PGM_PROTECTION,
-				    current->thread.gmap_teid.addr * PAGE_SIZE, 1);
+				    current->thread.gmap_teid.addr * MMUPAGE_SIZE, 1);
 
-	rc = gaccess_shadow_fault(vcpu, sg, current->thread.gmap_teid.addr * PAGE_SIZE, NULL, wr);
+	rc = gaccess_shadow_fault(vcpu, sg, current->thread.gmap_teid.addr * MMUPAGE_SIZE, NULL, wr);
 	if (rc > 0) {
 		rc = inject_fault(vcpu, rc,
-				  current->thread.gmap_teid.addr * PAGE_SIZE, wr);
+				  current->thread.gmap_teid.addr * MMUPAGE_SIZE, wr);
 		if (rc >= 0)
-			vsie_page->fault_addr = current->thread.gmap_teid.addr * PAGE_SIZE;
+			vsie_page->fault_addr = current->thread.gmap_teid.addr * MMUPAGE_SIZE;
 	}
 	return rc;
 }

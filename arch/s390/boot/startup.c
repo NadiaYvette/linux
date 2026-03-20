@@ -413,7 +413,7 @@ static unsigned long setup_kernel_memory_layout(unsigned long kernel_size)
 	VMALLOC_START = VMALLOC_END - vmalloc_size;
 	boot_debug("vmalloc area:        0x%016lx-0x%016lx\n", VMALLOC_START, VMALLOC_END);
 
-	__memcpy_real_area = round_down(VMALLOC_START - MEMCPY_REAL_SIZE, PAGE_SIZE);
+	__memcpy_real_area = round_down(VMALLOC_START - MEMCPY_REAL_SIZE, MMUPAGE_SIZE);
 	boot_debug("memcpy real area:    0x%016lx-0x%016lx\n", __memcpy_real_area,
 		   __memcpy_real_area + MEMCPY_REAL_SIZE);
 	__abs_lowcore = round_down(__memcpy_real_area - ABS_LOWCORE_MAP_SIZE,

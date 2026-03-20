@@ -492,7 +492,7 @@ static int mlock_fixup(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	/*
 	 * Keep track of amount of locked VM.
 	 */
-	nr_pages = (end - start) >> PAGE_SHIFT;
+	nr_pages = (end - start) >> MMUPAGE_SHIFT;
 	if (!(newflags & VM_LOCKED))
 		nr_pages = -nr_pages;
 	else if (oldflags & VM_LOCKED)
@@ -599,7 +599,7 @@ static unsigned long count_mm_mlocked_page_nr(struct mm_struct *mm,
 		}
 	}
 
-	return count >> PAGE_SHIFT;
+	return count >> MMUPAGE_SHIFT;
 }
 
 /*
@@ -629,8 +629,8 @@ static __must_check int do_mlock(unsigned long start, size_t len, vm_flags_t fla
 	start &= MMUPAGE_MASK;
 
 	lock_limit = rlimit(RLIMIT_MEMLOCK);
-	lock_limit >>= PAGE_SHIFT;
-	locked = len >> PAGE_SHIFT;
+	lock_limit >>= MMUPAGE_SHIFT;
+	locked = len >> MMUPAGE_SHIFT;
 
 	if (mmap_write_lock_killable(current->mm))
 		return -EINTR;
@@ -760,7 +760,7 @@ SYSCALL_DEFINE1(mlockall, int, flags)
 		return -EPERM;
 
 	lock_limit = rlimit(RLIMIT_MEMLOCK);
-	lock_limit >>= PAGE_SHIFT;
+	lock_limit >>= MMUPAGE_SHIFT;
 
 	if (mmap_write_lock_killable(current->mm))
 		return -EINTR;
@@ -799,10 +799,10 @@ int user_shm_lock(size_t size, struct ucounts *ucounts)
 	long memlock;
 	int allowed = 0;
 
-	locked = (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
+	locked = (size + MMUPAGE_SIZE - 1) >> MMUPAGE_SHIFT;
 	lock_limit = rlimit(RLIMIT_MEMLOCK);
 	if (lock_limit != RLIM_INFINITY)
-		lock_limit >>= PAGE_SHIFT;
+		lock_limit >>= MMUPAGE_SHIFT;
 	spin_lock(&shmlock_user_lock);
 	memlock = inc_rlimit_ucounts(ucounts, UCOUNT_RLIMIT_MEMLOCK, locked);
 
@@ -824,7 +824,7 @@ out:
 void user_shm_unlock(size_t size, struct ucounts *ucounts)
 {
 	spin_lock(&shmlock_user_lock);
-	dec_rlimit_ucounts(ucounts, UCOUNT_RLIMIT_MEMLOCK, (size + PAGE_SIZE - 1) >> PAGE_SHIFT);
+	dec_rlimit_ucounts(ucounts, UCOUNT_RLIMIT_MEMLOCK, (size + MMUPAGE_SIZE - 1) >> MMUPAGE_SHIFT);
 	spin_unlock(&shmlock_user_lock);
 	put_ucounts(ucounts);
 }

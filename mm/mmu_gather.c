@@ -174,7 +174,8 @@ static bool __tlb_remove_folio_pages_size(struct mmu_gather *tlb,
 
 #ifdef CONFIG_MMU_GATHER_PAGE_SIZE
 	VM_WARN_ON(tlb->page_size != page_size);
-	VM_WARN_ON_ONCE(nr_pages != 1 && page_size != PAGE_SIZE);
+	VM_WARN_ON_ONCE(nr_pages != 1 && page_size != PAGE_SIZE &&
+			page_size != MMUPAGE_SIZE);
 	VM_WARN_ON_ONCE(page_folio(page) != page_folio(page + nr_pages - 1));
 #endif
 
@@ -208,7 +209,7 @@ bool __tlb_remove_folio_pages(struct mmu_gather *tlb, struct page *page,
 		unsigned int nr_pages, bool delay_rmap)
 {
 	return __tlb_remove_folio_pages_size(tlb, page, nr_pages, delay_rmap,
-					     PAGE_SIZE);
+					     MMUPAGE_SIZE);
 }
 
 bool __tlb_remove_page_size(struct mmu_gather *tlb, struct page *page, int page_size)

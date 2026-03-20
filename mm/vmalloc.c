@@ -138,17 +138,12 @@ static int vmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 #endif
 		/*
 		 * With PAGE_MMUSHIFT > 0, paddr may be MMUPAGE-aligned
-		 * but not PAGE-aligned.  PTE_PFN_MASK (arch-specific)
-		 * preserves the MMUPAGE PFN bits directly.  On arches
-		 * where PAGE_MMUSHIFT is always 0, use pfn_pte().
+		 * but not PAGE-aligned.  Use __phys_to_pte_val() to
+		 * correctly encode the sub-page physical address on all
+		 * architectures.
 		 */
-#ifdef PTE_PFN_MASK
 		set_pte_at(&init_mm, addr, pte,
-			   __pte((paddr & PTE_PFN_MASK) | pgprot_val(prot)));
-#else
-		set_pte_at(&init_mm, addr, pte,
-			   pfn_pte(paddr >> PAGE_SHIFT, prot));
-#endif
+			   __pte(__phys_to_pte_val(paddr) | pgprot_val(prot)));
 		paddr += MMUPAGE_SIZE;
 	} while (pte += (size >> MMUPAGE_SHIFT), addr += size, addr != end);
 
@@ -581,13 +576,8 @@ static int vmap_pages_pte_range(pmd_t *pmd, unsigned long addr,
 		for (sub = 0; sub < PAGE_MMUCOUNT; sub++) {
 			phys_addr_t pa = page_to_phys(page) + sub * MMUPAGE_SIZE;
 
-#ifdef PTE_PFN_MASK
 			set_pte_at(&init_mm, addr, pte,
-				   __pte((pa & PTE_PFN_MASK) | pgprot_val(prot)));
-#else
-			set_pte_at(&init_mm, addr, pte,
-				   pfn_pte(pa >> PAGE_SHIFT, prot));
-#endif
+				   __pte(__phys_to_pte_val(pa) | pgprot_val(prot)));
 			pte++;
 			addr += MMUPAGE_SIZE;
 			if (addr == end)
