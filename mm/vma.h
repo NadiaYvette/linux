@@ -234,7 +234,7 @@ static inline bool vmg_nomem(struct vma_merge_struct *vmg)
 static inline pgoff_t vma_pgoff_offset(struct vm_area_struct *vma,
 				       unsigned long addr)
 {
-	return vma->vm_pgoff + PHYS_PFN(addr - vma->vm_start);
+	return vma->vm_pgoff + ((addr - vma->vm_start) >> MMUPAGE_SHIFT);
 }
 
 #define VMG_STATE(name, mm_, vmi_, start_, end_, vma_flags_, pgoff_)	\

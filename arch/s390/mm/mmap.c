@@ -23,7 +23,7 @@ static unsigned long stack_maxrandom_size(void)
 {
 	if (!(current->flags & PF_RANDOMIZE))
 		return 0;
-	return STACK_RND_MASK << PAGE_SHIFT;
+	return STACK_RND_MASK << MMUPAGE_SHIFT;
 }
 
 static inline int mmap_is_legacy(const struct rlimit *rlim_stack)
@@ -37,7 +37,7 @@ static inline int mmap_is_legacy(const struct rlimit *rlim_stack)
 
 unsigned long arch_mmap_rnd(void)
 {
-	return (get_random_u32() & MMAP_RND_MASK) << PAGE_SHIFT;
+	return (get_random_u32() & MMAP_RND_MASK) << MMUPAGE_SHIFT;
 }
 
 static unsigned long mmap_base_legacy(unsigned long rnd)
@@ -71,7 +71,7 @@ static int get_align_mask(struct file *filp, unsigned long flags)
 	if (!(current->flags & PF_RANDOMIZE))
 		return 0;
 	if (filp || (flags & MAP_SHARED))
-		return MMAP_ALIGN_MASK << PAGE_SHIFT;
+		return MMAP_ALIGN_MASK << MMUPAGE_SHIFT;
 	return 0;
 }
 
@@ -102,9 +102,9 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr,
 	info.high_limit = TASK_SIZE;
 	info.align_mask = get_align_mask(filp, flags);
 	if (!(filp && is_file_hugepages(filp)))
-		info.align_offset = pgoff << PAGE_SHIFT;
+		info.align_offset = pgoff << MMUPAGE_SHIFT;
 	addr = vm_unmapped_area(&info);
-	if (offset_in_page(addr))
+	if (IS_ERR_VALUE(addr))
 		return addr;
 
 check_asce_limit:
@@ -137,11 +137,11 @@ unsigned long arch_get_unmapped_area_topdown(struct file *filp, unsigned long ad
 
 	info.flags = VM_UNMAPPED_AREA_TOPDOWN;
 	info.length = len;
-	info.low_limit = PAGE_SIZE;
+	info.low_limit = MMUPAGE_SIZE;
 	info.high_limit = mm->mmap_base;
 	info.align_mask = get_align_mask(filp, flags);
 	if (!(filp && is_file_hugepages(filp)))
-		info.align_offset = pgoff << PAGE_SHIFT;
+		info.align_offset = pgoff << MMUPAGE_SHIFT;
 	addr = vm_unmapped_area(&info);
 
 	/*
@@ -150,13 +150,13 @@ unsigned long arch_get_unmapped_area_topdown(struct file *filp, unsigned long ad
 	 * can happen with large stack limits and large mmap()
 	 * allocations.
 	 */
-	if (offset_in_page(addr)) {
+	if (IS_ERR_VALUE(addr)) {
 		VM_BUG_ON(addr != -ENOMEM);
 		info.flags = 0;
 		info.low_limit = TASK_UNMAPPED_BASE;
 		info.high_limit = TASK_SIZE;
 		addr = vm_unmapped_area(&info);
-		if (offset_in_page(addr))
+		if (IS_ERR_VALUE(addr))
 			return addr;
 	}
 

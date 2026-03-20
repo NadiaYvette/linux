@@ -569,6 +569,7 @@ config SPLIT_PTE_PTLOCKS
 	depends on NR_CPUS >= 4
 	depends on !ARM || CPU_CACHE_VIPT
 	depends on !PARISC || PA20
+	depends on !S390 || PAGE_MMUSHIFT = 0
 	depends on !SPARC32
 	depends on !UML
 
