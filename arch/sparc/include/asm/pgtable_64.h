@@ -937,6 +937,34 @@ static inline void __set_pte_at(struct mm_struct *mm, unsigned long addr,
 static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 		pte_t *ptep, pte_t pte, unsigned int nr)
 {
+#if PAGE_MMUSHIFT > 0
+	if (nr == 1) {
+		/* Single PTE: caller already set up sub-page offset */
+		__set_pte_at(mm, addr, ptep, pte, 0);
+	} else {
+		unsigned int i;
+
+		/*
+		 * With page clustering, nr is in kernel pages but each
+		 * kernel page spans PAGE_MMUCOUNT MMUPAGEs.  Fill
+		 * nr * PAGE_MMUCOUNT PTEs, using sub-page offsets
+		 * within each kernel page.
+		 */
+		for (i = 0; i < nr; i++) {
+			unsigned int j;
+
+			for (j = 0; j < PAGE_MMUCOUNT; j++) {
+				pte_t sub = __pte(pte_val(pte) +
+						  j * MMUPAGE_SIZE);
+				__set_pte_at(mm, addr, ptep, sub, 0);
+				ptep++;
+				addr += MMUPAGE_SIZE;
+			}
+			if (i + 1 < nr)
+				pte_val(pte) += PAGE_SIZE;
+		}
+	}
+#else
 	for (;;) {
 		__set_pte_at(mm, addr, ptep, pte, 0);
 		if (--nr == 0)
@@ -945,6 +973,7 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 		pte_val(pte) += PAGE_SIZE;
 		addr += PAGE_SIZE;
 	}
+#endif
 }
 #define set_ptes set_ptes
 
