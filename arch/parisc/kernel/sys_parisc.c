@@ -193,16 +193,16 @@ asmlinkage unsigned long sys_mmap2(unsigned long addr, unsigned long len,
 	/* Make sure the shift for mmap2 is constant (12), no matter what PAGE_SIZE
 	   we have. */
 	return ksys_mmap_pgoff(addr, len, prot, flags, fd,
-			       pgoff >> (PAGE_SHIFT - 12));
+			       pgoff >> (MMUPAGE_SHIFT - 12));
 }
 
 asmlinkage unsigned long sys_mmap(unsigned long addr, unsigned long len,
 		unsigned long prot, unsigned long flags, unsigned long fd,
 		unsigned long offset)
 {
-	if (!(offset & ~PAGE_MASK)) {
+	if (!(offset & ~MMUPAGE_MASK)) {
 		return ksys_mmap_pgoff(addr, len, prot, flags, fd,
-					offset >> PAGE_SHIFT);
+					offset >> MMUPAGE_SHIFT);
 	} else {
 		return -EINVAL;
 	}

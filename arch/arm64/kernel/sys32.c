@@ -51,10 +51,10 @@ COMPAT_SYSCALL_DEFINE6(aarch32_mmap2, unsigned long, addr, unsigned long, len,
 		       unsigned long, prot, unsigned long, flags,
 		       unsigned long, fd, unsigned long, off_4k)
 {
-	if (off_4k & (~PAGE_MASK >> 12))
+	if (off_4k & (~MMUPAGE_MASK >> 12))
 		return -EINVAL;
 
-	off_4k >>= (PAGE_SHIFT - 12);
+	off_4k >>= (MMUPAGE_SHIFT - 12);
 
 	return ksys_mmap_pgoff(addr, len, prot, flags, fd, off_4k);
 }
