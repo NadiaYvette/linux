@@ -22,11 +22,11 @@ SYSCALL_DEFINE6(mmap2,
 	unsigned long, fd,
 	unsigned long, offset)
 {
-	if (unlikely(offset & (~PAGE_MASK >> 12)))
+	if (unlikely(offset & (~MMUPAGE_MASK >> 12)))
 		return -EINVAL;
 
 	return ksys_mmap_pgoff(addr, len, prot, flags, fd,
-			       offset >> (PAGE_SHIFT - 12));
+			       offset >> (MMUPAGE_SHIFT - 12));
 }
 
 /*
