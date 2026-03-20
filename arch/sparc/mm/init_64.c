@@ -330,7 +330,8 @@ static void __update_mmu_tsb_insert(struct mm_struct *mm, unsigned long tsb_inde
 #ifdef CONFIG_HUGETLB_PAGE
 static int __init hugetlbpage_init(void)
 {
-	hugetlb_add_hstate(HPAGE_64K_SHIFT - PAGE_SHIFT);
+	if (HPAGE_64K_SHIFT > PAGE_SHIFT)
+		hugetlb_add_hstate(HPAGE_64K_SHIFT - PAGE_SHIFT);
 	hugetlb_add_hstate(HPAGE_SHIFT - PAGE_SHIFT);
 	hugetlb_add_hstate(HPAGE_256MB_SHIFT - PAGE_SHIFT);
 	hugetlb_add_hstate(HPAGE_2GB_SHIFT - PAGE_SHIFT);
@@ -412,7 +413,7 @@ void update_mmu_cache_range(struct vm_fault *vmf, struct vm_area_struct *vma,
 	is_huge_tsb = false;
 #if defined(CONFIG_HUGETLB_PAGE) || defined(CONFIG_TRANSPARENT_HUGEPAGE)
 	if (mm->context.hugetlb_pte_count || mm->context.thp_pte_count) {
-		unsigned long hugepage_size = PAGE_SIZE;
+		unsigned long hugepage_size = MMUPAGE_SIZE;
 
 		if (is_vm_hugetlb_page(vma))
 			hugepage_size = huge_page_size(hstate_vma(vma));
@@ -440,11 +441,20 @@ void update_mmu_cache_range(struct vm_fault *vmf, struct vm_area_struct *vma,
 	}
 #endif
 	if (!is_huge_tsb) {
-		for (i = 0; i < nr; i++) {
-			__update_mmu_tsb_insert(mm, MM_TSB_BASE, PAGE_SHIFT,
+		if (nr == 1) {
+			/* Single PTE: only one MMUPAGE has a page table entry */
+			__update_mmu_tsb_insert(mm, MM_TSB_BASE, MMUPAGE_SHIFT,
 						address, pte_val(pte));
-			address += PAGE_SIZE;
-			pte_val(pte) += PAGE_SIZE;
+		} else {
+			unsigned int total = nr * PAGE_MMUCOUNT;
+
+			for (i = 0; i < total; i++) {
+				__update_mmu_tsb_insert(mm, MM_TSB_BASE,
+							MMUPAGE_SHIFT,
+							address, pte_val(pte));
+				address += MMUPAGE_SIZE;
+				pte_val(pte) += MMUPAGE_SIZE;
+			}
 		}
 	}
 
@@ -3105,7 +3115,14 @@ void copy_user_highpage(struct page *to, struct page *from,
 
 	vfrom = kmap_atomic(from);
 	vto = kmap_atomic(to);
+#if PAGE_MMUSHIFT > 0
+	/* TLBTEMP TLB entry maps MMUPAGE_SIZE, can't cover full PAGE_SIZE.
+	 * Use regular copy_page; D-cache flush handled by set_pte_at.
+	 */
+	copy_page(vto, vfrom);
+#else
 	copy_user_page(vto, vfrom, vaddr, to);
+#endif
 	kunmap_atomic(vto);
 	kunmap_atomic(vfrom);
 
