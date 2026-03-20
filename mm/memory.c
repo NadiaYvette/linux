@@ -1200,7 +1200,7 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 		if (nr > 1) {
 			folio_ref_add(folio, nr);
 			if (!folio_try_dup_anon_rmap_ptes(folio, page,
-							  nr, dst_vma,
+							  1, dst_vma,
 							  src_vma)) {
 				int i;
 
@@ -1210,6 +1210,8 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 				 * folios regardless of nr_pages.  With PGCL,
 				 * all PTEs within a kernel page map the same
 				 * folio, so we need nr mappings tracked.
+				 * Pass nr=1 to avoid the page+nr-1 folio
+				 * check (all sub-pages share one struct page).
 				 */
 				atomic_add(nr - 1, &folio->_mapcount);
 

@@ -254,16 +254,16 @@ static long do_mincore(unsigned long addr, unsigned long pages, unsigned char *v
 	vma = vma_lookup(current->mm, addr);
 	if (!vma)
 		return -ENOMEM;
-	end = min(vma->vm_end, addr + (pages << PAGE_SHIFT));
+	end = min(vma->vm_end, addr + (pages << MMUPAGE_SHIFT));
 	if (!can_do_mincore(vma)) {
-		unsigned long pages = DIV_ROUND_UP(end - addr, PAGE_SIZE);
+		unsigned long pages = DIV_ROUND_UP(end - addr, MMUPAGE_SIZE);
 		memset(vec, 1, pages);
 		return pages;
 	}
 	err = walk_page_range(vma->vm_mm, addr, end, &mincore_walk_ops, vec);
 	if (err < 0)
 		return err;
-	return (end - addr) >> PAGE_SHIFT;
+	return (end - addr) >> MMUPAGE_SHIFT;
 }
 
 /*
@@ -300,16 +300,16 @@ SYSCALL_DEFINE3(mincore, unsigned long, start, size_t, len,
 	start = untagged_addr(start);
 
 	/* Check the start address: needs to be page-aligned.. */
-	if (unlikely(start & ~PAGE_MASK))
+	if (unlikely(start & ~MMUPAGE_MASK))
 		return -EINVAL;
 
 	/* ..and we need to be passed a valid user-space range */
 	if (!access_ok((void __user *) start, len))
 		return -ENOMEM;
 
-	/* This also avoids any overflows on PAGE_ALIGN */
-	pages = len >> PAGE_SHIFT;
-	pages += (offset_in_page(len)) != 0;
+	/* This also avoids any overflows on MMUPAGE_ALIGN */
+	pages = len >> MMUPAGE_SHIFT;
+	pages += (len & ~MMUPAGE_MASK) != 0;
 
 	if (!access_ok(vec, pages))
 		return -EFAULT;
@@ -325,7 +325,7 @@ SYSCALL_DEFINE3(mincore, unsigned long, start, size_t, len,
 		 * the temporary buffer size.
 		 */
 		mmap_read_lock(current->mm);
-		retval = do_mincore(start, min(pages, PAGE_SIZE), tmp);
+		retval = do_mincore(start, min(pages, (unsigned long)PAGE_SIZE), tmp);
 		mmap_read_unlock(current->mm);
 
 		if (retval <= 0)
@@ -336,7 +336,7 @@ SYSCALL_DEFINE3(mincore, unsigned long, start, size_t, len,
 		}
 		pages -= retval;
 		vec += retval;
-		start += retval << PAGE_SHIFT;
+		start += retval << MMUPAGE_SHIFT;
 		retval = 0;
 	}
 	free_page((unsigned long) tmp);

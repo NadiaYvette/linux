@@ -988,7 +988,7 @@ static long madvise_populate(struct madvise_behavior *madv_behavior)
 				return -ENOMEM;
 			}
 		}
-		start += pages * PAGE_SIZE;
+		start += pages * MMUPAGE_SIZE;
 	}
 	return 0;
 }
@@ -1840,9 +1840,9 @@ static bool is_valid_madvise(unsigned long start, size_t len_in, int behavior)
 	if (!madvise_behavior_valid(behavior))
 		return false;
 
-	if (!PAGE_ALIGNED(start))
+	if (!MMUPAGE_ALIGNED(start))
 		return false;
-	len = PAGE_ALIGN(len_in);
+	len = MMUPAGE_ALIGN(len_in);
 
 	/* Check to see whether len was rounded up from small -ve to zero */
 	if (len_in && !len)
@@ -1872,7 +1872,7 @@ static bool madvise_should_skip(unsigned long start, size_t len_in,
 		*err = -EINVAL;
 		return true;
 	}
-	if (start + PAGE_ALIGN(len_in) == start) {
+	if (start + MMUPAGE_ALIGN(len_in) == start) {
 		*err = 0;
 		return true;
 	}
@@ -1919,7 +1919,7 @@ static int madvise_do_behavior(unsigned long start, size_t len_in,
 	}
 
 	range->start = get_untagged_addr(madv_behavior->mm, start);
-	range->end = range->start + PAGE_ALIGN(len_in);
+	range->end = range->start + MMUPAGE_ALIGN(len_in);
 
 	blk_start_plug(&plug);
 	if (is_madvise_populate(madv_behavior))
@@ -2185,9 +2185,9 @@ static int madvise_set_anon_name(struct mm_struct *mm, unsigned long start,
 		.anon_name = anon_name,
 	};
 
-	if (start & ~PAGE_MASK)
+	if (start & ~MMUPAGE_MASK)
 		return -EINVAL;
-	len = (len_in + ~PAGE_MASK) & PAGE_MASK;
+	len = (len_in + ~MMUPAGE_MASK) & MMUPAGE_MASK;
 
 	/* Check to see whether len was rounded up from small -ve to zero */
 	if (len_in && !len)

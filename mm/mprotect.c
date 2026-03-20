@@ -219,6 +219,19 @@ static __always_inline void set_write_prot_commit_flush_ptes(struct vm_area_stru
 				       /* idx = */ 0, set_write, tlb);
 		return;
 	}
+	/*
+	 * With PGCL, pgcl_pte_batch batches sub-pages within the same kernel
+	 * page.  All sub-pages share ONE struct page, so page[idx] for idx>0
+	 * is NOT a sub-page — it's a different kernel page entirely.
+	 * Skip per-page sub-batching for non-large folios; they all share
+	 * the same PageAnonExclusive status.
+	 */
+	if (folio && !folio_test_large(folio)) {
+		prot_commit_flush_ptes(vma, addr, ptep, oldpte, ptent, nr_ptes,
+				       /* idx = */ 0,
+				       PageAnonExclusive(page), tlb);
+		return;
+	}
 	commit_anon_folio_batch(vma, folio, page, addr, ptep, oldpte, ptent, nr_ptes, tlb);
 }
 
@@ -740,7 +753,7 @@ mprotect_fixup(struct vma_iterator *vmi, struct mmu_gather *tlb,
 	struct mm_struct *mm = vma->vm_mm;
 	const vma_flags_t old_vma_flags = READ_ONCE(vma->flags);
 	vma_flags_t new_vma_flags = legacy_to_vma_flags(newflags);
-	long nrpages = (end - start) >> PAGE_SHIFT;
+	long nrpages = (end - start) >> MMUPAGE_SHIFT;
 	unsigned int mm_cp_flags = 0;
 	unsigned long charged = 0;
 	int error;

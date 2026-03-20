@@ -133,6 +133,7 @@ static inline pteval_t __phys_to_pte_val(phys_addr_t phys)
 }
 #endif
 
+#define __phys_to_pte_val __phys_to_pte_val
 #define pte_pfn(pte)		(__pte_to_phys(pte) >> PAGE_SHIFT)
 #define pfn_pte(pfn,prot)	\
 	__pte(__phys_to_pte_val((phys_addr_t)(pfn) << PAGE_SHIFT) | pgprot_val(prot))
@@ -456,9 +457,13 @@ static inline void __sync_cache_and_tags(pte_t pte, unsigned int nr_pages)
 #define pte_pgprot pte_pgprot
 static inline pgprot_t pte_pgprot(pte_t pte)
 {
-	unsigned long pfn = pte_pfn(pte);
-
-	return __pgprot(pte_val(pfn_pte(pfn, __pgprot(0))) ^ pte_val(pte));
+	/*
+	 * Extract protection bits by XOR'ing out the address encoding.
+	 * Use __pte_to_phys + __phys_to_pte_val to get the full physical
+	 * address encoding (including sub-page bits with PGCL), rather than
+	 * pte_pfn which drops sub-page bits and would leak them into pgprot.
+	 */
+	return __pgprot(__phys_to_pte_val(__pte_to_phys(pte)) ^ pte_val(pte));
 }
 
 #define pte_advance_pfn pte_advance_pfn

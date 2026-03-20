@@ -346,7 +346,7 @@ struct page_table {
 };
 
 static_assert(sizeof(struct crst_table) == _CRST_TABLE_SIZE);
-static_assert(sizeof(struct page_table) == PAGE_SIZE);
+static_assert(sizeof(struct page_table) == MMUPAGE_SIZE);
 
 struct dat_walk;
 

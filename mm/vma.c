@@ -3083,7 +3083,7 @@ static int acct_stack_growth(struct vm_area_struct *vma,
 
 	/* mlock limit tests */
 	if (!mlock_future_ok(mm, vma_test(vma, VMA_LOCKED_BIT),
-			     grow << PAGE_SHIFT))
+			     grow << MMUPAGE_SHIFT))
 		return -ENOMEM;
 
 	/* Check to ensure the stack will not grow into a hugetlb-only region */
@@ -3124,10 +3124,10 @@ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
 	mmap_assert_write_locked(mm);
 
 	/* Guard against exceeding limits of the address space. */
-	address &= PAGE_MASK;
-	if (address >= (TASK_SIZE & PAGE_MASK))
+	address &= MMUPAGE_MASK;
+	if (address >= (TASK_SIZE & MMUPAGE_MASK))
 		return -ENOMEM;
-	address += PAGE_SIZE;
+	address += MMUPAGE_SIZE;
 
 	/* Enforce stack_guard_gap */
 	gap_addr = address + stack_guard_gap;
@@ -3208,7 +3208,7 @@ int expand_downwards(struct vm_area_struct *vma, unsigned long address)
 
 	mmap_assert_write_locked(mm);
 
-	address &= PAGE_MASK;
+	address &= MMUPAGE_MASK;
 	if (address < mmap_min_addr || address < FIRST_USER_ADDRESS)
 		return -EPERM;
 
