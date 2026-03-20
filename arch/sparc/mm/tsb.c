@@ -53,11 +53,11 @@ void flush_tsb_kernel_range(unsigned long start, unsigned long end)
 {
 	unsigned long v;
 
-	if ((end - start) >> PAGE_SHIFT >= 2 * KERNEL_TSB_NENTRIES)
+	if ((end - start) >> MMUPAGE_SHIFT >= 2 * KERNEL_TSB_NENTRIES)
 		return flush_tsb_kernel_range_scan(start, end);
 
-	for (v = start; v < end; v += PAGE_SIZE) {
-		unsigned long hash = tsb_hash(v, PAGE_SHIFT,
+	for (v = start; v < end; v += MMUPAGE_SIZE) {
+		unsigned long hash = tsb_hash(v, MMUPAGE_SHIFT,
 					      KERNEL_TSB_NENTRIES);
 		struct tsb *ent = &swapper_tsb[hash];
 
@@ -128,11 +128,11 @@ void flush_tsb_user(struct tlb_batch *tb)
 		nentries = mm->context.tsb_block[MM_TSB_BASE].tsb_nentries;
 		if (tlb_type == cheetah_plus || tlb_type == hypervisor)
 			base = __pa(base);
-		if (tb->hugepage_shift == PAGE_SHIFT)
-			__flush_tsb_one(tb, PAGE_SHIFT, base, nentries);
+		if (tb->hugepage_shift == MMUPAGE_SHIFT)
+			__flush_tsb_one(tb, MMUPAGE_SHIFT, base, nentries);
 #if defined(CONFIG_HUGETLB_PAGE)
 		else
-			__flush_huge_tsb_one(tb, PAGE_SHIFT, base, nentries,
+			__flush_huge_tsb_one(tb, MMUPAGE_SHIFT, base, nentries,
 					     tb->hugepage_shift);
 #endif
 	}
@@ -161,12 +161,12 @@ void flush_tsb_user_page(struct mm_struct *mm, unsigned long vaddr,
 		nentries = mm->context.tsb_block[MM_TSB_BASE].tsb_nentries;
 		if (tlb_type == cheetah_plus || tlb_type == hypervisor)
 			base = __pa(base);
-		if (hugepage_shift == PAGE_SHIFT)
-			__flush_tsb_one_entry(base, vaddr, PAGE_SHIFT,
+		if (hugepage_shift == MMUPAGE_SHIFT)
+			__flush_tsb_one_entry(base, vaddr, MMUPAGE_SHIFT,
 					      nentries);
 #if defined(CONFIG_HUGETLB_PAGE)
 		else
-			__flush_huge_tsb_one_entry(base, vaddr, PAGE_SHIFT,
+			__flush_huge_tsb_one_entry(base, vaddr, MMUPAGE_SHIFT,
 						   nentries, hugepage_shift);
 #endif
 	}
@@ -508,7 +508,7 @@ retry_tsb_alloc:
 		}
 		copy_tsb(old_tsb_base, old_size, new_tsb_base, new_size,
 			tsb_index == MM_TSB_BASE ?
-			PAGE_SHIFT : REAL_HPAGE_SHIFT);
+			MMUPAGE_SHIFT : REAL_HPAGE_SHIFT);
 	}
 
 	mm->context.tsb_block[tsb_index].tsb = new_tsb;
@@ -559,7 +559,7 @@ int init_new_context(struct task_struct *tsk, struct mm_struct *mm)
 	mm->context.hugetlb_pte_count = 0;
 	mm->context.thp_pte_count = 0;
 
-	mm_rss -= saved_thp_pte_count * (HPAGE_SIZE / PAGE_SIZE);
+	mm_rss -= saved_thp_pte_count * (HPAGE_SIZE / MMUPAGE_SIZE);
 #endif
 
 	/* copy_mm() copies over the parent's mm_struct before calling

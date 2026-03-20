@@ -54,7 +54,7 @@ sun4v_itlb_miss:
 
 	LOAD_ITLB_INFO(%g2, %g4, %g5)
 	COMPUTE_TAG_TARGET(%g6, %g4, %g5, kvmap_itlb_4v)
-	COMPUTE_TSB_PTR(%g1, %g4, PAGE_SHIFT, %g3, %g7)
+	COMPUTE_TSB_PTR(%g1, %g4, MMUPAGE_SHIFT, %g3, %g7)
 
 	/* Load TSB tag/pte into %g2/%g3 and compare the tag.  */
 	ldda	[%g1] ASI_QUAD_LDD_PHYS_4V, %g2
@@ -100,7 +100,7 @@ sun4v_dtlb_miss:
 
 	LOAD_DTLB_INFO(%g2, %g4, %g5)
 	COMPUTE_TAG_TARGET(%g6, %g4, %g5, kvmap_dtlb_4v)
-	COMPUTE_TSB_PTR(%g1, %g4, PAGE_SHIFT, %g3, %g7)
+	COMPUTE_TSB_PTR(%g1, %g4, MMUPAGE_SHIFT, %g3, %g7)
 
 	/* Load TSB tag/pte into %g2/%g3 and compare the tag.  */
 	ldda	[%g1] ASI_QUAD_LDD_PHYS_4V, %g2
@@ -173,7 +173,7 @@ sun4v_dtsb_miss:
 	/* fallthrough */
 
 sun4v_tsb_miss_common:
-	COMPUTE_TSB_PTR(%g1, %g4, PAGE_SHIFT, %g5, %g7)
+	COMPUTE_TSB_PTR(%g1, %g4, MMUPAGE_SHIFT, %g5, %g7)
 
 	sub	%g2, TRAP_PER_CPU_FAULT_INFO, %g2
 
