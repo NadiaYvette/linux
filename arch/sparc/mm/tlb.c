@@ -81,7 +81,7 @@ static void tlb_batch_add_one(struct mm_struct *mm, unsigned long vaddr,
 	struct tlb_batch *tb = &get_cpu_var(tlb_batch);
 	unsigned long nr;
 
-	vaddr &= PAGE_MASK;
+	vaddr &= MMUPAGE_MASK;
 	if (exec)
 		vaddr |= 0x1UL;
 
@@ -167,10 +167,10 @@ static void tlb_batch_pmd_scan(struct mm_struct *mm, unsigned long vaddr,
 		if (pte_val(*pte) & _PAGE_VALID) {
 			bool exec = pte_exec(*pte);
 
-			tlb_batch_add_one(mm, vaddr, exec, PAGE_SHIFT);
+			tlb_batch_add_one(mm, vaddr, exec, MMUPAGE_SHIFT);
 		}
 		pte++;
-		vaddr += PAGE_SIZE;
+		vaddr += MMUPAGE_SIZE;
 	}
 	pte_unmap(pte);
 }

@@ -7,7 +7,7 @@
 
 struct vdso_image {
 	void *data;
-	unsigned long size;   /* Always a multiple of PAGE_SIZE */
+	unsigned long size;   /* Always a multiple of MMUPAGE_SIZE */
 
 	long sym_vvar_start;  /* Negative offset to the vvar area */
 };

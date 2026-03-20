@@ -42,8 +42,17 @@ void hugetlb_setup(struct pt_regs *regs);
 void _clear_page(void *page);
 #define clear_page(X)	_clear_page((void *)(X))
 struct page;
+#if PAGE_MMUSHIFT > 0
+/*
+ * With PGCL, TLBTEMP TLB entries map MMUPAGE_SIZE but copy/clear loops
+ * iterate PAGE_SIZE bytes.  Bypass TLBTEMP and use regular copy/clear.
+ * D-cache aliasing flush is handled separately by set_pte_at paths.
+ */
+#define clear_user_page(addr, vaddr, page)	clear_page(addr)
+#else
 void clear_user_page(void *addr, unsigned long vaddr, struct page *page);
 #define clear_user_page clear_user_page
+#endif
 #define copy_page(X,Y)	memcpy((void *)(X), (void *)(Y), PAGE_SIZE)
 void copy_user_page(void *to, void *from, unsigned long vaddr, struct page *topage);
 #define __HAVE_ARCH_COPY_USER_HIGHPAGE

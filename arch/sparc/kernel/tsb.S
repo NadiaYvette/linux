@@ -31,16 +31,16 @@
 tsb_miss_dtlb:
 	mov		TLB_TAG_ACCESS, %g4
 	ldxa		[%g4] ASI_DMMU, %g4
-	srlx		%g4, PAGE_SHIFT, %g4
+	srlx		%g4, MMUPAGE_SHIFT, %g4
 	ba,pt		%xcc, tsb_miss_page_table_walk
-	 sllx		%g4, PAGE_SHIFT, %g4
+	 sllx		%g4, MMUPAGE_SHIFT, %g4
 
 tsb_miss_itlb:
 	mov		TLB_TAG_ACCESS, %g4
 	ldxa		[%g4] ASI_IMMU, %g4
-	srlx		%g4, PAGE_SHIFT, %g4
+	srlx		%g4, MMUPAGE_SHIFT, %g4
 	ba,pt		%xcc, tsb_miss_page_table_walk
-	 sllx		%g4, PAGE_SHIFT, %g4
+	 sllx		%g4, MMUPAGE_SHIFT, %g4
 
 	/* At this point we have:
 	 * %g1 --	PAGE_SIZE TSB entry address
@@ -275,8 +275,8 @@ tsb_do_dtlb_fault:
 	.previous
 
 	/* Clear context ID bits.  */
-	srlx		%g5, PAGE_SHIFT, %g5
-	sllx		%g5, PAGE_SHIFT, %g5
+	srlx		%g5, MMUPAGE_SHIFT, %g5
+	sllx		%g5, MMUPAGE_SHIFT, %g5
 
 	be,pt	%xcc, sparc64_realfault_common
 	 mov	FAULT_CODE_DTLB, %g4
