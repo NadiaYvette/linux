@@ -410,10 +410,10 @@ void __set_fixmap(enum fixed_addresses idx, phys_addr_t phys, pgprot_t prot)
 
 	if (pgprot_val(prot))
 		set_pte_at(NULL, vaddr, pte,
-			pfn_pte(phys >> PAGE_SHIFT, prot));
+			__pte(phys | pgprot_val(prot)));
 	else
 		pte_clear(NULL, vaddr, pte);
-	local_flush_tlb_kernel_range(vaddr, vaddr + PAGE_SIZE);
+	local_flush_tlb_kernel_range(vaddr, vaddr + MMUPAGE_SIZE);
 }
 
 static pgprot_t protection_map[16] __ro_after_init = {
@@ -759,17 +759,26 @@ static pte_t * __init early_pte_alloc(pmd_t *pmd, unsigned long addr,
 }
 
 static void __init alloc_init_pte(pmd_t *pmd, unsigned long addr,
-				  unsigned long end, unsigned long pfn,
+				  unsigned long end, phys_addr_t phys,
 				  const struct mem_type *type,
 				  void *(*alloc)(unsigned long sz),
 				  bool ng)
 {
 	pte_t *pte = arm_pte_alloc(pmd, addr, type->prot_l1, alloc);
+	if (addr >= 0xffff0000)
+		pr_alert("PGCL: aip pte=%px addr=%08lx phys=%08x pmd=%08x base=%px idx=%lu\n",
+			 pte, addr, (u32)phys, (u32)pmd_val(*pmd),
+			 pmd_page_vaddr(*pmd), pte_index(addr));
 	do {
-		set_pte_ext(pte, pfn_pte(pfn, __pgprot(type->prot_pte)),
+		set_pte_ext(pte, __pte(phys | pgprot_val(__pgprot(type->prot_pte))),
 			    ng ? PTE_EXT_NG : 0);
-		pfn++;
-	} while (pte++, addr += PAGE_SIZE, addr != end);
+		if (addr >= 0xffff0000) {
+			u32 *hw = (u32 *)pte + PTRS_PER_PTE;
+			pr_alert("PGCL: aip wrote pte@%px=%08x hw@%px=%08x\n",
+				 pte, pte_val(*pte), hw, *hw);
+		}
+		phys += MMUPAGE_SIZE;
+	} while (pte++, addr += MMUPAGE_SIZE, addr != end);
 }
 
 static void __init __map_init_section(pmd_t *pmd, unsigned long addr,
@@ -823,7 +832,7 @@ static void __init alloc_init_pmd(pud_t *pud, unsigned long addr,
 			__map_init_section(pmd, addr, next, phys, type, ng);
 		} else {
 			alloc_init_pte(pmd, addr, next,
-				       __phys_to_pfn(phys), type, alloc, ng);
+				       phys, type, alloc, ng);
 		}
 
 		phys += next - addr;
@@ -945,9 +954,9 @@ static void __init __create_mapping(struct mm_struct *mm, struct map_desc *md,
 	}
 #endif
 
-	addr = md->virtual & PAGE_MASK;
+	addr = md->virtual & MMUPAGE_MASK;
 	phys = __pfn_to_phys(md->pfn);
-	length = PAGE_ALIGN(md->length + (md->virtual & ~PAGE_MASK));
+	length = MMUPAGE_ALIGN(md->length + (md->virtual & ~MMUPAGE_MASK));
 
 	if (type->prot_l1 == 0 && ((addr | phys | length) & ~SECTION_MASK)) {
 		pr_warn("BUG: map for 0x%08llx at 0x%08lx can not be mapped using pages, ignoring.\n",
@@ -1143,8 +1152,8 @@ void __init debug_ll_io_init(void)
 	if (!map.pfn || !map.virtual)
 		return;
 	map.pfn = __phys_to_pfn(map.pfn);
-	map.virtual &= PAGE_MASK;
-	map.length = PAGE_SIZE;
+	map.virtual &= MMUPAGE_MASK;
+	map.length = MMUPAGE_SIZE;
 	map.type = MT_DEVICE;
 	iotable_init(&map, 1);
 }
@@ -1372,15 +1381,23 @@ static void __init devicemaps_init(const struct machine_desc *mdesc)
 	/*
 	 * Allocate the vector page early.
 	 */
-	vectors = early_alloc(PAGE_SIZE * 2);
+	/*
+	 * With PGCL, the vector pages must be PAGE-aligned because
+	 * create_mapping uses PAGE-granular pfns. Allocate with
+	 * PAGE_SIZE alignment to avoid sub-page offset loss.
+	 */
+	vectors = memblock_alloc_or_panic(MMUPAGE_SIZE * 2, PAGE_SIZE);
+	pr_alert("PGCL: devmaps vectors=%px\n", vectors);
 
 	early_trap_init(vectors);
+	pr_alert("PGCL: devmaps early_trap_init done\n");
 
 	/*
 	 * Clear page table except top pmd used by early fixmaps
 	 */
 	for (addr = VMALLOC_START; addr < (FIXADDR_TOP & PMD_MASK); addr += PMD_SIZE)
 		pmd_clear(pmd_off_k(addr));
+	pr_alert("PGCL: devmaps pmd_clear loop done\n");
 
 	if (__atags_pointer) {
 		/* create a read-only mapping of the device tree */
@@ -1413,34 +1430,41 @@ static void __init devicemaps_init(const struct machine_desc *mdesc)
 	 * Create a mapping for the machine vectors at the high-vectors
 	 * location (0xffff0000).  If we aren't using high-vectors, also
 	 * create a mapping at the low-vectors virtual address.
+	 *
+	 * With PGCL, vectors (4KB) and stubs (4KB) are in separate MMU
+	 * pages but the same kernel page.  Map both in one call so
+	 * alloc_init_pte correctly increments the physical address.
+	 * Using separate calls with PFN would truncate the sub-page
+	 * offset of the stubs physical address.
 	 */
-	map.pfn = __phys_to_pfn(virt_to_phys(vectors));
-	map.virtual = 0xffff0000;
-	map.length = PAGE_SIZE;
+	{
+		phys_addr_t vphys = virt_to_phys(vectors);
+		pr_alert("PGCL: devmaps vector mapping virt=%px phys=%pa\n",
+			 vectors, &vphys);
+		map.pfn = __phys_to_pfn(vphys);
+		map.virtual = 0xffff0000;
+		map.length = MMUPAGE_SIZE * 2;
 #ifdef CONFIG_KUSER_HELPERS
-	map.type = MT_HIGH_VECTORS;
+		map.type = MT_HIGH_VECTORS;
 #else
-	map.type = MT_LOW_VECTORS;
+		map.type = MT_LOW_VECTORS;
 #endif
-	create_mapping(&map);
+		create_mapping(&map);
+	}
 
 	if (!vectors_high()) {
 		map.virtual = 0;
-		map.length = PAGE_SIZE * 2;
+		map.length = MMUPAGE_SIZE * 2;
 		map.type = MT_LOW_VECTORS;
 		create_mapping(&map);
 	}
 
-	/* Now create a kernel read-only mapping */
-	map.pfn += 1;
-	map.virtual = 0xffff0000 + PAGE_SIZE;
-	map.length = PAGE_SIZE;
-	map.type = MT_LOW_VECTORS;
-	create_mapping(&map);
+	pr_alert("PGCL: devmaps vector high done\n");
 
 	/*
 	 * Ask the machine support to map in the statically mapped devices.
 	 */
+	pr_alert("PGCL: devmaps vector ro done, calling map_io\n");
 	if (mdesc->map_io)
 		mdesc->map_io();
 	else
@@ -1724,28 +1748,52 @@ static void __init early_fixmap_shutdown(void)
 	int i;
 	unsigned long va = fix_to_virt(__end_of_permanent_fixed_addresses - 1);
 
+	pr_alert("PGCL: fixmap va=0x%08lx, end=%d\n", va,
+		 __end_of_permanent_fixed_addresses);
 	pte_offset_fixmap = pte_offset_late_fixmap;
-	pmd_clear(fixmap_pmd(va));
-	local_flush_tlb_kernel_page(va);
 
-	for (i = 0; i < __end_of_permanent_fixed_addresses; i++) {
-		pte_t *pte;
-		struct map_desc map;
+	/*
+	 * Save PTE values from the early fixmap (bm_pte array, accessed
+	 * directly — not through the page table). Then clear the PMD
+	 * to remove the early fixmap mapping, and re-create permanent
+	 * device mappings via create_mapping.
+	 */
+	{
+		pte_t saved[__end_of_permanent_fixed_addresses];
+		unsigned long saved_va[__end_of_permanent_fixed_addresses];
 
-		map.virtual = fix_to_virt(i);
-		pte = pte_offset_early_fixmap(pmd_off_k(map.virtual), map.virtual);
+		for (i = 0; i < __end_of_permanent_fixed_addresses; i++) {
+			saved_va[i] = fix_to_virt(i);
+			saved[i] = bm_pte[pte_index(saved_va[i])];
+		}
 
-		/* Only i/o device mappings are supported ATM */
-		if (pte_none(*pte) ||
-		    (pte_val(*pte) & L_PTE_MT_MASK) != L_PTE_MT_DEV_SHARED)
-			continue;
+		/*
+		 * DON'T pmd_clear before create_mapping — the earlycon
+		 * is mapped here and clearing it causes a data abort on
+		 * any console output. create_mapping will allocate a new
+		 * PTE page and replace the PMD entry, naturally
+		 * superseding the early bm_pte.
+		 */
+		for (i = 0; i < __end_of_permanent_fixed_addresses; i++) {
+			struct map_desc map;
 
-		map.pfn = pte_pfn(*pte);
-		map.type = MT_DEVICE;
-		map.length = PAGE_SIZE;
+			if (pte_none(saved[i]) ||
+			    (pte_val(saved[i]) & L_PTE_MT_MASK) !=
+			     L_PTE_MT_DEV_SHARED)
+				continue;
 
-		create_mapping(&map);
+			map.virtual = saved_va[i];
+			map.pfn = pte_pfn(saved[i]);
+			map.type = MT_DEVICE;
+			map.length = MMUPAGE_SIZE;
+			create_mapping(&map);
+		}
+
+		/* Flush TLB to pick up new page table entries */
+		local_flush_tlb_kernel_range(va & PMD_MASK,
+					     (va & PMD_MASK) + PMD_SIZE);
 	}
+	pr_alert("PGCL: fixmap remapped\n");
 }
 
 /*
@@ -1762,23 +1810,26 @@ void __init paging_init(const struct machine_desc *mdesc)
 	pr_debug("physical kernel sections: 0x%08llx-0x%08llx\n",
 		 kernel_sec_start, kernel_sec_end);
 
+	pr_alert("PGCL: prepare_page_table\n");
 	prepare_page_table();
+	pr_alert("PGCL: map_lowmem\n");
 	map_lowmem();
 	memblock_set_current_limit(arm_lowmem_limit);
-	pr_debug("lowmem limit is %08llx\n", (long long)arm_lowmem_limit);
-	/*
-	 * After this point early_alloc(), i.e. the memblock allocator, can
-	 * be used
-	 */
+	pr_alert("PGCL: map_kernel\n");
 	map_kernel();
+	pr_alert("PGCL: dma_contiguous_remap\n");
 	dma_contiguous_remap();
+	pr_alert("PGCL: early_fixmap_shutdown\n");
 	early_fixmap_shutdown();
+	pr_alert("PGCL: devicemaps_init\n");
 	devicemaps_init(mdesc);
+	pr_alert("PGCL: kmap_init\n");
 	kmap_init();
 	tcm_init();
 
 	top_pmd = pmd_off_k(0xffff0000);
 
+	pr_alert("PGCL: bootmem_init\n");
 	bootmem_init();
 }
 
@@ -1804,6 +1855,7 @@ void set_ptes(struct mm_struct *mm, unsigned long addr,
 		if (--nr == 0)
 			break;
 		ptep++;
-		pteval = pte_next_pfn(pteval);
+		pteval = __pte(pte_val(pteval) +
+			       __phys_to_pte_val(MMUPAGE_SIZE));
 	}
 }

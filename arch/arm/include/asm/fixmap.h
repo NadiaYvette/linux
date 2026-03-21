@@ -4,7 +4,7 @@
 
 #define FIXADDR_START		0xffc80000UL
 #define FIXADDR_END		0xfff00000UL
-#define FIXADDR_TOP		(FIXADDR_END - PAGE_SIZE)
+#define FIXADDR_TOP		(FIXADDR_END - MMUPAGE_SIZE)
 
 #include <linux/pgtable.h>
 #include <asm/kmap_size.h>

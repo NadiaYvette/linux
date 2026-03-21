@@ -871,7 +871,7 @@ void __init early_trap_init(void *vectors_base)
 	 * ISAs.  The Thumb version is an undefined instruction with a
 	 * branch back to the undefined instruction.
 	 */
-	for (i = 0; i < PAGE_SIZE / sizeof(u32); i++)
+	for (i = 0; i < MMUPAGE_SIZE / sizeof(u32); i++)
 		((u32 *)vectors_base)[i] = 0xe7fddef1;
 
 	/*
@@ -884,7 +884,7 @@ void __init early_trap_init(void *vectors_base)
 
 	kuser_init(vectors_base);
 
-	flush_vectors(vectors_base, 0, PAGE_SIZE * 2);
+	flush_vectors(vectors_base, 0, MMUPAGE_SIZE * 2);
 }
 #else /* ifndef CONFIG_CPU_V7M */
 void __init early_trap_init(void *vectors_base)

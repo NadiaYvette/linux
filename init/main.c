@@ -717,13 +717,11 @@ static noinline void __ref __noreturn rest_init(void)
 	struct task_struct *tsk;
 	int pid;
 
+	pr_alert("PGCL: rest_init enter\n");
 	rcu_scheduler_starting();
-	/*
-	 * We need to spawn init first so that it obtains pid 1, however
-	 * the init task will end up wanting to create kthreads, which, if
-	 * we schedule it before we create kthreadd, will OOPS.
-	 */
+	pr_alert("PGCL: rest_init: user_mode_thread(kernel_init)\n");
 	pid = user_mode_thread(kernel_init, NULL, CLONE_FS);
+	pr_alert("PGCL: rest_init: kernel_init pid=%d\n", pid);
 	/*
 	 * Pin init on the boot CPU. Task migration is not properly working
 	 * until sched_init_smp() has been run. It will set the allowed
@@ -736,6 +734,7 @@ static noinline void __ref __noreturn rest_init(void)
 	rcu_read_unlock();
 
 	numa_default_policy();
+	pr_alert("PGCL: rest_init: kernel_thread(kthreadd)\n");
 	pid = kernel_thread(kthreadd, NULL, NULL, CLONE_FS | CLONE_FILES);
 	rcu_read_lock();
 	kthreadd_task = find_task_by_pid_ns(pid, &init_pid_ns);
@@ -1113,7 +1112,9 @@ void start_kernel(void)
 	context_tracking_init();
 	/* init some links before init_ISA_irqs() */
 	early_irq_init();
+	pr_alert("PGCL: early_irq_init done\n");
 	init_IRQ();
+	pr_alert("PGCL: init_IRQ done\n");
 	tick_init();
 	rcu_init_nohz();
 	timers_init();
@@ -1121,6 +1122,7 @@ void start_kernel(void)
 	hrtimers_init();
 	softirq_init();
 	timekeeping_init();
+	pr_alert("PGCL: timekeeping_init done\n");
 	time_init();
 
 	/* This must be after timekeeping is initialized */
@@ -1135,10 +1137,13 @@ void start_kernel(void)
 	call_function_init();
 	WARN(!irqs_disabled(), "Interrupts were enabled early\n");
 
+	pr_alert("PGCL: time_init done, enabling IRQs\n");
 	early_boot_irqs_disabled = false;
 	local_irq_enable();
+	pr_alert("PGCL: local_irq_enable done\n");
 
 	kmem_cache_init_late();
+	pr_alert("PGCL: kmem_cache_init_late done\n");
 
 	/*
 	 * HACK ALERT! This is early. We're enabling the console before
@@ -1146,6 +1151,7 @@ void start_kernel(void)
 	 * this. But we do want output early, in case something goes wrong.
 	 */
 	console_init();
+	pr_alert("PGCL: console_init done\n");
 	if (panic_later)
 		panic("Too many boot %s vars at `%s'", panic_later,
 		      panic_param);
@@ -1589,8 +1595,11 @@ static int __ref kernel_init(void *unused)
 	ftrace_free_init_mem();
 	kgdb_free_init_mem();
 	exit_boot_config();
+	pr_alert("PGCL: kernel_init: free_initmem\n");
 	free_initmem();
+	pr_alert("PGCL: kernel_init: mark_readonly\n");
 	mark_readonly();
+	pr_alert("PGCL: kernel_init: mark_readonly done\n");
 
 	/*
 	 * Kernel mappings are now finalized - update the userspace page-table
@@ -1605,8 +1614,12 @@ static int __ref kernel_init(void *unused)
 
 	do_sysctl_args();
 
+	pr_alert("PGCL: kernel_init: about to run init process\n");
 	if (ramdisk_execute_command) {
+		pr_alert("PGCL: kernel_init: ramdisk_execute_command='%s'\n",
+			 ramdisk_execute_command);
 		ret = run_init_process(ramdisk_execute_command);
+		pr_alert("PGCL: kernel_init: run_init_process returned %d\n", ret);
 		if (!ret)
 			return 0;
 		pr_err("Failed to execute %s (error %d)\n",
@@ -1673,16 +1686,26 @@ static noinline void __init kernel_init_freeable(void)
 
 	cad_pid = get_pid(task_pid(current));
 
+	pr_alert("PGCL: smp_prepare_cpus enter\n");
 	smp_prepare_cpus(setup_max_cpus);
+	pr_alert("PGCL: smp_prepare_cpus done\n");
 
+	pr_alert("PGCL: workqueue_init enter\n");
 	workqueue_init();
+	pr_alert("PGCL: workqueue_init done\n");
 
+	pr_alert("PGCL: init_mm_internals enter\n");
 	init_mm_internals();
+	pr_alert("PGCL: init_mm_internals done\n");
 
+	pr_alert("PGCL: do_pre_smp_initcalls enter\n");
 	do_pre_smp_initcalls();
+	pr_alert("PGCL: do_pre_smp_initcalls done\n");
 	lockup_detector_init();
 
+	pr_alert("PGCL: smp_init enter\n");
 	smp_init();
+	pr_alert("PGCL: smp_init done\n");
 	sched_init_smp();
 
 	workqueue_init_topology();

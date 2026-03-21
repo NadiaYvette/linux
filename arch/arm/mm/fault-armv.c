@@ -132,7 +132,7 @@ make_coherent(struct address_space *mapping, struct vm_area_struct *vma,
 	pgoff_t pgoff;
 	int aliases = 0;
 
-	pgoff = vma->vm_pgoff + ((addr - vma->vm_start) >> PAGE_SHIFT);
+	pgoff = vma->vm_pgoff + ((addr - vma->vm_start) >> MMUPAGE_SHIFT);
 
 	/*
 	 * If we have any shared mappings that are in the same mm
@@ -158,7 +158,7 @@ make_coherent(struct address_space *mapping, struct vm_area_struct *vma,
 			continue;
 		if (!(mpnt->vm_flags & VM_MAYSHARE))
 			continue;
-		offset = (pgoff - mpnt->vm_pgoff) << PAGE_SHIFT;
+		offset = (pgoff - mpnt->vm_pgoff) << MMUPAGE_SHIFT;
 		mpnt_addr = mpnt->vm_start + offset;
 
 		/* Avoid deadlocks by not grabbing the same PTE lock again. */

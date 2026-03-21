@@ -620,10 +620,12 @@ void __init reserve_initrd_mem(void)
 	 * This allows us to detect whether the pages overlapping the initrd
 	 * are in use, but more importantly, reserves the entire set of pages
 	 * as we don't want these pages allocated for other purposes.
+	 * Use MMUPAGE_SIZE for alignment — with PGCL, PAGE_SIZE can be much
+	 * larger and cause false overlaps with adjacent reservations (e.g. FDT).
 	 */
-	start = round_down(phys_initrd_start, PAGE_SIZE);
+	start = round_down(phys_initrd_start, MMUPAGE_SIZE);
 	size = phys_initrd_size + (phys_initrd_start - start);
-	size = round_up(size, PAGE_SIZE);
+	size = round_up(size, MMUPAGE_SIZE);
 
 	if (!memblock_is_region_memory(start, size)) {
 		pr_err("INITRD: 0x%08llx+0x%08lx is not a memory region",
@@ -634,6 +636,9 @@ void __init reserve_initrd_mem(void)
 	if (memblock_is_region_reserved(start, size)) {
 		pr_err("INITRD: 0x%08llx+0x%08lx overlaps in-use memory region\n",
 		       (u64)start, size);
+		pr_err("INITRD: phys_initrd_start=0x%08llx phys_initrd_size=0x%08lx PAGE_SIZE=0x%lx\n",
+		       (u64)phys_initrd_start, (unsigned long)phys_initrd_size, PAGE_SIZE);
+		memblock_dump_all();
 		goto disable;
 	}
 
@@ -653,8 +658,8 @@ disable:
 void __weak __init free_initrd_mem(unsigned long start, unsigned long end)
 {
 #ifdef CONFIG_ARCH_KEEP_MEMBLOCK
-	unsigned long aligned_start = ALIGN_DOWN(start, PAGE_SIZE);
-	unsigned long aligned_end = ALIGN(end, PAGE_SIZE);
+	unsigned long aligned_start = ALIGN_DOWN(start, MMUPAGE_SIZE);
+	unsigned long aligned_end = ALIGN(end, MMUPAGE_SIZE);
 
 	memblock_free((void *)aligned_start, aligned_end - aligned_start);
 #endif

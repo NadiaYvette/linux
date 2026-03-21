@@ -3863,6 +3863,9 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 	unsigned int page_order;
 	unsigned int flags;
 	int ret;
+#ifdef CONFIG_HIGHMEM
+	bool highmem_zero;
+#endif
 
 	array_size = (unsigned long)nr_small_pages * sizeof(struct page *);
 
@@ -3872,6 +3875,18 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 
 	if (!(gfp_mask & (GFP_DMA | GFP_DMA32)))
 		gfp_mask |= __GFP_HIGHMEM;
+
+	/*
+	 * With PGCL, clear_highpage() maps MMUPAGE_SIZE via kmap but
+	 * clear_page() writes PAGE_SIZE bytes, overrunning the mapping.
+	 * Strip __GFP_ZERO from page allocation and zero after vmap.
+	 */
+#ifdef CONFIG_HIGHMEM
+	highmem_zero = (gfp_mask & __GFP_HIGHMEM) &&
+		       (gfp_mask & __GFP_ZERO);
+	if (highmem_zero)
+		gfp_mask &= ~__GFP_ZERO;
+#endif
 
 	/* Please note that the recursion is strictly bounded. */
 	if (array_size > PAGE_SIZE) {
@@ -3950,6 +3965,11 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 			area->nr_pages * PAGE_SIZE);
 		goto fail;
 	}
+
+#ifdef CONFIG_HIGHMEM
+	if (highmem_zero)
+		memset(area->addr, 0, size);
+#endif
 
 	return area->addr;
 

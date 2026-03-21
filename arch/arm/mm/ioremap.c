@@ -111,7 +111,7 @@ void __init add_static_vm_early(struct static_vm *svm)
 int ioremap_page(unsigned long virt, unsigned long phys,
 		 const struct mem_type *mtype)
 {
-	return vmap_page_range(virt, virt + PAGE_SIZE, phys,
+	return vmap_page_range(virt, virt + MMUPAGE_SIZE, phys,
 			       __pgprot(mtype->prot_pte));
 }
 EXPORT_SYMBOL(ioremap_page);
@@ -433,7 +433,7 @@ __arm_ioremap_exec(phys_addr_t phys_addr, size_t size, bool cached)
 
 void __arm_iomem_set_ro(void __iomem *ptr, size_t size)
 {
-	set_memory_ro((unsigned long)ptr, PAGE_ALIGN(size) / PAGE_SIZE);
+	set_memory_ro((unsigned long)ptr, MMUPAGE_ALIGN(size) / MMUPAGE_SIZE);
 }
 
 void *arch_memremap_wb(phys_addr_t phys_addr, size_t size, unsigned long flags)

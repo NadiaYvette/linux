@@ -56,15 +56,14 @@ static void __init init_irq_stacks(void)
 	u8 *stack;
 	int cpu;
 
+	pr_alert("PGCL: init_irq_stacks: THREAD_SIZE=%lu THREAD_ALIGN=%lu VMAP=%d\n",
+		 (unsigned long)THREAD_SIZE, (unsigned long)THREAD_ALIGN,
+		 IS_ENABLED(CONFIG_VMAP_STACK));
 	for_each_possible_cpu(cpu) {
-		if (!IS_ENABLED(CONFIG_VMAP_STACK))
-			stack = (u8 *)__get_free_pages(GFP_KERNEL,
-						       THREAD_SIZE_ORDER);
-		else
-			stack = __vmalloc_node(THREAD_SIZE, THREAD_ALIGN,
-					       THREADINFO_GFP, NUMA_NO_NODE,
-					       __builtin_return_address(0));
-
+		pr_alert("PGCL: irq_stack cpu=%d enter (order=%d sz=%d)\n", cpu, THREAD_SIZE_ORDER, THREAD_SIZE);
+		stack = (u8 *)__get_free_pages(GFP_KERNEL,
+					       THREAD_SIZE_ORDER);
+		pr_alert("PGCL: irq_stack cpu=%d stack=%px\n", cpu, stack);
 		if (WARN_ON(!stack))
 			break;
 		per_cpu(irq_stack_ptr, cpu) = &stack[THREAD_SIZE];
@@ -126,14 +125,19 @@ void __init init_IRQ(void)
 {
 	int ret;
 
+	pr_alert("PGCL: init_IRQ enter\n");
 #ifdef CONFIG_IRQSTACKS
+	pr_alert("PGCL: init_irq_stacks enter\n");
 	init_irq_stacks();
+	pr_alert("PGCL: init_irq_stacks done\n");
 #endif
 
+	pr_alert("PGCL: irqchip_init enter\n");
 	if (IS_ENABLED(CONFIG_OF) && !machine_desc->init_irq)
 		irqchip_init();
 	else
 		machine_desc->init_irq();
+	pr_alert("PGCL: irqchip_init done\n");
 
 	if (IS_ENABLED(CONFIG_OF) && IS_ENABLED(CONFIG_CACHE_L2X0) &&
 	    (machine_desc->l2c_aux_mask || machine_desc->l2c_aux_val)) {
