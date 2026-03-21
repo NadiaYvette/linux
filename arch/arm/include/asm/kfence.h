@@ -17,8 +17,11 @@ static inline int split_pmd_page(pmd_t *pmd, unsigned long addr)
 	if (!pte)
 		return -ENOMEM;
 
-	for (i = 0; i < PTRS_PER_PTE; i++)
-		set_pte_ext(pte + i, pfn_pte(pfn + i, PAGE_KERNEL), 0);
+	for (i = 0; i < PTRS_PER_PTE; i++) {
+		phys_addr_t phys = ((phys_addr_t)pfn << PAGE_SHIFT) +
+				   (unsigned long)i * MMUPAGE_SIZE;
+		set_pte_ext(pte + i, __pte(phys | pgprot_val(PAGE_KERNEL)), 0);
+	}
 	pmd_populate_kernel(&init_mm, pmd, pte);
 
 	flush_tlb_kernel_range(addr, addr + PMD_SIZE);
@@ -31,7 +34,7 @@ static inline bool arch_kfence_init_pool(void)
 	pmd_t *pmd;
 
 	for (addr = (unsigned long)__kfence_pool; is_kfence_address((void *)addr);
-	     addr += PAGE_SIZE) {
+	     addr += MMUPAGE_SIZE) {
 		pmd = pmd_off_k(addr);
 
 		if (pmd_leaf(*pmd)) {

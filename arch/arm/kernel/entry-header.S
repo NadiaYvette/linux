@@ -433,11 +433,11 @@ tsk	.req	r9		@ current thread_info
 #ifdef CONFIG_VMAP_STACK
 	@
 	@ Test whether the SP has overflowed. Task and IRQ stacks are aligned
-	@ so that SP & BIT(THREAD_SIZE_ORDER + PAGE_SHIFT) should always be
-	@ zero.
+	@ so that SP & BIT(THREAD_SIZE_ORDER + MMUPAGE_SHIFT) should always be
+	@ zero. Use MMUPAGE_SHIFT since THREAD_SIZE is based on MMUPAGE_SIZE.
 	@
-ARM(	tst	sp, #1 << (THREAD_SIZE_ORDER + PAGE_SHIFT)	)
-THUMB(	tst	r1, #1 << (THREAD_SIZE_ORDER + PAGE_SHIFT)	)
+ARM(	tst	sp, #1 << (THREAD_SIZE_ORDER + MMUPAGE_SHIFT)	)
+THUMB(	tst	r1, #1 << (THREAD_SIZE_ORDER + MMUPAGE_SHIFT)	)
 THUMB(	it	ne						)
 	bne	.Lstack_overflow_check\@
 
