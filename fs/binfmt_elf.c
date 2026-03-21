@@ -399,6 +399,9 @@ static unsigned long elf_map(struct file *filep, unsigned long addr,
 	} else
 		map_addr = vm_mmap(filep, addr, size, prot, type, off);
 
+	pr_alert("PGCL: elf_map: addr=0x%lx size=0x%lx off=0x%lx prot=0x%x type=0x%x map_addr=0x%lx\n",
+		 addr, size, off, prot, type, map_addr);
+
 	if ((type & MAP_FIXED_NOREPLACE) &&
 	    PTR_ERR((void *)map_addr) == -EEXIST)
 		pr_info("%d (%s): Uhuuh, elf segment at %px requested but the memory is mapped already\n",
@@ -421,8 +424,10 @@ static unsigned long elf_load(struct file *filep, unsigned long addr,
 
 	if (eppnt->p_filesz) {
 		map_addr = elf_map(filep, addr, eppnt, prot, type, total_size);
-		if (BAD_ADDR(map_addr))
+		if (BAD_ADDR(map_addr)) {
+			pr_alert("PGCL: elf_load: elf_map failed addr=0x%lx map_addr=0x%lx\n", addr, map_addr);
 			return map_addr;
+		}
 		if (eppnt->p_memsz > eppnt->p_filesz) {
 			zero_start = map_addr + ELF_PAGEOFFSET(eppnt->p_vaddr) +
 				eppnt->p_filesz;
@@ -433,8 +438,12 @@ static unsigned long elf_load(struct file *filep, unsigned long addr,
 			 * Zero the end of the last mapped page but ignore
 			 * any errors if the segment isn't writable.
 			 */
-			if (padzero(zero_start) && (prot & PROT_WRITE))
+			if (padzero(zero_start) && (prot & PROT_WRITE)) {
+				pr_alert("PGCL: elf_load: padzero failed at 0x%lx (map_addr=0x%lx pageoff=0x%lx filesz=0x%lx memsz=0x%lx prot=0x%x)\n",
+					 zero_start, map_addr, (unsigned long)ELF_PAGEOFFSET(eppnt->p_vaddr),
+					 (unsigned long)eppnt->p_filesz, (unsigned long)eppnt->p_memsz, prot);
 				return -EFAULT;
+			}
 		}
 	} else {
 		map_addr = zero_start = ELF_PAGESTART(addr);
@@ -1027,8 +1036,10 @@ out_free_interp:
 	   change some of these later */
 	retval = setup_arg_pages(bprm, randomize_stack_top(STACK_TOP),
 				 executable_stack);
-	if (retval < 0)
+	if (retval < 0) {
+		pr_alert("PGCL: setup_arg_pages failed: retval=%d\n", retval);
 		goto out_free_dentry;
+	}
 
 	elf_brk = 0;
 
@@ -1190,6 +1201,8 @@ out_free_interp:
 		if (BAD_ADDR(error)) {
 			retval = IS_ERR_VALUE(error) ?
 				PTR_ERR((void*)error) : -EINVAL;
+			pr_alert("PGCL: elf_load failed: addr=0x%lx vaddr=0x%lx bias=0x%lx flags=0x%x error=0x%lx retval=%d\n",
+				 load_bias + vaddr, vaddr, load_bias, elf_flags, error, retval);
 			goto out_free_dentry;
 		}
 
@@ -1383,6 +1396,7 @@ out:
 
 	/* error cleanup */
 out_free_dentry:
+	pr_alert("PGCL: load_elf_binary: out_free_dentry retval=%d\n", retval);
 	kfree(interp_elf_ex);
 	kfree(interp_elf_phdata);
 out_free_file:
@@ -1390,6 +1404,7 @@ out_free_file:
 	if (interpreter)
 		fput(interpreter);
 out_free_ph:
+	pr_alert("PGCL: load_elf_binary: out_free_ph retval=%d\n", retval);
 	kfree(elf_phdata);
 	goto out;
 }

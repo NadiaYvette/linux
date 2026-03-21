@@ -29,7 +29,7 @@ static inline void pud_populate(struct mm_struct *mm, pud_t *pud, pmd_t *pmd)
 }
 
 #else	/* !CONFIG_ARM_LPAE */
-#define PGD_SIZE		(PAGE_SIZE << 2)
+#define PGD_SIZE		(PTRS_PER_PGD * sizeof(pgd_t))
 
 /*
  * Since we have only two-level page tables, these are trivial
