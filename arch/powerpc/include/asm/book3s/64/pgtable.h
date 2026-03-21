@@ -645,9 +645,9 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 #define SWP_TYPE_BITS 5
 #define SWP_TYPE_MASK		((1UL << SWP_TYPE_BITS) - 1)
 #define __swp_type(x)		((x).val & SWP_TYPE_MASK)
-#define __swp_offset(x)		(((x).val & PTE_RPN_MASK) >> PAGE_SHIFT)
+#define __swp_offset(x)		(((x).val & PTE_RPN_MASK) >> MMUPAGE_SHIFT)
 #define __swp_entry(type, offset)	((swp_entry_t) { \
-				(type) | (((offset) << PAGE_SHIFT) & PTE_RPN_MASK)})
+				(type) | (((offset) << MMUPAGE_SHIFT) & PTE_RPN_MASK)})
 /*
  * swp_entry_t must be independent of pte bits. We build a swp_entry_t from
  * swap type and offset we get from swap and convert that to pte to find a

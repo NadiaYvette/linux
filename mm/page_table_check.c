@@ -210,9 +210,17 @@ void __page_table_check_ptes_set(struct mm_struct *mm, unsigned long addr,
 	page_table_check_pte_flags(pte);
 
 	for (i = 0; i < nr; i++)
-		__page_table_check_pte_clear(mm, addr + PAGE_SIZE * i, ptep_get(ptep + i));
-	if (pte_user_accessible_page(pte, addr))
-		page_table_check_set(pte_pfn(pte), nr, pte_write(pte));
+		__page_table_check_pte_clear(mm, addr + i * MMUPAGE_SIZE, ptep_get(ptep + i));
+	if (pte_user_accessible_page(pte, addr)) {
+		/*
+		 * With PGCL, consecutive PTEs may map sub-pages within the
+		 * same kernel page.  Increment the page_table_check counter
+		 * once per PTE, using the correct PAGE-granular PFN for each.
+		 */
+		for (i = 0; i < nr; i++)
+			page_table_check_set(pte_pfn(pte) + (i >> PAGE_MMUSHIFT),
+					     1, pte_write(pte));
+	}
 }
 EXPORT_SYMBOL(__page_table_check_ptes_set);
 
@@ -277,7 +285,7 @@ void __page_table_check_pte_clear_range(struct mm_struct *mm,
 			return;
 		for (i = 0; i < PTRS_PER_PTE; i++) {
 			__page_table_check_pte_clear(mm, addr, ptep_get(ptep));
-			addr += PAGE_SIZE;
+			addr += MMUPAGE_SIZE;
 			ptep++;
 		}
 		pte_unmap(ptep - PTRS_PER_PTE);
