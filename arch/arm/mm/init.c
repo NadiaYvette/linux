@@ -180,6 +180,10 @@ void check_cpu_icache_size(int cpuid)
 void __init arm_memblock_init(const struct machine_desc *mdesc)
 {
 	/* Register the kernel text, kernel data and initrd with memblock. */
+	pr_alert("PGCL: kernel phys 0x%08lx-0x%08lx size 0x%lx\n",
+		 (unsigned long)__pa(KERNEL_START),
+		 (unsigned long)__pa(KERNEL_END),
+		 (unsigned long)(KERNEL_END - KERNEL_START));
 	memblock_reserve(__pa(KERNEL_START), KERNEL_END - KERNEL_START);
 
 	reserve_initrd_mem();
@@ -410,24 +414,86 @@ void mark_rodata_ro(void)
 static inline void fix_kernmem_perms(void) { }
 #endif /* CONFIG_STRICT_KERNEL_RWX */
 
+/*
+ * With PGCL (PAGE_SIZE > MMUPAGE_SIZE), a kernel page can contain both
+ * init-section data and critical page table entries.  Early PTE table
+ * allocations from memblock may land within the init section's physical
+ * range.  Freeing such a page destroys the PTE table, corrupting
+ * kernel mappings (e.g., vectors at 0xffff0000).
+ *
+ * Collect all PTE table physical addresses referenced by kernel PMDs,
+ * then skip any init page that contains one.
+ */
 void free_initmem(void)
 {
 	fix_kernmem_perms();
 
-	poison_init_mem(__init_begin, __init_end - __init_begin);
-	if (!machine_is_integrator() && !machine_is_cintegrator())
-		free_initmem_default(-1);
+	if (!machine_is_integrator() && !machine_is_cintegrator()) {
+		if (!PAGE_MMUSHIFT) {
+			poison_init_mem(__init_begin,
+					__init_end - __init_begin);
+			free_initmem_default(-1);
+		} else {
+			/*
+			 * PGCL: scan ALL 4096 ARM hardware L1 page table
+			 * entries directly (not via Linux PGD abstraction,
+			 * which only exposes the first L1 desc per 2MB pair).
+			 * Skip any init page containing a PTE table.
+			 */
+			unsigned long pos;
+			unsigned long start = PAGE_ALIGN((unsigned long)__init_begin);
+			unsigned long end = (unsigned long)__init_end & PAGE_MASK;
+			unsigned long freed = 0;
+			u32 *l1 = (u32 *)init_mm.pgd;
+			int i;
+
+			for (pos = start; pos < end; pos += PAGE_SIZE) {
+				unsigned long page_phys = __pa(pos);
+				unsigned long page_phys_end = page_phys + PAGE_SIZE;
+				bool has_pgtable = false;
+
+				/*
+				 * Scan all 4096 L1 descriptors.  Each covers 1MB.
+				 * Type bits [1:0]: 01 = coarse page table.
+				 * PTE table phys addr in bits [31:10].
+				 */
+				for (i = 0; i < 4096; i++) {
+					u32 desc = l1[i];
+					unsigned long pte_phys;
+
+					if ((desc & PMD_TYPE_MASK) != PMD_TYPE_TABLE)
+						continue;
+					pte_phys = (unsigned long)(desc & ~0x3FFU) & PAGE_MASK;
+					if (pte_phys >= page_phys && pte_phys < page_phys_end) {
+						has_pgtable = true;
+						break;
+					}
+				}
+
+				if (has_pgtable) {
+					pr_info("PGCL: free_initmem: skip %px (contains pgtable for L1[%d])\n",
+						(void *)pos, i);
+					continue;
+				}
+				free_reserved_page(virt_to_page((void *)pos));
+				freed++;
+			}
+			if (freed)
+				pr_info("Freeing unused kernel image (initmem) memory: %ldK\n",
+					freed * (PAGE_SIZE / 1024));
+		}
+	}
 }
 
 #ifdef CONFIG_BLK_DEV_INITRD
 void free_initrd_mem(unsigned long start, unsigned long end)
 {
 	if (start == initrd_start)
-		start = round_down(start, PAGE_SIZE);
+		start = round_down(start, MMUPAGE_SIZE);
 	if (end == initrd_end)
-		end = round_up(end, PAGE_SIZE);
+		end = round_up(end, MMUPAGE_SIZE);
 
-	poison_init_mem((void *)start, PAGE_ALIGN(end) - start);
+	poison_init_mem((void *)start, MMUPAGE_ALIGN(end) - start);
 	free_reserved_area((void *)start, (void *)end, -1, "initrd");
 }
 #endif

@@ -1187,7 +1187,7 @@ static long madvise_guard_install(struct madvise_behavior *madv_behavior)
 
 		if (err == 0) {
 			unsigned long nr_expected_pages =
-				PHYS_PFN(range->end - range->start);
+				(range->end - range->start) >> MMUPAGE_SHIFT;
 
 			VM_WARN_ON(nr_pages != nr_expected_pages);
 			return 0;
