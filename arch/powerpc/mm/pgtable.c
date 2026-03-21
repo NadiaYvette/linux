@@ -208,6 +208,33 @@ void set_ptes(struct mm_struct *mm, unsigned long addr, pte_t *ptep,
 	 * involved that need to be batched.
 	 */
 
+	/*
+	 * With PGCL (PAGE_MMUSHIFT > 0), set_ptes semantics are:
+	 *   nr == 1: set a single PTE (caller already adjusted sub-page)
+	 *   nr >  1: nr is in kernel pages; write nr * PAGE_MMUCOUNT PTEs,
+	 *            filling sub-pages within each kernel page.
+	 * This matches the generic set_ptes in include/linux/pgtable.h.
+	 */
+#if PAGE_MMUSHIFT > 0
+	if (nr == 1) {
+		page_table_check_ptes_set(mm, addr, ptep, pte, 1);
+		VM_WARN_ON(pte_hw_valid(*ptep) && !pte_protnone(*ptep));
+		__set_pte_at(mm, addr, ptep, pte, 0);
+	} else {
+		unsigned int total = nr * PAGE_MMUCOUNT;
+		unsigned int i;
+
+		page_table_check_ptes_set(mm, addr, ptep, pte, total);
+		for (i = 0; i < total; i++) {
+			VM_WARN_ON(pte_hw_valid(*ptep) && !pte_protnone(*ptep));
+			__set_pte_at(mm, addr, ptep, pte, 0);
+			ptep++;
+			addr += MMUPAGE_SIZE;
+			pte = __pte(pte_val(pte) +
+				    __phys_to_pte_val(MMUPAGE_SIZE));
+		}
+	}
+#else
 	page_table_check_ptes_set(mm, addr, ptep, pte, nr);
 
 	for (;;) {
@@ -226,6 +253,7 @@ void set_ptes(struct mm_struct *mm, unsigned long addr, pte_t *ptep,
 		addr += MMUPAGE_SIZE;
 		pte = __pte(pte_val(pte) + __phys_to_pte_val(MMUPAGE_SIZE));
 	}
+#endif
 }
 
 void set_pte_at_unchecked(struct mm_struct *mm, unsigned long addr,

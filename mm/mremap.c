@@ -320,7 +320,7 @@ static int move_ptes(struct pagetable_move_control *pmc,
 				for (j = 0; j < nr_ptes; j++) {
 					set_ptes(mm, new_addr + (unsigned long)j * MMUPAGE_SIZE, new_ptep + j, pte, 1);
 					pte = __pte(pte_val(pte) +
-						    MMUPAGE_SIZE);
+						    __phys_to_pte_val(MMUPAGE_SIZE));
 				}
 			} else
 #endif
