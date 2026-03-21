@@ -225,12 +225,22 @@ void __init poking_init(void)
 	static_branch_enable(&poking_init_done);
 }
 
+/*
+ * Return MMUPAGE-granular PFN for the hardware page containing addr.
+ * pfn_pte() expects PAGE-granular PFNs, but code-patching maps a single
+ * MMUPAGE via __set_pte_at, so we construct the PTE directly using
+ * (pfn << MMUPAGE_SHIFT) to get the correct physical address.
+ */
 static unsigned long get_patch_pfn(void *addr)
 {
-	if (IS_ENABLED(CONFIG_EXECMEM) && is_vmalloc_or_module_addr(addr))
-		return vmalloc_to_pfn(addr);
-	else
+	if (IS_ENABLED(CONFIG_EXECMEM) && is_vmalloc_or_module_addr(addr)) {
+		struct page *page = vmalloc_to_page(addr);
+		unsigned long pa = page_to_phys(page) +
+			offset_in_page((unsigned long)addr);
+		return pa >> MMUPAGE_SHIFT;
+	} else {
 		return __pa_symbol(addr) >> MMUPAGE_SHIFT;
+	}
 }
 
 /*
@@ -297,7 +307,7 @@ static int __do_patch_mem_mm(void *addr, unsigned long val, bool is_dword)
 	if (!pte)
 		return -ENOMEM;
 
-	__set_pte_at(patching_mm, text_poke_addr, pte, pfn_pte(pfn, PAGE_KERNEL), 0);
+	__set_pte_at(patching_mm, text_poke_addr, pte, __pte(((pte_basic_t)pfn << MMUPAGE_SHIFT) | pgprot_val(PAGE_KERNEL) | _PAGE_PTE), 0);
 
 	/* order PTE update before use, also serves as the hwsync */
 	asm volatile("ptesync": : :"memory");
@@ -336,7 +346,7 @@ static int __do_patch_mem(void *addr, unsigned long val, bool is_dword)
 	patch_addr = (u32 *)(text_poke_addr + ((unsigned long)(addr) & ~MMUPAGE_MASK));
 
 	pte = __this_cpu_read(cpu_patching_context.pte);
-	__set_pte_at(&init_mm, text_poke_addr, pte, pfn_pte(pfn, PAGE_KERNEL), 0);
+	__set_pte_at(&init_mm, text_poke_addr, pte, __pte(((pte_basic_t)pfn << MMUPAGE_SHIFT) | pgprot_val(PAGE_KERNEL) | _PAGE_PTE), 0);
 	/* See ptesync comment in radix__set_pte_at() */
 	if (radix_enabled())
 		asm volatile("ptesync": : :"memory");
@@ -483,7 +493,7 @@ static int __do_patch_instructions_mm(u32 *addr, u32 *code, size_t len, bool rep
 	if (!pte)
 		return -ENOMEM;
 
-	__set_pte_at(patching_mm, text_poke_addr, pte, pfn_pte(pfn, PAGE_KERNEL), 0);
+	__set_pte_at(patching_mm, text_poke_addr, pte, __pte(((pte_basic_t)pfn << MMUPAGE_SHIFT) | pgprot_val(PAGE_KERNEL) | _PAGE_PTE), 0);
 
 	/* order PTE update before use, also serves as the hwsync */
 	asm volatile("ptesync" ::: "memory");
@@ -528,7 +538,7 @@ static int __do_patch_instructions(u32 *addr, u32 *code, size_t len, bool repeat
 	patch_addr = (u32 *)(text_poke_addr + ((unsigned long)(addr) & ~MMUPAGE_MASK));
 
 	pte = __this_cpu_read(cpu_patching_context.pte);
-	__set_pte_at(&init_mm, text_poke_addr, pte, pfn_pte(pfn, PAGE_KERNEL), 0);
+	__set_pte_at(&init_mm, text_poke_addr, pte, __pte(((pte_basic_t)pfn << MMUPAGE_SHIFT) | pgprot_val(PAGE_KERNEL) | _PAGE_PTE), 0);
 	/* See ptesync comment in radix__set_pte_at() */
 	if (radix_enabled())
 		asm volatile("ptesync" ::: "memory");
