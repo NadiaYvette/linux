@@ -8115,8 +8115,10 @@ void __init workqueue_init(void)
 	struct worker_pool *pool;
 	int cpu, bkt;
 
+	pr_alert("PGCL: workqueue_init: thresh\n");
 	wq_cpu_intensive_thresh_init();
 
+	pr_alert("PGCL: workqueue_init: mutex_lock\n");
 	mutex_lock(&wq_pool_mutex);
 
 	/*
@@ -8130,6 +8132,7 @@ void __init workqueue_init(void)
 			pool->node = cpu_to_node(cpu);
 	}
 
+	pr_alert("PGCL: workqueue_init: init_rescuers\n");
 	list_for_each_entry(wq, &workqueues, list) {
 		WARN(init_rescuer(wq),
 		     "workqueue: failed to create early rescuer for %s",
@@ -8138,6 +8141,7 @@ void __init workqueue_init(void)
 
 	mutex_unlock(&wq_pool_mutex);
 
+	pr_alert("PGCL: workqueue_init: create_bh_workers\n");
 	/*
 	 * Create the initial workers. A BH pool has one pseudo worker that
 	 * represents the shared BH execution context and thus doesn't get
@@ -8148,6 +8152,7 @@ void __init workqueue_init(void)
 		for_each_bh_worker_pool(pool, cpu)
 			BUG_ON(!create_worker(pool));
 
+	pr_alert("PGCL: workqueue_init: create_cpu_workers\n");
 	for_each_online_cpu(cpu) {
 		for_each_cpu_worker_pool(pool, cpu) {
 			pool->flags &= ~POOL_DISASSOCIATED;
@@ -8155,9 +8160,11 @@ void __init workqueue_init(void)
 		}
 	}
 
+	pr_alert("PGCL: workqueue_init: create_unbound_workers\n");
 	hash_for_each(unbound_pool_hash, bkt, pool, hash_node)
 		BUG_ON(!create_worker(pool));
 
+	pr_alert("PGCL: workqueue_init: online\n");
 	wq_online = true;
 	wq_watchdog_init();
 }

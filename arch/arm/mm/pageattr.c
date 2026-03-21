@@ -54,8 +54,8 @@ static int __change_memory_common(unsigned long start, unsigned long size,
 static int change_memory_common(unsigned long addr, int numpages,
 				pgprot_t set_mask, pgprot_t clear_mask)
 {
-	unsigned long start = addr & PAGE_MASK;
-	unsigned long end = PAGE_ALIGN(addr) + numpages * PAGE_SIZE;
+	unsigned long start = addr & MMUPAGE_MASK;
+	unsigned long end = MMUPAGE_ALIGN(addr) + numpages * MMUPAGE_SIZE;
 	unsigned long size = end - start;
 
 	WARN_ON_ONCE(start != addr);
@@ -101,11 +101,11 @@ int set_memory_x(unsigned long addr, int numpages)
 int set_memory_valid(unsigned long addr, int numpages, int enable)
 {
 	if (enable)
-		return __change_memory_common(addr, PAGE_SIZE * numpages,
+		return __change_memory_common(addr, MMUPAGE_SIZE * numpages,
 					      __pgprot(L_PTE_VALID),
 					      __pgprot(0));
 	else
-		return __change_memory_common(addr, PAGE_SIZE * numpages,
+		return __change_memory_common(addr, MMUPAGE_SIZE * numpages,
 					      __pgprot(0),
 					      __pgprot(L_PTE_VALID));
 }

@@ -441,7 +441,7 @@ retry:
 		goto bad_area;
 	}
 
-	fault = handle_mm_fault(vma, addr & PAGE_MASK, flags, regs);
+	fault = handle_mm_fault(vma, addr & MMUPAGE_MASK, flags, regs);
 
 	/* If we need to retry but a fatal signal is pending, handle the
 	 * signal first. We do not need to release the mmap_lock because
