@@ -1041,13 +1041,13 @@ pgtable_t pgtable_trans_huge_withdraw(struct mm_struct *mm, pmd_t *pmdp);
  *   1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
  *   --------------------> E <-- type ---> <------- zeroes -------->
  */
-#define __swp_type(entry)	(((entry).val >> PAGE_SHIFT) & 0x7fUL)
-#define __swp_offset(entry)	((entry).val >> (PAGE_SHIFT + 8UL))
+#define __swp_type(entry)	(((entry).val >> MMUPAGE_SHIFT) & 0x7fUL)
+#define __swp_offset(entry)	((entry).val >> (MMUPAGE_SHIFT + 8UL))
 #define __swp_entry(type, offset)	\
 	( (swp_entry_t) \
 	  { \
-		((((long)(type) & 0x7fUL) << PAGE_SHIFT) | \
-                 ((long)(offset) << (PAGE_SHIFT + 8UL))) \
+		((((long)(type) & 0x7fUL) << MMUPAGE_SHIFT) | \
+                 ((long)(offset) << (MMUPAGE_SHIFT + 8UL))) \
 	  } )
 #define __pte_to_swp_entry(pte)		((swp_entry_t) { pte_val(pte) })
 #define __swp_entry_to_pte(x)		((pte_t) { (x).val })
