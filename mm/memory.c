@@ -5349,8 +5349,12 @@ check_folio:
 	 */
 	arch_swap_restore(folio_swap(entry, folio), folio);
 
-	add_mm_counter(vma->vm_mm, MM_ANONPAGES, nr_pages);
-	add_mm_counter(vma->vm_mm, MM_SWAPENTS, -nr_pages);
+	{
+		long nr_rss = (PAGE_MMUSHIFT && nr_pages > 1) ?
+			(long)nr_pages * PAGE_MMUCOUNT : nr_pages;
+		add_mm_counter(vma->vm_mm, MM_ANONPAGES, nr_rss);
+		add_mm_counter(vma->vm_mm, MM_SWAPENTS, -nr_rss);
+	}
 	pte = mk_pte(page, vma->vm_page_prot);
 	if (pte_swp_soft_dirty(vmf->orig_pte))
 		pte = pte_mksoft_dirty(pte);
@@ -5375,7 +5379,15 @@ check_folio:
 		}
 		rmap_flags |= RMAP_EXCLUSIVE;
 	}
-	folio_ref_add(folio, nr_pages - 1);
+	{
+	/*
+	 * PGCL: set_ptes(nr>1) maps nr*PAGE_MMUCOUNT PTEs.
+	 * Refs and rmap must account for all hardware PTEs.
+	 */
+	unsigned long nr_ptes = (PAGE_MMUSHIFT && nr_pages > 1) ?
+		(unsigned long)nr_pages * PAGE_MMUCOUNT : nr_pages;
+
+	folio_ref_add(folio, nr_ptes - 1);
 	flush_icache_pages(vma, page, nr_pages);
 	vmf->orig_pte = pte_advance_pfn(pte, page_idx);
 
@@ -5398,6 +5410,20 @@ check_folio:
 		folio_add_anon_rmap_ptes(folio, page, nr_pages, vma, address,
 					 rmap_flags);
 		folio_put_swap(folio, nr_pages == 1 ? page : NULL);
+	}
+	/*
+	 * PGCL large folio rmap fixup: folio_add_new_anon_rmap and
+	 * folio_add_anon_rmap_ptes only account for nr_pages (kernel
+	 * pages), but we need nr_ptes (MMUPAGE count) mappings.
+	 */
+	if (PAGE_MMUSHIFT && nr_pages > 1 && folio_test_large(folio)) {
+		int i;
+		for (i = 0; i < nr_pages; i++)
+			atomic_add(PAGE_MMUCOUNT - 1,
+				   &folio_page(folio, i)->_mapcount);
+		folio_add_large_mapcount(folio,
+					nr_ptes - nr_pages, vma);
+	}
 	}
 
 	VM_BUG_ON(!folio_test_anon(folio) ||
@@ -5788,7 +5814,6 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		for (j = 0; j < PAGE_MMUCOUNT; j++) {
 			unsigned long a = base_addr + (unsigned long)j * MMUPAGE_SIZE;
 			pte_t *ptep = base_pte + j;
-			struct page *sub_page;
 
 			/* Skip if outside VMA bounds */
 			if (a < vma->vm_start || a >= vma->vm_end)
@@ -5796,7 +5821,6 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 			/* Skip if PTE already occupied */
 			if (!pte_none(ptep_get(ptep)))
 				continue;
-			sub_page = folio_page(folio, 0) + j;
 			set_ptes(vma->vm_mm, a, ptep, pte_mksub(entry, (unsigned long)j * MMUPAGE_SIZE), 1);
 			rss++;
 		}
@@ -6041,14 +6065,21 @@ void set_pte_range(struct vm_fault *vmf, struct folio *folio,
 		folio_add_new_anon_rmap(folio, vma, addr, RMAP_EXCLUSIVE);
 		folio_add_lru_vma(folio, vma);
 	} else {
+		folio_add_file_rmap_ptes(folio, page, nr, vma);
 		/*
-		 * With PGCL, set_ptes(nr=1) maps a single PTE (special case),
-		 * but set_ptes(nr>1) maps nr * PAGE_MMUCOUNT PTEs.
-		 * Match rmap count to actual PTEs set.
+		 * PGCL: set_ptes(nr>1) maps nr*PAGE_MMUCOUNT PTEs,
+		 * but rmap functions only accept kernel page counts.
+		 * Bump per-page mapcount and large_mapcount for the
+		 * extra PGCL sub-page PTEs.
 		 */
-		unsigned int rmap_nr = (nr > 1) ?
-			nr * PAGE_MMUCOUNT : nr;
-		folio_add_file_rmap_ptes(folio, page, rmap_nr, vma);
+		if (PAGE_MMUSHIFT && nr > 1 && folio_test_large(page_folio(page))) {
+			int i;
+			for (i = 0; i < nr; i++)
+				atomic_add(PAGE_MMUCOUNT - 1,
+					   &(page + i)->_mapcount);
+			folio_add_large_mapcount(page_folio(page),
+				(unsigned long)nr * (PAGE_MMUCOUNT - 1), vma);
+		}
 	}
 	set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr);
 
