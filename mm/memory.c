@@ -3174,11 +3174,11 @@ static int remap_pfn_range_internal(struct vm_area_struct *vma, unsigned long ad
 {
 	pgd_t *pgd;
 	unsigned long next;
-	unsigned long end = addr + PAGE_ALIGN(size);
+	unsigned long end = addr + MMUPAGE_ALIGN(size);
 	struct mm_struct *mm = vma->vm_mm;
 	int err;
 
-	if (WARN_ON_ONCE(!PAGE_ALIGNED(addr)))
+	if (WARN_ON_ONCE(!MMUPAGE_ALIGNED(addr)))
 		return -EINVAL;
 
 	VM_WARN_ON_ONCE(!vma_test_all_mask(vma, VMA_REMAP_FLAGS));
@@ -3254,7 +3254,7 @@ static int remap_pfn_range_track(struct vm_area_struct *vma, unsigned long addr,
 	struct pfnmap_track_ctx *ctx = NULL;
 	int err;
 
-	size = PAGE_ALIGN(size);
+	size = MMUPAGE_ALIGN(size);
 
 	/*
 	 * If we cover the full VMA, we'll perform actual tracking, and
@@ -3323,7 +3323,7 @@ static int remap_pfn_range_prepare_vma(struct vm_area_struct *vma,
 				       unsigned long addr, unsigned long pfn,
 				       unsigned long size)
 {
-	const unsigned long end = addr + PAGE_ALIGN(size);
+	const unsigned long end = addr + MMUPAGE_ALIGN(size);
 	const bool is_cow = is_cow_mapping(vma->vm_flags);
 	int err;
 
