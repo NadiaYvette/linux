@@ -584,8 +584,10 @@ static inline unsigned int order_objects(unsigned int order, unsigned int size)
 static inline struct kmem_cache_order_objects oo_make(unsigned int order,
 		unsigned int size)
 {
+	unsigned int nr = order_objects(order, size);
+
 	struct kmem_cache_order_objects x = {
-		(order << OO_SHIFT) + order_objects(order, size)
+		(order << OO_SHIFT) + min_t(unsigned int, nr, OO_MASK)
 	};
 
 	return x;
@@ -7468,8 +7470,10 @@ static inline int calculate_order(unsigned int size)
 
 	min_order = max_t(unsigned int, slub_min_order,
 			  get_order(min_objects * size));
-	if (order_objects(min_order, size) > MAX_OBJS_PER_PAGE)
-		return get_order(size * MAX_OBJS_PER_PAGE) - 1;
+	if (order_objects(min_order, size) > MAX_OBJS_PER_PAGE) {
+		unsigned int order = get_order(size * MAX_OBJS_PER_PAGE);
+		return order > 0 ? order - 1 : 0;
+	}
 
 	/*
 	 * Attempt to find best configuration for a slab. This works by first
