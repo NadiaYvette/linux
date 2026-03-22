@@ -64,9 +64,9 @@ void local_flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 		unsigned long size, flags;
 
 		local_irq_save(flags);
-		start = round_down(start, PAGE_SIZE << 1);
-		end = round_up(end, PAGE_SIZE << 1);
-		size = (end - start) >> (PAGE_SHIFT + 1);
+		start = round_down(start, MMUPAGE_SIZE << 1);
+		end = round_up(end, MMUPAGE_SIZE << 1);
+		size = (end - start) >> (MMUPAGE_SHIFT + 1);
 		if (size <= (current_cpu_data.tlbsizestlbsets ?
 			     current_cpu_data.tlbsize / 8 :
 			     current_cpu_data.tlbsize / 2)) {
@@ -74,7 +74,7 @@ void local_flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 
 			while (start < end) {
 				invtlb(INVTLB_ADDR_GFALSE_AND_ASID, asid, start);
-				start += (PAGE_SIZE << 1);
+				start += (MMUPAGE_SIZE << 1);
 			}
 		} else {
 			drop_mmu_context(mm, cpu);
@@ -90,19 +90,19 @@ void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
 	unsigned long size, flags;
 
 	local_irq_save(flags);
-	size = (end - start + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
+	size = (end - start + (MMUPAGE_SIZE - 1)) >> MMUPAGE_SHIFT;
 	size = (size + 1) >> 1;
 	if (size <= (current_cpu_data.tlbsizestlbsets ?
 		     current_cpu_data.tlbsize / 8 :
 		     current_cpu_data.tlbsize / 2)) {
 
-		start &= (PAGE_MASK << 1);
-		end += ((PAGE_SIZE << 1) - 1);
-		end &= (PAGE_MASK << 1);
+		start &= (MMUPAGE_MASK << 1);
+		end += ((MMUPAGE_SIZE << 1) - 1);
+		end &= (MMUPAGE_MASK << 1);
 
 		while (start < end) {
 			invtlb_addr(INVTLB_ADDR_GTRUE_OR_ASID, 0, start);
-			start += (PAGE_SIZE << 1);
+			start += (MMUPAGE_SIZE << 1);
 		}
 	} else {
 		local_flush_tlb_kernel();
@@ -118,7 +118,7 @@ void local_flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
 		int newpid;
 
 		newpid = cpu_asid(cpu, vma->vm_mm);
-		page &= (PAGE_MASK << 1);
+		page &= (MMUPAGE_MASK << 1);
 		invtlb(INVTLB_ADDR_GFALSE_AND_ASID, newpid, page);
 	} else {
 		cpumask_clear_cpu(cpu, mm_cpumask(vma->vm_mm));
@@ -131,7 +131,7 @@ void local_flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
  */
 void local_flush_tlb_one(unsigned long page)
 {
-	page &= (PAGE_MASK << 1);
+	page &= (MMUPAGE_MASK << 1);
 	invtlb_addr(INVTLB_ADDR_GTRUE_OR_ASID, 0, page);
 }
 
@@ -144,7 +144,7 @@ static void __update_hugetlb(struct vm_area_struct *vma, unsigned long address, 
 
 	local_irq_save(flags);
 
-	address &= (PAGE_MASK << 1);
+	address &= (MMUPAGE_MASK << 1);
 	write_csr_entryhi(address);
 	tlb_probe();
 	idx = read_csr_tlbidx();
@@ -187,7 +187,7 @@ void __update_tlb(struct vm_area_struct *vma, unsigned long address, pte_t *ptep
 	if ((unsigned long)ptep & sizeof(pte_t))
 		ptep--;
 
-	address &= (PAGE_MASK << 1);
+	address &= (MMUPAGE_MASK << 1);
 	write_csr_entryhi(address);
 	tlb_probe();
 	idx = read_csr_tlbidx();
@@ -211,17 +211,17 @@ static void __no_sanitize_address setup_ptwalker(void)
 	unsigned long pte_i = 0, pte_w = 0;
 
 	pgd_i = PGDIR_SHIFT;
-	pgd_w = PAGE_SHIFT - 3;
+	pgd_w = MMUPAGE_SHIFT - 3;
 #if CONFIG_PGTABLE_LEVELS > 3
 	pud_i = PUD_SHIFT;
-	pud_w = PAGE_SHIFT - 3;
+	pud_w = MMUPAGE_SHIFT - 3;
 #endif
 #if CONFIG_PGTABLE_LEVELS > 2
 	pmd_i = PMD_SHIFT;
-	pmd_w = PAGE_SHIFT - 3;
+	pmd_w = MMUPAGE_SHIFT - 3;
 #endif
-	pte_i = PAGE_SHIFT;
-	pte_w = PAGE_SHIFT - 3;
+	pte_i = MMUPAGE_SHIFT;
+	pte_w = MMUPAGE_SHIFT - 3;
 
 	pwctl0 = pte_i | pte_w << 5 | pmd_i << 10 | pmd_w << 15 | pud_i << 20 | pud_w << 25;
 	pwctl1 = pgd_i | pgd_w << 6;

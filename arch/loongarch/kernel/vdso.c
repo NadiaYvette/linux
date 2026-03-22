@@ -50,16 +50,16 @@ static int __init init_vdso(void)
 	for_each_possible_cpu(cpu)
 		vdso_k_arch_data->pdata[cpu].node = cpu_to_node(cpu);
 
-	vdso_info.size = PAGE_ALIGN(vdso_end - vdso_start);
+	vdso_info.size = MMUPAGE_ALIGN(vdso_end - vdso_start);
 	vdso_info.code_mapping.pages =
-		kzalloc_objs(struct page *, vdso_info.size / PAGE_SIZE);
+		kzalloc_objs(struct page *, vdso_info.size / MMUPAGE_SIZE);
 
 	if (!vdso_info.code_mapping.pages)
 		return -ENOMEM;
 
 	pfn = __phys_to_pfn(__pa_symbol(vdso_info.vdso));
-	for (i = 0; i < vdso_info.size / PAGE_SIZE; i++)
-		vdso_info.code_mapping.pages[i] = pfn_to_page(pfn + i);
+	for (i = 0; i < vdso_info.size / MMUPAGE_SIZE; i++)
+		vdso_info.code_mapping.pages[i] = pfn_to_page(pfn + i / PAGE_MMUCOUNT);
 
 	return 0;
 }
@@ -71,7 +71,7 @@ static unsigned long vdso_base(void)
 
 	if (current->flags & PF_RANDOMIZE) {
 		base += get_random_u32_below(VDSO_RANDOMIZE_SIZE);
-		base = PAGE_ALIGN(base);
+		base = MMUPAGE_ALIGN(base);
 	}
 
 	return base;

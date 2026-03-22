@@ -58,7 +58,7 @@ register unsigned long current_stack_pointer __asm__("$sp");
 /* thread information allocation */
 #define THREAD_SIZE		SZ_16K
 #define THREAD_MASK		(THREAD_SIZE - 1UL)
-#define THREAD_SIZE_ORDER	ilog2(THREAD_SIZE / PAGE_SIZE)
+#define THREAD_SIZE_ORDER	ilog2(DIV_ROUND_UP(THREAD_SIZE, PAGE_SIZE))
 /*
  * thread information flags
  * - these are process state flags that various assembly files may need to

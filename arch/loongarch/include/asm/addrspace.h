@@ -138,7 +138,7 @@ extern unsigned long vm_map_base;
  * PCI_IOBASE ->|-----------------------|
  *              |         ....          |
  */
-#define PCI_IOBASE	((void __iomem *)(vm_map_base + (2 * PAGE_SIZE)))
+#define PCI_IOBASE	((void __iomem *)(vm_map_base + (2 * MMUPAGE_SIZE)))
 #define PCI_IOSIZE	SZ_32M
 #define ISA_IOSIZE	SZ_16K
 #define IO_SPACE_LIMIT	(PCI_IOSIZE - 1)

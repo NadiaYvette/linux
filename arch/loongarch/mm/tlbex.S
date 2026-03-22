@@ -11,10 +11,11 @@
 
 #define INVTLB_ADDR_GFALSE_AND_ASID	5
 
-#define PTRS_PER_PGD_BITS	(PAGE_SHIFT - PTRLOG)
-#define PTRS_PER_PUD_BITS	(PAGE_SHIFT - PTRLOG)
-#define PTRS_PER_PMD_BITS	(PAGE_SHIFT - PTRLOG)
-#define PTRS_PER_PTE_BITS	(PAGE_SHIFT - PTRLOG)
+/* Page table index widths: MMUPAGE-sized tables, not PAGE-sized (PGCL) */
+#define PTRS_PER_PGD_BITS	(MMUPAGE_SHIFT - PTRLOG)
+#define PTRS_PER_PUD_BITS	(MMUPAGE_SHIFT - PTRLOG)
+#define PTRS_PER_PMD_BITS	(MMUPAGE_SHIFT - PTRLOG)
+#define PTRS_PER_PTE_BITS	(MMUPAGE_SHIFT - PTRLOG)
 
 #ifdef CONFIG_32BIT
 #define PTE_LL	ll.w
@@ -98,7 +99,7 @@ vmalloc_done_load:
 	bltz		ra, tlb_huge_update_load
 
 	PTR_ROTRI	ra, ra, BITS_PER_LONG - (_PAGE_HUGE_SHIFT + 1)
-	PTR_BSTRPICK	t0, t0, PTRS_PER_PTE_BITS + PAGE_SHIFT - 1, PAGE_SHIFT
+	PTR_BSTRPICK	t0, t0, PTRS_PER_PTE_BITS + MMUPAGE_SHIFT - 1, MMUPAGE_SHIFT
 	PTR_ALSL	t1, t0, ra, _PTE_T_LOG2
 
 #ifdef CONFIG_SMP
@@ -259,7 +260,7 @@ vmalloc_done_store:
 	bltz		ra, tlb_huge_update_store
 
 	PTR_ROTRI	ra, ra, BITS_PER_LONG - (_PAGE_HUGE_SHIFT + 1)
-	PTR_BSTRPICK	t0, t0, PTRS_PER_PTE_BITS + PAGE_SHIFT - 1, PAGE_SHIFT
+	PTR_BSTRPICK	t0, t0, PTRS_PER_PTE_BITS + MMUPAGE_SHIFT - 1, MMUPAGE_SHIFT
 	PTR_ALSL	t1, t0, ra, _PTE_T_LOG2
 
 #ifdef CONFIG_SMP
@@ -447,7 +448,7 @@ vmalloc_done_modify:
 	bltz		ra, tlb_huge_update_modify
 
 	PTR_ROTRI	ra, ra, BITS_PER_LONG - (_PAGE_HUGE_SHIFT + 1)
-	PTR_BSTRPICK	t0, t0, PTRS_PER_PTE_BITS + PAGE_SHIFT - 1, PAGE_SHIFT
+	PTR_BSTRPICK	t0, t0, PTRS_PER_PTE_BITS + MMUPAGE_SHIFT - 1, MMUPAGE_SHIFT
 	PTR_ALSL	t1, t0, ra, _PTE_T_LOG2
 
 #ifdef CONFIG_SMP
@@ -606,7 +607,7 @@ SYM_CODE_START(handle_tlb_refill)
 	ld.w		t0, t0, 0
 	csrrd		t1, LOONGARCH_CSR_TLBRBADV
 	slli.w		t1, t1, (32 - PGDIR_SHIFT)
-	srli.w		t1, t1, (32 - PGDIR_SHIFT + PAGE_SHIFT + 1)
+	srli.w		t1, t1, (32 - PGDIR_SHIFT + MMUPAGE_SHIFT + 1)
 	slli.w		t1, t1, (0x2 + 1)
 	add.w		t0, t0, t1
 	and		t0, t0, ra
