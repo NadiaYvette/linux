@@ -1325,8 +1325,6 @@ static int __init of_fdt_raw_init(void)
 	if (!initial_boot_params)
 		return 0;
 
-	pr_alert("PGCL: of_fdt_raw_init: initial_boot_params=%px totalsize=0x%x\n",
-		 initial_boot_params, fdt_totalsize(initial_boot_params));
 	if (of_fdt_crc32 != crc32_be(~0, initial_boot_params,
 				     fdt_totalsize(initial_boot_params))) {
 		pr_warn("not creating '/sys/firmware/fdt': CRC check failed\n");

@@ -28,27 +28,29 @@ struct vm_area_struct;
  */
 #define set_pte(pteptr, pteval) ((*(pteptr)) = (pteval))
 
-/* PMD_SHIFT determines the size of the area a second-level page table can map */
-#define PMD_SHIFT	(PAGE_SHIFT + (PAGE_SHIFT-3))
+/* PMD_SHIFT determines the size of the area a second-level page table can map.
+ * Alpha hardware page tables use hardware (MMU) page size, not kernel page size. */
+#define PMD_SHIFT	(MMUPAGE_SHIFT + (MMUPAGE_SHIFT-3))
 #define PMD_SIZE	(1UL << PMD_SHIFT)
 #define PMD_MASK	(~(PMD_SIZE-1))
 
 /* PGDIR_SHIFT determines what a third-level page table entry can map */
-#define PGDIR_SHIFT	(PAGE_SHIFT + 2*(PAGE_SHIFT-3))
+#define PGDIR_SHIFT	(MMUPAGE_SHIFT + 2*(MMUPAGE_SHIFT-3))
 #define PGDIR_SIZE	(1UL << PGDIR_SHIFT)
 #define PGDIR_MASK	(~(PGDIR_SIZE-1))
 
 /*
  * Entries per page directory level:  the Alpha is three-level, with
- * all levels having a one-page page table.
+ * all levels having a one-hardware-page page table.
+ * Page table structures are sized by hardware (MMU) page size, not kernel page size.
  */
-#define PTRS_PER_PTE	(1UL << (PAGE_SHIFT-3))
-#define PTRS_PER_PMD	(1UL << (PAGE_SHIFT-3))
-#define PTRS_PER_PGD	(1UL << (PAGE_SHIFT-3))
+#define PTRS_PER_PTE	(1UL << (MMUPAGE_SHIFT-3))
+#define PTRS_PER_PMD	(1UL << (MMUPAGE_SHIFT-3))
+#define PTRS_PER_PGD	(1UL << (MMUPAGE_SHIFT-3))
 #define USER_PTRS_PER_PGD	(TASK_SIZE / PGDIR_SIZE)
 
-/* Number of pointers that fit on a page:  this will go away. */
-#define PTRS_PER_PAGE	(1UL << (PAGE_SHIFT-3))
+/* Number of pointers that fit on a hardware page:  this will go away. */
+#define PTRS_PER_PAGE	(1UL << (MMUPAGE_SHIFT-3))
 
 #ifdef CONFIG_ALPHA_LARGE_VMALLOC
 #define VMALLOC_START		0xfffffe0000000000
@@ -153,9 +155,9 @@ struct vm_area_struct;
 #endif
 #if defined(CONFIG_ALPHA_GENERIC) || \
     (defined(CONFIG_ALPHA_EV6) && !defined(USE_48_BIT_KSEG))
-#define KSEG_PFN	(0xc0000000000UL >> PAGE_SHIFT)
+#define KSEG_PFN	(0xc0000000000UL >> MMUPAGE_SHIFT)
 #define PHYS_TWIDDLE(pfn) \
-  ((((pfn) & KSEG_PFN) == (0x40000000000UL >> PAGE_SHIFT)) \
+  ((((pfn) & KSEG_PFN) == (0x40000000000UL >> MMUPAGE_SHIFT)) \
   ? ((pfn) ^= KSEG_PFN) : (pfn))
 #else
 #define PHYS_TWIDDLE(pfn) (pfn)
@@ -164,24 +166,42 @@ struct vm_area_struct;
 /*
  * Conversion functions:  convert a page and protection to a page entry,
  * and a page entry and page directory to the page they refer to.
+ *
+ * Alpha hardware stores the hardware PFN (pa >> MMUPAGE_SHIFT) in PTE bits
+ * [63:32].  Kernel PFNs (pa >> PAGE_SHIFT) differ by PAGE_MMUCOUNT with PGCL.
+ * pfn_pte() takes a kernel PFN and converts to hardware PFN for the PTE.
+ * pte_pfn() extracts the hardware PFN and converts back to kernel PFN.
+ *
+ * __phys_to_pte_val(pa): convert physical byte address to raw PTE value
+ * encoding.  Alpha stores hardware PFN in bits[63:32], so:
+ *   __phys_to_pte_val(pa) = ((pa >> MMUPAGE_SHIFT) << 32)
  */
 #define page_to_pa(page)	(page_to_pfn(page) << PAGE_SHIFT)
 #define PFN_PTE_SHIFT		32
-#define pte_pfn(pte)		(pte_val(pte) >> PFN_PTE_SHIFT)
+#define pte_pfn(pte)		((pte_val(pte) >> PFN_PTE_SHIFT) >> PAGE_MMUSHIFT)
+#define __phys_to_pte_val(phys)	(((phys) >> MMUPAGE_SHIFT) << 32)
 
 #define pte_page(pte)	pfn_to_page(pte_pfn(pte))
 
 extern inline pte_t pfn_pte(unsigned long physpfn, pgprot_t pgprot)
-{ pte_t pte; pte_val(pte) = (PHYS_TWIDDLE(physpfn) << 32) | pgprot_val(pgprot); return pte; }
+{ pte_t pte; unsigned long hw_pfn = physpfn << PAGE_MMUSHIFT; pte_val(pte) = (PHYS_TWIDDLE(hw_pfn) << 32) | pgprot_val(pgprot); return pte; }
+
+/* Advance PTE by nr kernel pages (not hardware pages).  Alpha stores hardware
+ * PFN in bits[63:32], and one kernel page = PAGE_MMUCOUNT hardware pages. */
+#define pte_advance_pfn pte_advance_pfn
+static inline pte_t pte_advance_pfn(pte_t pte, unsigned long nr)
+{
+	return __pte(pte_val(pte) + ((unsigned long)(nr << PAGE_MMUSHIFT) << PFN_PTE_SHIFT));
+}
 
 extern inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 { pte_val(pte) = (pte_val(pte) & _PAGE_CHG_MASK) | pgprot_val(newprot); return pte; }
 
 extern inline void pmd_set(pmd_t * pmdp, pte_t * ptep)
-{ pmd_val(*pmdp) = _PAGE_TABLE | ((((unsigned long) ptep) - PAGE_OFFSET) << (32-PAGE_SHIFT)); }
+{ pmd_val(*pmdp) = _PAGE_TABLE | ((((unsigned long) ptep) - PAGE_OFFSET) << (32-MMUPAGE_SHIFT)); }
 
 extern inline void pud_set(pud_t * pudp, pmd_t * pmdp)
-{ pud_val(*pudp) = _PAGE_TABLE | ((((unsigned long) pmdp) - PAGE_OFFSET) << (32-PAGE_SHIFT)); }
+{ pud_val(*pudp) = _PAGE_TABLE | ((((unsigned long) pmdp) - PAGE_OFFSET) << (32-MMUPAGE_SHIFT)); }
 
 
 extern void migrate_flush_tlb_page(struct vm_area_struct *vma,
@@ -190,7 +210,7 @@ extern void migrate_flush_tlb_page(struct vm_area_struct *vma,
 extern inline unsigned long
 pmd_page_vaddr(pmd_t pmd)
 {
-	return ((pmd_val(pmd) & _PFN_MASK) >> (32-PAGE_SHIFT)) + PAGE_OFFSET;
+	return ((pmd_val(pmd) & _PFN_MASK) >> (32-MMUPAGE_SHIFT)) + PAGE_OFFSET;
 }
 
 #define pmd_pfn(pmd)	(pmd_val(pmd) >> 32)
@@ -199,7 +219,7 @@ pmd_page_vaddr(pmd_t pmd)
 
 extern inline pmd_t *pud_pgtable(pud_t pgd)
 {
-	return (pmd_t *)(PAGE_OFFSET + ((pud_val(pgd) & _PFN_MASK) >> (32-PAGE_SHIFT)));
+	return (pmd_t *)(PAGE_OFFSET + ((pud_val(pgd) & _PFN_MASK) >> (32-MMUPAGE_SHIFT)));
 }
 
 extern inline int pte_none(pte_t pte)		{ return !pte_val(pte); }
@@ -260,7 +280,7 @@ extern inline pmd_t * pmd_offset(pud_t * dir, unsigned long address)
 extern inline pte_t * pte_offset_kernel(pmd_t * dir, unsigned long address)
 {
 	pte_t *ret = (pte_t *) pmd_page_vaddr(*dir)
-		+ ((address >> PAGE_SHIFT) & (PTRS_PER_PAGE - 1));
+		+ ((address >> MMUPAGE_SHIFT) & (PTRS_PER_PAGE - 1));
 	smp_rmb(); /* see above */
 	return ret;
 }

@@ -430,7 +430,8 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 
 			for (j = 0; j < PAGE_MMUCOUNT; j++) {
 				set_pte(ptep, __pte(pte_val(pte) +
-						    j * MMUPAGE_SIZE));
+					__phys_to_pte_val((phys_addr_t)j *
+							  MMUPAGE_SIZE)));
 				ptep++;
 			}
 			if (i + 1 < nr)
