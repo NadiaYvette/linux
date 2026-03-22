@@ -222,10 +222,10 @@ void __init __set_fixmap(enum fixed_addresses idx,
 	}
 
 	if (pgprot_val(flags))
-		set_pte(ptep, pfn_pte(phys >> PAGE_SHIFT, flags));
+		set_pte(ptep, __pte((phys & MMUPAGE_MASK) | pgprot_val(flags)));
 	else {
 		pte_clear(&init_mm, addr, ptep);
-		flush_tlb_kernel_range(addr, addr + PAGE_SIZE);
+		flush_tlb_kernel_range(addr, addr + MMUPAGE_SIZE);
 	}
 }
 
