@@ -153,7 +153,7 @@ static unsigned long __init init_initrd(void)
 	if (!initrd_start || initrd_end <= initrd_start)
 		goto disable;
 
-	if (initrd_start & ~PAGE_MASK) {
+	if (initrd_start & ~MMUPAGE_MASK) {
 		pr_err("initrd start must be page aligned\n");
 		goto disable;
 	}
@@ -219,7 +219,7 @@ static void __init finalize_initrd(void)
 		printk(KERN_INFO "Initrd not found or empty");
 		goto disable;
 	}
-	if (__pa(initrd_end) > PFN_PHYS(max_low_pfn)) {
+	if (__pa(initrd_end) > memblock_end_of_DRAM()) {
 		printk(KERN_ERR "Initrd extends beyond end of memory");
 		goto disable;
 	}
