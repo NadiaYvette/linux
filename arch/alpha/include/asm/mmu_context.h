@@ -200,7 +200,7 @@ init_new_context(struct task_struct *tsk, struct mm_struct *mm)
 		mm->context[i] = 0;
 	if (tsk != current)
 		task_thread_info(tsk)->pcb.ptbr
-		  = ((unsigned long)mm->pgd - IDENT_ADDR) >> PAGE_SHIFT;
+		  = ((unsigned long)mm->pgd - IDENT_ADDR) >> MMUPAGE_SHIFT;
 	return 0;
 }
 
@@ -209,7 +209,7 @@ static inline void
 enter_lazy_tlb(struct mm_struct *mm, struct task_struct *tsk)
 {
 	task_thread_info(tsk)->pcb.ptbr
-	  = ((unsigned long)mm->pgd - IDENT_ADDR) >> PAGE_SHIFT;
+	  = ((unsigned long)mm->pgd - IDENT_ADDR) >> MMUPAGE_SHIFT;
 }
 
 #include <asm-generic/mmu_context.h>

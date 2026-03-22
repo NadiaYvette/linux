@@ -77,9 +77,10 @@ switch_to_system_map(void)
 	unsigned long original_pcb_ptr;
 
 	/* Initialize the kernel's page tables.  Linux puts the vptb in
-	   the last slot of the L1 page table.  */
-	memset(swapper_pg_dir, 0, PAGE_SIZE);
-	newptbr = ((unsigned long) swapper_pg_dir - PAGE_OFFSET) >> PAGE_SHIFT;
+	   the last slot of the L1 page table.  The page table is one hardware
+	   page (MMUPAGE_SIZE), not a kernel page (PAGE_SIZE).  */
+	memset(swapper_pg_dir, 0, MMUPAGE_SIZE);
+	newptbr = ((unsigned long) swapper_pg_dir - PAGE_OFFSET) >> MMUPAGE_SHIFT;
 	pgd_val(swapper_pg_dir[1023]) =
 		(newptbr << 32) | pgprot_val(PAGE_KERNEL);
 
@@ -152,17 +153,18 @@ callback_init(void * kernel_end)
 	   we need to allocate the PGD we use for vmalloc before we start
 	   forking other tasks.  */
 
+	/* Allocate two hardware pages for PUD and PMD page tables. */
 	two_pages = (void *)
-	  (((unsigned long)kernel_end + ~PAGE_MASK) & PAGE_MASK);
-	kernel_end = two_pages + 2*PAGE_SIZE;
-	memset(two_pages, 0, 2*PAGE_SIZE);
+	  (((unsigned long)kernel_end + ~MMUPAGE_MASK) & MMUPAGE_MASK);
+	kernel_end = two_pages + 2*MMUPAGE_SIZE;
+	memset(two_pages, 0, 2*MMUPAGE_SIZE);
 
 	pgd = pgd_offset_k(VMALLOC_START);
 	p4d = p4d_offset(pgd, VMALLOC_START);
 	pud = pud_offset(p4d, VMALLOC_START);
 	pud_set(pud, (pmd_t *)two_pages);
 	pmd = pmd_offset(pud, VMALLOC_START);
-	pmd_set(pmd, (pte_t *)(two_pages + PAGE_SIZE));
+	pmd_set(pmd, (pte_t *)(two_pages + MMUPAGE_SIZE));
 
 	if (alpha_using_srm) {
 		static struct vm_struct console_remap_vm;
@@ -176,8 +178,8 @@ callback_init(void * kernel_end)
 
 		/* register the vm area */
 		console_remap_vm.flags = VM_ALLOC;
-		console_remap_vm.size = nr_pages << PAGE_SHIFT;
-		vm_area_register_early(&console_remap_vm, PAGE_SIZE);
+		console_remap_vm.size = nr_pages << MMUPAGE_SHIFT;
+		vm_area_register_early(&console_remap_vm, MMUPAGE_SIZE);
 
 		vaddr = (unsigned long)console_remap_vm.addr;
 
@@ -188,18 +190,18 @@ callback_init(void * kernel_end)
 			crb->map[i].va = vaddr;
 			for (j = 0; j < crb->map[i].count; ++j) {
 				/* Newer consoles (especially on larger
-				   systems) may require more pages of
-				   PTEs. Grab additional pages as needed. */
+				   systems) may require more hardware pages of
+				   PTEs. Grab additional hardware pages as needed. */
 				if (pmd != pmd_offset(pud, vaddr)) {
-					memset(kernel_end, 0, PAGE_SIZE);
+					memset(kernel_end, 0, MMUPAGE_SIZE);
 					pmd = pmd_offset(pud, vaddr);
 					pmd_set(pmd, (pte_t *)kernel_end);
-					kernel_end += PAGE_SIZE;
+					kernel_end += MMUPAGE_SIZE;
 				}
 				set_pte(pte_offset_kernel(pmd, vaddr),
 					pfn_pte(pfn, PAGE_KERNEL));
 				pfn++;
-				vaddr += PAGE_SIZE;
+				vaddr += MMUPAGE_SIZE;
 			}
 		}
 	}
@@ -224,7 +226,7 @@ void __init arch_zone_limits_init(unsigned long *max_zone_pfn)
  */
 void __init paging_init(void)
 {
-	memset(absolute_pointer(ZERO_PGE), 0, PAGE_SIZE);
+	memset(absolute_pointer(ZERO_PGE), 0, MMUPAGE_SIZE);
 }
 
 #if defined(CONFIG_ALPHA_GENERIC) || defined(CONFIG_ALPHA_SRM)

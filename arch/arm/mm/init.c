@@ -180,10 +180,6 @@ void check_cpu_icache_size(int cpuid)
 void __init arm_memblock_init(const struct machine_desc *mdesc)
 {
 	/* Register the kernel text, kernel data and initrd with memblock. */
-	pr_alert("PGCL: kernel phys 0x%08lx-0x%08lx size 0x%lx\n",
-		 (unsigned long)__pa(KERNEL_START),
-		 (unsigned long)__pa(KERNEL_END),
-		 (unsigned long)(KERNEL_END - KERNEL_START));
 	memblock_reserve(__pa(KERNEL_START), KERNEL_END - KERNEL_START);
 
 	reserve_initrd_mem();
@@ -471,8 +467,6 @@ void free_initmem(void)
 				}
 
 				if (has_pgtable) {
-					pr_info("PGCL: free_initmem: skip %px (contains pgtable for L1[%d])\n",
-						(void *)pos, i);
 					continue;
 				}
 				free_reserved_page(virt_to_page((void *)pos));

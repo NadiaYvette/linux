@@ -185,11 +185,11 @@ SYSCALL_DEFINE6(osf_mmap, unsigned long, addr, unsigned long, len,
 		printk("%s: unimplemented OSF mmap flags %04lx\n", 
 			current->comm, flags);
 #endif
-	if ((off + PAGE_ALIGN(len)) < off)
+	if ((off + MMUPAGE_ALIGN(len)) < off)
 		goto out;
-	if (off & ~PAGE_MASK)
+	if (off & ~MMUPAGE_MASK)
 		goto out;
-	ret = ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> PAGE_SHIFT);
+	ret = ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> MMUPAGE_SHIFT);
  out:
 	return ret;
 }

@@ -6241,12 +6241,8 @@ unsigned long free_reserved_area(void *start, void *end, int poison, const char 
 
 	start = (void *)PAGE_ALIGN((unsigned long)start);
 	end = (void *)((unsigned long)end & PAGE_MASK);
-	pr_alert("PGCL: free_reserved_area: start=%px end=%px PAGE_SIZE=0x%lx s=%s\n",
-		 start, end, PAGE_SIZE, s ? s : "(null)");
 	for (pos = start; pos < end; pos += PAGE_SIZE, pages++) {
 		struct page *page = virt_to_page(pos);
-		if (pages < 3 || ((unsigned long)pos & 0xfffff) == 0)
-			pr_alert("PGCL: free_reserved_area: page %lu pos=%px\n", pages, pos);
 		void *direct_map_addr;
 
 		/*

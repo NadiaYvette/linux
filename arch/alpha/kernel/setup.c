@@ -301,19 +301,22 @@ setup_memory(void *kernel_end)
 		       i, cluster->usage, cluster->start_pfn,
 		       cluster->start_pfn + cluster->numpages);
 
-		end = cluster->start_pfn + cluster->numpages;
+		/* cluster->start_pfn and numpages are in hardware (MMUPAGE)
+		 * units from the HWRPB. Convert to kernel page units for
+		 * max_low_pfn, and to physical bytes for memblock.  */
+		end = (cluster->start_pfn + cluster->numpages) >> PAGE_MMUSHIFT;
 		if (end > max_low_pfn)
 			max_low_pfn = end;
 
-		memblock_add(PFN_PHYS(cluster->start_pfn),
-			     cluster->numpages << PAGE_SHIFT);
+		memblock_add(cluster->start_pfn << MMUPAGE_SHIFT,
+			     cluster->numpages << MMUPAGE_SHIFT);
 
 		/* Bit 0 is console/PALcode reserved.  Bit 1 is
 		   non-volatile memory -- we might want to mark
 		   this for later.  */
 		if (cluster->usage & 3)
-			memblock_reserve(PFN_PHYS(cluster->start_pfn),
-				         cluster->numpages << PAGE_SHIFT);
+			memblock_reserve(cluster->start_pfn << MMUPAGE_SHIFT,
+				         cluster->numpages << MMUPAGE_SHIFT);
 	}
 
 	/*

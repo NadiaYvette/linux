@@ -393,11 +393,8 @@ static void smp_store_cpu_info(unsigned int cpuid)
 	cpu_info->loops_per_jiffy = loops_per_jiffy;
 	cpu_info->cpuid = read_cpuid_id();
 
-	pr_alert("PGCL: store_cpu_topology\n");
 	store_cpu_topology(cpuid);
-	pr_alert("PGCL: check_icache\n");
 	check_cpu_icache_size(cpuid);
-	pr_alert("PGCL: store_cpu_info exit\n");
 }
 
 static void set_current(struct task_struct *cur)
@@ -507,9 +504,7 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 {
 	unsigned int ncores = num_possible_cpus();
 
-	pr_alert("PGCL: smp_prepare_cpus ncores=%d max_cpus=%d\n", ncores, max_cpus);
 	init_cpu_topology();
-	pr_alert("PGCL: init_cpu_topology done\n");
 
 	smp_store_cpu_info(smp_processor_id());
 

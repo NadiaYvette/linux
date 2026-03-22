@@ -954,8 +954,8 @@ EXPORT_SYMBOL_GPL(build_get_pgde32);
 
 static void build_adjust_context(u32 **p, unsigned int ctx)
 {
-	unsigned int shift = 4 - (PTE_T_LOG2 + 1) + PAGE_SHIFT - 12;
-	unsigned int mask = (PTRS_PER_PTE / 2 - 1) << (PTE_T_LOG2 + 1);
+	unsigned int shift = 4 - (PTE_T_LOG2 + 1) + MMUPAGE_SHIFT - 12;
+	unsigned int mask = (MMUPAGE_SIZE / sizeof(pte_t) / 2 - 1) << (PTE_T_LOG2 + 1);
 
 	if (shift)
 		UASM_i_SRL(p, ctx, ctx, shift);
@@ -1217,7 +1217,7 @@ build_fast_tlb_refill_handler (u32 **p, struct uasm_label **l,
 		build_tlb_write_entry(p, l, r, tlb_random);
 		uasm_l_leave(l, *p);
 		rv.restore_scratch = 1;
-	} else if (PAGE_SHIFT == 14 || PAGE_SHIFT == 13)  {
+	} else if (MMUPAGE_SHIFT == 14 || MMUPAGE_SHIFT == 13)  {
 		build_tlb_write_entry(p, l, r, tlb_random);
 		uasm_l_leave(l, *p);
 		UASM_i_LW(p, scratch, scratchpad_offset(0), 0);
@@ -2012,8 +2012,8 @@ build_r4000_tlbchange_handler_head(u32 **p, struct uasm_label **l,
 
 	UASM_i_MFC0(p, wr.r1, C0_BADVADDR);
 	UASM_i_LW(p, wr.r2, 0, wr.r2);
-	UASM_i_SRL(p, wr.r1, wr.r1, PAGE_SHIFT - PTE_T_LOG2);
-	uasm_i_andi(p, wr.r1, wr.r1, (PTRS_PER_PTE - 1) << PTE_T_LOG2);
+	UASM_i_SRL(p, wr.r1, wr.r1, MMUPAGE_SHIFT - PTE_T_LOG2);
+	uasm_i_andi(p, wr.r1, wr.r1, (MMUPAGE_SIZE / sizeof(pte_t) - 1) << PTE_T_LOG2);
 	UASM_i_ADDU(p, wr.r2, wr.r2, wr.r1);
 
 #ifdef CONFIG_SMP
@@ -2415,7 +2415,7 @@ static void config_htw_params(void)
 	pwfield |= PGDIR_SHIFT << MIPS_PWFIELD_GDI_SHIFT;
 	/* re-initialize the PTI field including the even/odd bit */
 	pwfield &= ~MIPS_PWFIELD_PTI_MASK;
-	pwfield |= PAGE_SHIFT << MIPS_PWFIELD_PTI_SHIFT;
+	pwfield |= MMUPAGE_SHIFT << MIPS_PWFIELD_PTI_SHIFT;
 	if (CONFIG_PGTABLE_LEVELS >= 3) {
 		pwfield &= ~MIPS_PWFIELD_MDI_MASK;
 		pwfield |= PMD_SHIFT << MIPS_PWFIELD_MDI_SHIFT;
@@ -2440,7 +2440,7 @@ static void config_htw_params(void)
 	}
 
 	pwsize = ilog2(PTRS_PER_PGD) << MIPS_PWSIZE_GDW_SHIFT;
-	pwsize |= ilog2(PTRS_PER_PTE) << MIPS_PWSIZE_PTW_SHIFT;
+	pwsize |= ilog2(MMUPAGE_SIZE / sizeof(pte_t)) << MIPS_PWSIZE_PTW_SHIFT;
 	if (CONFIG_PGTABLE_LEVELS >= 3)
 		pwsize |= ilog2(PTRS_PER_PMD) << MIPS_PWSIZE_MDW_SHIFT;
 

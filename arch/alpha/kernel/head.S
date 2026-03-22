@@ -12,6 +12,7 @@
 #include <asm/asm-offsets.h>
 #include <asm/pal.h>
 #include <asm/setup.h>
+#include <asm/page.h>
 
 __HEAD
 .globl _stext
@@ -25,8 +26,9 @@ __start:
 1:	ldgp	$29,0($27)
 	/* We need to get current_task_info loaded up...  */
 	lda	$8,init_thread_union
-	/* ... and find our stack ... */
-	lda	$30,0x4000 - SIZEOF_PT_REGS($8)
+	/* ... and find our stack (THREAD_SIZE may exceed 16-bit lda range) ... */
+	ldah	$30,(2*PAGE_SIZE + 0x8000) >> 16 ($8)
+	lda	$30,((2*PAGE_SIZE) & 0xffff) - SIZEOF_PT_REGS ($30)
 	/* ... and then we can start the kernel.  */
 	jsr	$26,start_kernel
 	call_pal PAL_halt
@@ -48,7 +50,17 @@ __smp_callin:
 	mov	$0,$16		# Install it.
 	call_pal PAL_swpctx
 
-	lda	$8,0x3fff	# Find "current".
+	/* Find "current" — THREAD_SIZE may exceed 16-bit lda range.
+	 * (2*PAGE_SIZE-1) & 0xffff may be >= 0x8000 (= 0xffff for large PAGE_SIZE),
+	 * which the assembler would expand as a large unsigned immediate.
+	 * Use the sign-corrected form: when lo >= 0x8000, hi++ and lo -= 0x10000. */
+.if	((2*PAGE_SIZE - 1) & 0xffff) >= 0x8000
+	ldah	$8,(((2*PAGE_SIZE - 1) >> 16) + 1)($31)
+	lda	$8,(((2*PAGE_SIZE - 1) & 0xffff) - 0x10000)($8)
+.else
+	ldah	$8,((2*PAGE_SIZE - 1) >> 16)($31)
+	lda	$8,((2*PAGE_SIZE - 1) & 0xffff)($8)
+.endif
 	bic	$30,$8,$8
 	
 	jsr	$26,smp_callin

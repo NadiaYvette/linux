@@ -934,14 +934,10 @@ void __init init_cpu_topology(void)
 {
 	int cpu, ret;
 
-	pr_alert("PGCL: init_cpu_topology: reset\n");
 	reset_cpu_topology();
-	pr_alert("PGCL: init_cpu_topology: parse_acpi\n");
 	ret = parse_acpi_topology();
-	pr_alert("PGCL: init_cpu_topology: parse_dt ret=%d\n", ret);
 	if (!ret)
 		ret = of_have_populated_dt() && parse_dt_topology();
-	pr_alert("PGCL: init_cpu_topology: dt done ret=%d\n", ret);
 
 	if (ret) {
 		/*
@@ -953,16 +949,13 @@ void __init init_cpu_topology(void)
 	}
 
 	for_each_possible_cpu(cpu) {
-		pr_alert("PGCL: init_cpu_topology: fetch_cache cpu=%d\n", cpu);
 		ret = fetch_cache_info(cpu);
-		pr_alert("PGCL: init_cpu_topology: fetch_cache cpu=%d ret=%d\n", cpu, ret);
 		if (!ret)
 			continue;
 		else if (ret != -ENOENT)
 			pr_err("Early cacheinfo failed, ret = %d\n", ret);
 		return;
 	}
-	pr_alert("PGCL: init_cpu_topology: done\n");
 }
 
 void store_cpu_topology(unsigned int cpuid)

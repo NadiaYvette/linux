@@ -1105,9 +1105,6 @@ void __init setup_arch(char **cmdline_p)
 	if (atags_vaddr) {
 		mdesc = setup_machine_fdt(atags_vaddr);
 		if (mdesc) {
-			pr_alert("PGCL: FDT at phys 0x%08x size 0x%x\n",
-				 __atags_pointer,
-				 fdt_totalsize(atags_vaddr));
 			memblock_reserve(__atags_pointer,
 					 fdt_totalsize(atags_vaddr));
 		}
@@ -1153,20 +1150,14 @@ void __init setup_arch(char **cmdline_p)
 	 */
 	adjust_lowmem_bounds();
 	arm_memblock_init(mdesc);
-	pr_alert("PGCL: arm_memblock_init done\n");
 	/* Memory may have been removed so recalculate the bounds. */
 	adjust_lowmem_bounds();
-	pr_alert("PGCL: adjust_lowmem_bounds done\n");
 
 	early_ioremap_reset();
-	pr_alert("PGCL: early_ioremap_reset done, calling paging_init\n");
 
 	paging_init(mdesc);
-	pr_alert("PGCL: paging_init done\n");
 	kasan_init();
-	pr_alert("PGCL: kasan_init done\n");
 	request_standard_resources(mdesc);
-	pr_alert("PGCL: request_standard_resources done\n");
 
 	if (mdesc->restart) {
 		__arm_pm_restart = mdesc->restart;
@@ -1174,12 +1165,9 @@ void __init setup_arch(char **cmdline_p)
 	}
 
 	unflatten_device_tree();
-	pr_alert("PGCL: unflatten_device_tree done\n");
 
 	arm_dt_init_cpu_maps();
-	pr_alert("PGCL: arm_dt_init_cpu_maps done\n");
 	psci_dt_init();
-	pr_alert("PGCL: psci_dt_init done\n");
 #ifdef CONFIG_SMP
 	if (is_smp()) {
 		if (!mdesc->smp_init || !mdesc->smp_init()) {
@@ -1196,7 +1184,6 @@ void __init setup_arch(char **cmdline_p)
 	if (!is_smp())
 		hyp_mode_check();
 
-	pr_alert("PGCL: smp init done\n");
 	reserve_crashkernel();
 
 #ifdef CONFIG_VT
