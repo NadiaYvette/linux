@@ -23,7 +23,7 @@
 #define SPUFS_PS_MAP_SIZE	0x20000
 #define SPUFS_MFC_MAP_SIZE	0x1000
 #define SPUFS_CNTL_MAP_SIZE	0x1000
-#define SPUFS_SIGNAL_MAP_SIZE	PAGE_SIZE
+#define SPUFS_SIGNAL_MAP_SIZE	MMUPAGE_SIZE
 #define SPUFS_MSS_MAP_SIZE	0x1000
 
 /* The magic number for our file system */

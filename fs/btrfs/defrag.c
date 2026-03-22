@@ -1129,7 +1129,7 @@ next:
 }
 
 #define CLUSTER_SIZE	(SZ_256K)
-static_assert(PAGE_ALIGNED(CLUSTER_SIZE));
+static_assert(MMUPAGE_ALIGNED(CLUSTER_SIZE));
 
 /*
  * Defrag one contiguous target range.
@@ -1203,7 +1203,7 @@ static int defrag_one_range(struct btrfs_inode *inode, u64 start, u32 len,
 				      (start >> PAGE_SHIFT) + 1;
 	int ret = 0;
 
-	ASSERT(nr_pages <= CLUSTER_SIZE / PAGE_SIZE);
+	ASSERT(nr_pages <= DIV_ROUND_UP(CLUSTER_SIZE, PAGE_SIZE));
 	ASSERT(IS_ALIGNED(start, sectorsize) && IS_ALIGNED(len, sectorsize));
 
 	folios = kzalloc_objs(struct folio *, nr_pages, GFP_NOFS);

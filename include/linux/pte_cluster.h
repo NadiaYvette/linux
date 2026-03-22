@@ -329,7 +329,7 @@ static __maybe_unused struct page *private_cluster_page(pte_t *cluster[],
 		for (i = 0; scount && i < fcount; i++) {
 			if (!cluster[i] || pte_present(*cluster[i]))
 				continue;
-			if (__pte_to_swp_entry(*cluster[i]).val == entry.val)
+			if (softleaf_from_pte(*cluster[i]).val == entry.val)
 				scount--;
 		}
 		if (scount)

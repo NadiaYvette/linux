@@ -127,7 +127,7 @@ static unsigned int sun4v_huge_tte_to_shift(pte_t entry)
 		shift = HPAGE_64K_SHIFT;
 		break;
 	default:
-		shift = PAGE_SHIFT;
+		shift = MMUPAGE_SHIFT;
 		break;
 	}
 	return shift;
@@ -149,7 +149,7 @@ static unsigned int sun4u_huge_tte_to_shift(pte_t entry)
 		shift = HPAGE_64K_SHIFT;
 		break;
 	default:
-		shift = PAGE_SHIFT;
+		shift = MMUPAGE_SHIFT;
 		break;
 	}
 	return shift;
