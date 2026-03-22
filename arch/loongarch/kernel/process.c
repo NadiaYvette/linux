@@ -317,7 +317,7 @@ unknown:
 
 unsigned long stack_top(void)
 {
-	unsigned long top = TASK_SIZE & PAGE_MASK;
+	unsigned long top = TASK_SIZE & MMUPAGE_MASK;
 
 	if (current->thread.vdso) {
 		/* Space for the VDSO & data page */
@@ -339,7 +339,7 @@ unsigned long stack_top(void)
 unsigned long arch_align_stack(unsigned long sp)
 {
 	if (!(current->personality & ADDR_NO_RANDOMIZE) && randomize_va_space)
-		sp -= get_random_u32_below(PAGE_SIZE);
+		sp -= get_random_u32_below(MMUPAGE_SIZE);
 
 	return sp & STACK_ALIGN;
 }
