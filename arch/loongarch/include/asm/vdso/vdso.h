@@ -14,7 +14,7 @@
 #include <asm/vdso.h>
 #include <vdso/datapage.h>
 
-#define VVAR_SIZE (VDSO_NR_PAGES << PAGE_SHIFT)
+#define VVAR_SIZE (VDSO_NR_PAGES << MMUPAGE_SHIFT)
 
 #endif /* __ASSEMBLER__ */
 

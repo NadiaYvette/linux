@@ -25,8 +25,8 @@
 
 #define _KVM_FLUSH_PGTABLE	0x1
 #define _KVM_HAS_PGMASK		0x2
-#define kvm_pfn_pte(pfn, prot)	(((pfn) << PFN_PTE_SHIFT) | pgprot_val(prot))
-#define kvm_pte_pfn(x)		((phys_addr_t)((x & _PFN_MASK) >> PFN_PTE_SHIFT))
+#define kvm_pfn_pte(pfn, prot)	(((pfn) << PAGE_SHIFT) | pgprot_val(prot))
+#define kvm_pte_pfn(x)		((phys_addr_t)((x & _PFN_MASK) >> PAGE_SHIFT))
 
 typedef unsigned long kvm_pte_t;
 typedef struct kvm_ptw_ctx kvm_ptw_ctx;
