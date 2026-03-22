@@ -49,7 +49,7 @@ __load_new_mm_context(struct mm_struct *next_mm)
 
 	pcb = &current_thread_info()->pcb;
 	pcb->asn = mmc & HARDWARE_ASN_MASK;
-	pcb->ptbr = ((unsigned long) next_mm->pgd - IDENT_ADDR) >> PAGE_SHIFT;
+	pcb->ptbr = ((unsigned long) next_mm->pgd - IDENT_ADDR) >> MMUPAGE_SHIFT;
 
 	__reload_thread(pcb);
 }
