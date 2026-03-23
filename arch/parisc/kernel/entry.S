@@ -397,8 +397,8 @@
 	bb,>=,n		\pmd,_PxD_PRESENT_BIT,\fault
 	dep		%r0,31,PxD_FLAG_SHIFT,\pmd /* clear flags */
 	SHLREG		\pmd,PxD_VALUE_SHIFT,\pmd
-	extru_safe	\va,31-PAGE_SHIFT,ASM_BITS_PER_PTE,\index
-	dep		%r0,31,PAGE_SHIFT,\pmd  /* clear offset */
+	extru_safe	\va,31-ASM_PLD_SHIFT,ASM_BITS_PER_PTE,\index
+	dep		%r0,31,ASM_PLD_SHIFT,\pmd  /* clear offset within MMUPAGE-sized PTE table */
 	shladd		\index,BITS_PER_PTE_ENTRY,\pmd,\pmd /* pmd is now pte */
 	.endm
 
@@ -471,9 +471,9 @@
 	 * - 38 to 52-bit Physical Page Number
 	 * - 12 to 26-bit page offset
 	 */
-	/* bitshift difference between a PFN (based on kernel's PAGE_SIZE)
-	 * to a CPU TLB 4k PFN (4k => 12 bits to shift) */
-	#define PAGE_ADD_SHIFT		(PAGE_SHIFT-12)
+	/* PTE stores physical address at 4KB (MMUPAGE) granularity in bits 12+.
+	 * No additional shift needed to convert PTE PFN to TLB 4K PFN. */
+	#define PAGE_ADD_SHIFT		(MMUPAGE_SHIFT-12)
 	#define PAGE_ADD_HUGE_SHIFT	(REAL_HPAGE_SHIFT-12)
 	#define PFN_START_BIT	(63-ASM_PFN_PTE_SHIFT+(63-58)-PAGE_ADD_SHIFT)
 

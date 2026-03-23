@@ -97,7 +97,17 @@
 #define PCI_IO_END       VMEMMAP_START
 #define PCI_IO_START     (PCI_IO_END - PCI_IO_SIZE)
 
+/*
+ * On 32-bit, the FDT early mapping uses PGDIR_SIZE superpages.
+ * FIXADDR_TOP must be PGDIR-aligned so that fix_fdt_va lands at
+ * the start of a PGD entry and the dtb_early_va calculation in
+ * create_fdt_early_page_table() is correct.
+ */
+#ifdef CONFIG_64BIT
 #define FIXADDR_TOP      PCI_IO_START
+#else
+#define FIXADDR_TOP      (PCI_IO_START & ~(PGDIR_SIZE - 1))
+#endif
 #ifdef CONFIG_64BIT
 #define MAX_FDT_SIZE	 PMD_SIZE
 #define FIX_FDT_SIZE	 (MAX_FDT_SIZE + SZ_2M)

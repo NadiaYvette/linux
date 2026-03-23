@@ -849,12 +849,12 @@ void flush_cache_vmap(unsigned long start, unsigned long end)
 	/* The physical addresses of IOREMAP regions are contiguous */
 	if (vm->flags & VM_IOREMAP) {
 		physaddr = vm->phys_addr;
-		for (addr = start; addr < end; addr += PAGE_SIZE) {
+		for (addr = start; addr < end; addr += MMUPAGE_SIZE) {
 			preempt_disable();
 			flush_dcache_page_asm(physaddr, start);
 			flush_icache_page_asm(physaddr, start);
 			preempt_enable();
-			physaddr += PAGE_SIZE;
+			physaddr += MMUPAGE_SIZE;
 		}
 		return;
 	}
