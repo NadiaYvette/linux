@@ -23,7 +23,7 @@
 
 #define LOAD_OFFSET	ASM_CONST((CONFIG_KERNEL_START-CONFIG_KERNEL_BASE_ADDR))
 
-#define PTE_SHIFT	(PAGE_SHIFT - 2)	/* 1024 ptes per page */
+#define PTE_SHIFT	(MMUPAGE_SHIFT - 2)	/* 1024 ptes per MMUPAGE */
 
 #ifndef __ASSEMBLER__
 
