@@ -86,7 +86,7 @@ extern pte_t *va_to_pte(unsigned long address);
  */
 
 /* PGDIR_SHIFT determines what a top-level page table entry can map */
-#define PGDIR_SHIFT	(PAGE_SHIFT + PTE_SHIFT)
+#define PGDIR_SHIFT	(MMUPAGE_SHIFT + PTE_SHIFT)
 #define PGDIR_SIZE	(1UL << PGDIR_SHIFT)
 #define PGDIR_MASK	(~(PGDIR_SIZE-1))
 
@@ -173,7 +173,7 @@ extern pte_t *va_to_pte(unsigned long address);
 #define _PAGE_EXEC	0
 #endif
 
-#define _PAGE_CHG_MASK	(PAGE_MASK | _PAGE_ACCESSED | _PAGE_DIRTY)
+#define _PAGE_CHG_MASK	(MMUPAGE_MASK | _PAGE_ACCESSED | _PAGE_DIRTY)
 
 /*
  * Note: the _PAGE_COHERENT bit automatically gets set in the hardware
