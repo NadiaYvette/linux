@@ -137,7 +137,7 @@ $cpu_ok:
 
 1:
 	stw		%r3,0(%r4)
-	ldo		(PAGE_SIZE >> PxD_VALUE_SHIFT)(%r3),%r3
+	ldo		(MMUPAGE_SIZE >> PxD_VALUE_SHIFT)(%r3),%r3
 	addib,>		-1,%r1,1b
 #if CONFIG_PGTABLE_LEVELS == 3
 	ldo             ASM_PMD_ENTRY_SIZE(%r4),%r4
@@ -149,9 +149,9 @@ $cpu_ok:
 	/* Now initialize the PTEs themselves.  We use RWX for
 	 * everything ... it will get remapped correctly later */
 	ldo		0+_PAGE_KERNEL_RWX(%r0),%r3 /* Hardwired 0 phys addr start */
-	load32		(1<<(KERNEL_INITIAL_ORDER-PAGE_SHIFT)),%r11 /* PFN count */
+	load32		(1<<(KERNEL_INITIAL_ORDER-MMUPAGE_SHIFT)),%r11 /* PFN count */
 	load32		PA(_end),%r1
-	SHRREG		%r1,PAGE_SHIFT,%r1  /* %r1 is PFN count for _end symbol */
+	SHRREG		%r1,MMUPAGE_SHIFT,%r1  /* %r1 is PFN count for _end symbol */
 	cmpb,<<,n	%r11,%r1,1f
 	copy		%r1,%r11	/* %r1 PFN count smaller than %r11 */
 1:	load32		PA(pg0),%r1

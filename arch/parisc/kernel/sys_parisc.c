@@ -32,12 +32,12 @@
  */
 #define GET_FILP_PGOFF(filp)		\
 	(filp ? (((unsigned long) filp->f_mapping) >> 8)	\
-		 & ((SHM_COLOUR-1) >> PAGE_SHIFT) : 0UL)
+		 & ((SHM_COLOUR-1) >> MMUPAGE_SHIFT) : 0UL)
 
 static unsigned long shared_align_offset(unsigned long filp_pgoff,
 					 unsigned long pgoff)
 {
-	return (filp_pgoff + pgoff) << PAGE_SHIFT;
+	return (filp_pgoff + pgoff) << MMUPAGE_SHIFT;
 }
 
 static inline unsigned long COLOR_ALIGN(unsigned long addr,
@@ -93,9 +93,9 @@ unsigned long mmap_upper_limit(const struct rlimit *rlim_stack)
 
 	/* Add space for stack randomization. */
 	if (current->flags & PF_RANDOMIZE)
-		stack_base += (STACK_RND_MASK << PAGE_SHIFT);
+		stack_base += (STACK_RND_MASK << MMUPAGE_SHIFT);
 
-	return PAGE_ALIGN(STACK_TOP - stack_base);
+	return MMUPAGE_ALIGN(STACK_TOP - stack_base);
 }
 
 enum mmap_allocation_direction {UP, DOWN};
@@ -136,7 +136,7 @@ static unsigned long arch_get_unmapped_area_common(struct file *filp,
 		if (do_color_align)
 			addr = COLOR_ALIGN(addr, filp_pgoff, pgoff);
 		else
-			addr = PAGE_ALIGN(addr);
+			addr = MMUPAGE_ALIGN(addr);
 
 		vma = find_vma_prev(mm, addr, &prev);
 		if (TASK_SIZE - len >= addr &&
@@ -145,15 +145,15 @@ static unsigned long arch_get_unmapped_area_common(struct file *filp,
 			return addr;
 	}
 
-	info.align_mask = do_color_align ? (PAGE_MASK & (SHM_COLOUR - 1)) : 0;
+	info.align_mask = do_color_align ? (MMUPAGE_MASK & (SHM_COLOUR - 1)) : 0;
 	info.align_offset = shared_align_offset(filp_pgoff, pgoff);
 
 	if (dir == DOWN) {
 		info.flags = VM_UNMAPPED_AREA_TOPDOWN;
-		info.low_limit = PAGE_SIZE;
+		info.low_limit = MMUPAGE_SIZE;
 		info.high_limit = mm->mmap_base;
 		addr = vm_unmapped_area(&info);
-		if (!(addr & ~PAGE_MASK))
+		if (!(addr & ~MMUPAGE_MASK))
 			return addr;
 		VM_BUG_ON(addr != -ENOMEM);
 
