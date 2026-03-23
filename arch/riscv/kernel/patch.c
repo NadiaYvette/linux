@@ -42,20 +42,26 @@ static inline bool is_kernel_exittext(uintptr_t addr)
 static __always_inline void *patch_map(void *addr, const unsigned int fixmap)
 {
 	uintptr_t uintaddr = (uintptr_t) addr;
-	phys_addr_t phys;
+	phys_addr_t pa;
 
 	if (core_kernel_text(uintaddr) || is_kernel_exittext(uintaddr)) {
-		phys = __pa_symbol(addr);
+		/*
+		 * Use __pa_symbol() directly instead of the phys_to_page() /
+		 * page_to_phys() roundtrip.  The latter requires a populated
+		 * sparsemem section map, which is not yet available when
+		 * apply_boot_alternatives() runs from setup_arch().
+		 */
+		pa = __pa_symbol(addr);
 	} else if (IS_ENABLED(CONFIG_STRICT_MODULE_RWX)) {
 		struct page *page = vmalloc_to_page(addr);
 
 		BUG_ON(!page);
-		phys = page_to_phys(page) + offset_in_page(addr);
+		pa = page_to_phys(page) + offset_in_page(addr);
 	} else {
 		return addr;
 	}
 
-	return (void *)set_fixmap_offset(fixmap, phys);
+	return (void *)set_fixmap_offset(fixmap, pa);
 }
 
 static void patch_unmap(int fixmap)

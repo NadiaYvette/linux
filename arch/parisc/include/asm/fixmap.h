@@ -31,7 +31,7 @@
 #define TMPALIAS_SIZE_BITS	22	/* 4 MB */
 #define TMPALIAS_MAP_START	((__PAGE_OFFSET) - (2 << TMPALIAS_SIZE_BITS))
 
-#define FIXMAP_SIZE		(FIX_BITMAP_COUNT << PAGE_SHIFT)
+#define FIXMAP_SIZE		(FIX_BITMAP_COUNT << MMUPAGE_SHIFT)
 #define FIXMAP_START		(TMPALIAS_MAP_START - FIXMAP_SIZE)
 /* This is the kernel area for all maps (vmalloc, dma etc.)  most
  * usually, it extends up to TMPALIAS_MAP_START.  Virtual addresses
@@ -54,7 +54,7 @@ extern void *parisc_vmalloc_start;
 #define VMALLOC_START		((unsigned long)parisc_vmalloc_start)
 #define VMALLOC_END		(KERNEL_MAP_END)
 
-#define __fix_to_virt(_x) (FIXMAP_START + ((_x) << PAGE_SHIFT))
+#define __fix_to_virt(_x) (FIXMAP_START + ((_x) << MMUPAGE_SHIFT))
 
 void set_fixmap(enum fixed_addresses idx, phys_addr_t phys);
 void clear_fixmap(enum fixed_addresses idx);

@@ -388,7 +388,6 @@ static inline pte_t pte_advance_pfn(pte_t pte, unsigned long nr)
 
 #define pte_next_pfn(pte) pte_advance_pfn(pte, 1)
 
-#ifndef set_ptes
 /*
  * Generic fallback for __phys_to_pte_val: identity transform.
  * Architectures where the PTE PFN field is not a direct physical address
@@ -399,6 +398,7 @@ static inline pte_t pte_advance_pfn(pte_t pte, unsigned long nr)
 #define __phys_to_pte_val(phys)	(phys)
 #endif
 
+#ifndef set_ptes
 /**
  * set_ptes - Map consecutive pages to a contiguous range of addresses.
  * @mm: Address space to map the pages into.
