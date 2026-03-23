@@ -114,13 +114,13 @@ static const int ptable_shift[3] = {
 };
 
 #define ptable_size(type) (1U << ptable_shift[type])
-#define ptable_mask(type) ((1U << (PAGE_SIZE / ptable_size(type))) - 1)
+#define ptable_mask(type) ((1U << (MMUPAGE_SIZE / ptable_size(type))) - 1)
 
 void __init init_pointer_table(void *table, int type)
 {
 	ptable_desc *dp;
 	unsigned long ptable = (unsigned long)table;
-	unsigned long pt_addr = ptable & PAGE_MASK;
+	unsigned long pt_addr = ptable & MMUPAGE_MASK;
 	unsigned int mask = 1U << ((ptable - pt_addr)/ptable_size(type));
 
 	dp = PD_PTABLE(pt_addr);
@@ -201,7 +201,7 @@ int free_pointer_table(void *table, int type)
 {
 	ptable_desc *dp;
 	unsigned long ptable = (unsigned long)table;
-	unsigned long pt_addr = ptable & PAGE_MASK;
+	unsigned long pt_addr = ptable & MMUPAGE_MASK;
 	unsigned int mask = 1U << ((ptable - pt_addr)/ptable_size(type));
 
 	dp = PD_PTABLE(pt_addr);
@@ -237,14 +237,19 @@ static pte_t * __init kernel_page_table(void)
 {
 	pte_t *pte_table = last_pte_table;
 
-	if (PAGE_ALIGNED(last_pte_table)) {
-		pte_table = memblock_alloc_low(PAGE_SIZE, PAGE_SIZE);
+	/*
+	 * Pack multiple PTE tables per hardware page (MMUPAGE_SIZE).
+	 * Must use MMUPAGE_ALIGNED, not PAGE_ALIGNED, because head.S
+	 * allocates at hardware page granularity (4KB).
+	 */
+	if (MMUPAGE_ALIGNED(last_pte_table)) {
+		pte_table = memblock_alloc_low(MMUPAGE_SIZE, MMUPAGE_SIZE);
 		if (!pte_table) {
 			panic("%s: Failed to allocate %lu bytes align=%lx\n",
-					__func__, PAGE_SIZE, PAGE_SIZE);
+					__func__, MMUPAGE_SIZE, MMUPAGE_SIZE);
 		}
 
-		clear_page(pte_table);
+		memset(pte_table, 0, MMUPAGE_SIZE);
 		mmu_page_ctor(pte_table);
 
 		last_pte_table = pte_table;
@@ -285,13 +290,17 @@ static pmd_t * __init kernel_ptr_table(void)
 	}
 
 	last_pmd_table += PTRS_PER_PMD;
-	if (PAGE_ALIGNED(last_pmd_table)) {
-		last_pmd_table = memblock_alloc_low(PAGE_SIZE, PAGE_SIZE);
+	/*
+	 * Pack multiple PMD tables per hardware page (MMUPAGE_SIZE).
+	 * Must use MMUPAGE_ALIGNED because head.S allocates at 4KB.
+	 */
+	if (MMUPAGE_ALIGNED(last_pmd_table)) {
+		last_pmd_table = memblock_alloc_low(MMUPAGE_SIZE, MMUPAGE_SIZE);
 		if (!last_pmd_table)
 			panic("%s: Failed to allocate %lu bytes align=%lx\n",
-			      __func__, PAGE_SIZE, PAGE_SIZE);
+			      __func__, MMUPAGE_SIZE, MMUPAGE_SIZE);
 
-		clear_page(last_pmd_table);
+		memset(last_pmd_table, 0, MMUPAGE_SIZE);
 		mmu_page_ctor(last_pmd_table);
 	}
 
@@ -362,8 +371,8 @@ static void __init map_node(int node)
 				pmd_set(pmd_dir, pte_dir);
 
 				pte_val(*pte_dir++) = 0;
-				physaddr += PAGE_SIZE;
-				for (i = 1; i < PTRS_PER_PTE; physaddr += PAGE_SIZE, i++)
+				physaddr += MMUPAGE_SIZE;
+				for (i = 1; i < PTRS_PER_PTE; physaddr += MMUPAGE_SIZE, i++)
 					pte_val(*pte_dir++) = physaddr;
 			}
 			size -= PMD_SIZE;
@@ -383,9 +392,9 @@ static void __init map_node(int node)
 					pte_val(*pte_dir) = physaddr;
 			} else
 				pte_val(*pte_dir) = 0;
-			size -= PAGE_SIZE;
-			virtaddr += PAGE_SIZE;
-			physaddr += PAGE_SIZE;
+			size -= MMUPAGE_SIZE;
+			virtaddr += MMUPAGE_SIZE;
+			physaddr += MMUPAGE_SIZE;
 		}
 
 	}
