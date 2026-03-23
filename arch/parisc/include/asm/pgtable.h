@@ -102,9 +102,9 @@ extern void __update_cache(pte_t pte);
 /* Definitions for 3rd level (we use PLD here for Page Lower directory
  * because PTE_SHIFT is used lower down to mean shift that has to be
  * done to get usable bits out of the PTE) */
-#define PLD_SHIFT	PAGE_SHIFT
-#define PLD_SIZE	PAGE_SIZE
-#define BITS_PER_PTE	(PAGE_SHIFT - BITS_PER_PTE_ENTRY)
+#define PLD_SHIFT	MMUPAGE_SHIFT
+#define PLD_SIZE	MMUPAGE_SIZE
+#define BITS_PER_PTE	(MMUPAGE_SHIFT - BITS_PER_PTE_ENTRY)
 #define PTRS_PER_PTE    (1UL << BITS_PER_PTE)
 
 /* Definitions for 2nd level */
@@ -112,7 +112,7 @@ extern void __update_cache(pte_t pte);
 #define PMD_SHIFT       (PLD_SHIFT + BITS_PER_PTE)
 #define PMD_SIZE	(1UL << PMD_SHIFT)
 #define PMD_MASK	(~(PMD_SIZE-1))
-#define BITS_PER_PMD	(PAGE_SHIFT + PMD_TABLE_ORDER - BITS_PER_PMD_ENTRY)
+#define BITS_PER_PMD	(MMUPAGE_SHIFT + PMD_TABLE_ORDER - BITS_PER_PMD_ENTRY)
 #define PTRS_PER_PMD    (1UL << BITS_PER_PMD)
 #else
 #define BITS_PER_PMD	0
@@ -120,10 +120,10 @@ extern void __update_cache(pte_t pte);
 
 /* Definitions for 1st level */
 #define PGDIR_SHIFT	(PLD_SHIFT + BITS_PER_PTE + BITS_PER_PMD)
-#if (PGDIR_SHIFT + PAGE_SHIFT + PGD_TABLE_ORDER - BITS_PER_PGD_ENTRY) > BITS_PER_LONG
+#if (PGDIR_SHIFT + MMUPAGE_SHIFT + PGD_TABLE_ORDER - BITS_PER_PGD_ENTRY) > BITS_PER_LONG
 #define BITS_PER_PGD	(BITS_PER_LONG - PGDIR_SHIFT)
 #else
-#define BITS_PER_PGD	(PAGE_SHIFT + PGD_TABLE_ORDER - BITS_PER_PGD_ENTRY)
+#define BITS_PER_PGD	(MMUPAGE_SHIFT + PGD_TABLE_ORDER - BITS_PER_PGD_ENTRY)
 #endif
 #define PGDIR_SIZE	(1UL << PGDIR_SHIFT)
 #define PGDIR_MASK	(~(PGDIR_SIZE-1))
@@ -203,7 +203,7 @@ extern void __update_cache(pte_t pte);
 #define _PAGE_SPECIAL  (1 << xlate_pabit(_PAGE_SPECIAL_BIT))
 
 #define _PAGE_TABLE	(_PAGE_PRESENT | _PAGE_READ | _PAGE_WRITE | _PAGE_DIRTY | _PAGE_ACCESSED)
-#define _PAGE_CHG_MASK	(PAGE_MASK | _PAGE_ACCESSED | _PAGE_DIRTY | _PAGE_SPECIAL)
+#define _PAGE_CHG_MASK	(MMUPAGE_MASK | _PAGE_ACCESSED | _PAGE_DIRTY | _PAGE_SPECIAL)
 #define _PAGE_KERNEL_RO	(_PAGE_PRESENT | _PAGE_READ | _PAGE_DIRTY | _PAGE_ACCESSED)
 #define _PAGE_KERNEL_EXEC	(_PAGE_KERNEL_RO | _PAGE_EXEC)
 #define _PAGE_KERNEL_RWX	(_PAGE_KERNEL_EXEC | _PAGE_WRITE)
@@ -338,11 +338,20 @@ static inline pte_t pte_mkspecial(pte_t pte)	{ pte_val(pte) |= _PAGE_SPECIAL; re
 #endif
 
 
+/*
+ * With PGCL, the PTE stores the full physical address at MMUPAGE (4KB)
+ * granularity: phys_addr | flags.  Bits 12+ hold the physical address,
+ * bits 0-11 hold flags.  Sub-page bits (12 to PAGE_SHIFT-1) distinguish
+ * MMUPAGEs within a kernel page.  __phys_to_pte_val is identity.
+ *
+ * pfn is PAGE-granular (phys >> PAGE_SHIFT), so pfn_pte shifts by
+ * PAGE_SHIFT to reconstruct the physical address.
+ */
 #define __mk_pte(addr,pgprot) \
 ({									\
 	pte_t __pte;							\
 									\
-	pte_val(__pte) = ((((addr)>>PAGE_SHIFT)<<PFN_PTE_SHIFT) + pgprot_val(pgprot));	\
+	pte_val(__pte) = (((addr) & MMUPAGE_MASK) + pgprot_val(pgprot));\
 									\
 	__pte;								\
 })
@@ -350,7 +359,7 @@ static inline pte_t pte_mkspecial(pte_t pte)	{ pte_val(pte) |= _PAGE_SPECIAL; re
 static inline pte_t pfn_pte(unsigned long pfn, pgprot_t pgprot)
 {
 	pte_t pte;
-	pte_val(pte) = (pfn << PFN_PTE_SHIFT) | pgprot_val(pgprot);
+	pte_val(pte) = (pfn << PAGE_SHIFT) | pgprot_val(pgprot);
 	return pte;
 }
 
@@ -359,7 +368,7 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 
 /* Permanent address of a page.  On parisc we don't have highmem. */
 
-#define pte_pfn(x)		(pte_val(x) >> PFN_PTE_SHIFT)
+#define pte_pfn(x)		(pte_val(x) >> PAGE_SHIFT)
 
 #define pte_page(pte)		(pfn_to_page(pte_pfn(pte)))
 
@@ -381,14 +390,22 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 {
 	if (pte_present(pte) && pte_user(pte))
 		__update_cache(pte);
-	for (;;) {
+	if (nr == 1) {
+		/* Single PTE: caller already set up sub-page offset */
 		*ptep = pte;
 		purge_tlb_entries(mm, addr);
-		if (--nr == 0)
-			break;
-		ptep++;
-		pte_val(pte) += 1 << PFN_PTE_SHIFT;
-		addr += PAGE_SIZE;
+	} else {
+		unsigned int i;
+		for (i = 0; i < nr; i++) {
+			unsigned int j;
+			for (j = 0; j < PAGE_MMUCOUNT; j++) {
+				*ptep = __pte(pte_val(pte) + j * MMUPAGE_SIZE);
+				purge_tlb_entries(mm, addr);
+				ptep++;
+				addr += MMUPAGE_SIZE;
+			}
+			pte_val(pte) += PAGE_SIZE;
+		}
 	}
 }
 #define set_ptes set_ptes
