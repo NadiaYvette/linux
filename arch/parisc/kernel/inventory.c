@@ -164,7 +164,8 @@ static void __init pagezero_memconfig(void)
 	 * should be done.
 	 */
 
-	npages = (PAGE_ALIGN(PAGE0->imm_max_mem) >> PAGE_SHIFT);
+	/* imm_max_mem is in bytes; set_pmem_entry expects 4KB (MMUPAGE) page count */
+	npages = (MMUPAGE_ALIGN(PAGE0->imm_max_mem) >> MMUPAGE_SHIFT);
 	set_pmem_entry(pmem_ranges,0UL,npages);
 	npmem_ranges = 1;
 }
