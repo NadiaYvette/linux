@@ -40,12 +40,12 @@
 
 .section .data
 .global empty_zero_page
-.align 12
+.align PAGE_SHIFT
 empty_zero_page:
 	.space	PAGE_SIZE
 .global swapper_pg_dir
 swapper_pg_dir:
-	.space	PAGE_SIZE
+	.space	MMUPAGE_SIZE
 
 .section .rodata
 .align 4

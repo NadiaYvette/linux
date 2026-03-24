@@ -554,7 +554,7 @@ static inline void local_r4k_flush_cache_page(void *args)
 	if (!has_valid_asid(mm, R4K_HIT))
 		return;
 
-	addr &= PAGE_MASK;
+	addr &= MMUPAGE_MASK;
 	pmdp = pmd_off(mm, addr);
 	ptep = pte_offset_kernel(pmdp, addr);
 

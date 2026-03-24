@@ -780,7 +780,7 @@ void build_get_pmde64(u32 **p, struct uasm_label **l, struct uasm_reloc **r,
 		 * everything but the lower xuseg addresses goes down
 		 * the module_alloc/vmalloc path.
 		 */
-		uasm_i_dsrl_safe(p, ptr, tmp, PGDIR_SHIFT + PGD_TABLE_ORDER + PAGE_SHIFT - 3);
+		uasm_i_dsrl_safe(p, ptr, tmp, PGDIR_SHIFT + PGD_TABLE_ORDER + MMUPAGE_SHIFT - 3);
 		uasm_il_bnez(p, r, ptr, label_vmalloc);
 	} else {
 		uasm_il_bltz(p, r, tmp, label_vmalloc);
@@ -1073,7 +1073,7 @@ build_fast_tlb_refill_handler (u32 **p, struct uasm_label **l,
 			UASM_i_SW(p, scratch, scratchpad_offset(0), 0);
 
 		uasm_i_dsrl_safe(p, scratch, tmp,
-				 PGDIR_SHIFT + PGD_TABLE_ORDER + PAGE_SHIFT - 3);
+				 PGDIR_SHIFT + PGD_TABLE_ORDER + MMUPAGE_SHIFT - 3);
 		uasm_il_bnez(p, r, scratch, label_vmalloc);
 
 		if (pgd_reg == -1) {
@@ -1442,13 +1442,13 @@ static void setup_pw(void)
 	pgd_w = PGDIR_SHIFT - PMD_SHIFT + PGD_TABLE_ORDER;
 
 	pmd_i = PMD_SHIFT;    /* 2nd level PMD */
-	pmd_w = PMD_SHIFT - PAGE_SHIFT;
+	pmd_w = PMD_SHIFT - MMUPAGE_SHIFT;
 #else
-	pgd_w = PGDIR_SHIFT - PAGE_SHIFT + PGD_TABLE_ORDER;
+	pgd_w = PGDIR_SHIFT - MMUPAGE_SHIFT + PGD_TABLE_ORDER;
 #endif
 
-	pt_i  = PAGE_SHIFT;    /* 3rd level PTE */
-	pt_w  = PAGE_SHIFT - 3;
+	pt_i  = MMUPAGE_SHIFT;    /* 3rd level PTE */
+	pt_w  = MMUPAGE_SHIFT - 3;
 
 	pte_i = ilog2(_PAGE_GLOBAL);
 	pte_w = 0;
@@ -1483,7 +1483,7 @@ static void build_loongson3_tlb_refill_handler(void)
 	if (check_for_high_segbits) {
 		uasm_i_dmfc0(&p, GPR_K0, C0_BADVADDR);
 		uasm_i_dsrl_safe(&p, GPR_K1, GPR_K0,
-				PGDIR_SHIFT + PGD_TABLE_ORDER + PAGE_SHIFT - 3);
+				PGDIR_SHIFT + PGD_TABLE_ORDER + MMUPAGE_SHIFT - 3);
 		uasm_il_beqz(&p, &r, GPR_K1, label_vmalloc);
 		uasm_i_nop(&p);
 
@@ -2542,7 +2542,7 @@ void build_tlb_refill_handler(void)
 	check_pabits();
 
 #ifdef CONFIG_64BIT
-	check_for_high_segbits = current_cpu_data.vmbits > (PGDIR_SHIFT + PGD_TABLE_ORDER + PAGE_SHIFT - 3);
+	check_for_high_segbits = current_cpu_data.vmbits > (PGDIR_SHIFT + PGD_TABLE_ORDER + MMUPAGE_SHIFT - 3);
 #endif
 
 	if (cpu_has_3kex) {

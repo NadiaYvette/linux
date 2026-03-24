@@ -152,7 +152,7 @@ extern pte_t *va_to_pte(unsigned long address);
 #define _PAGE_HWWRITE	0x100	/* hardware: Dirty & RW, set in exception */
 #define _PAGE_HWEXEC	0x200	/* hardware: EX permission */
 #define _PAGE_ACCESSED	0x400	/* software: R: page referenced */
-#define _PMD_PRESENT	PAGE_MASK
+#define _PMD_PRESENT	MMUPAGE_MASK
 
 /* We borrow bit 24 to store the exclusive marker in swap PTEs. */
 #define _PAGE_SWP_EXCLUSIVE	_PAGE_DIRTY
@@ -212,7 +212,7 @@ extern pte_t *va_to_pte(unsigned long address);
  * ZERO_PAGE is a global shared page that is always zero: used
  * for zero-mapped memory areas etc..
  */
-extern unsigned long empty_zero_page[1024];
+extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)];
 #define ZERO_PAGE(vaddr) (virt_to_page(empty_zero_page))
 
 #endif /* __ASSEMBLER__ */
@@ -227,8 +227,13 @@ extern unsigned long empty_zero_page[1024];
 #define	pmd_present(pmd)	((pmd_val(pmd) & _PMD_PRESENT) != 0)
 #define	pmd_clear(pmdp)		do { pmd_val(*(pmdp)) = 0; } while (0)
 
+/*
+ * pte_page returns the kernel page (struct page) containing the
+ * hardware page described by this PTE. Multiple MMU pages within one
+ * kernel page map to the same struct page.
+ */
 #define pte_page(x)		(mem_map + (unsigned long) \
-				((pte_val(x) - memory_start) >> PAGE_SHIFT))
+				(((pte_val(x) & MMUPAGE_MASK) - memory_start) >> PAGE_SHIFT))
 #define PFN_PTE_SHIFT		PAGE_SHIFT
 
 #define pte_pfn(x)		(pte_val(x) >> PFN_PTE_SHIFT)
@@ -367,10 +372,11 @@ static inline void ptep_mkdirty(struct mm_struct *mm,
 /* returns effective address of the pmd entry*/
 static inline unsigned long pmd_page_vaddr(pmd_t pmd)
 {
-	return ((unsigned long) (pmd_val(pmd) & PAGE_MASK));
+	return ((unsigned long) (pmd_val(pmd) & MMUPAGE_MASK));
 }
 
 /* returns pfn of the pmd entry*/
+/* PTE tables are MMUPAGE-sized; return the kernel-page PFN they reside in */
 #define pmd_pfn(pmd)	(__pa(pmd_val(pmd)) >> PAGE_SHIFT)
 
 /* returns struct *page of the pmd entry*/
