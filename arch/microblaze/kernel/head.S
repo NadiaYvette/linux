@@ -41,7 +41,7 @@
 .section .data
 .global swapper_pg_dir
 swapper_pg_dir:
-	.space	PAGE_SIZE
+	.space	MMUPAGE_SIZE
 
 .section .rodata
 .align 4
