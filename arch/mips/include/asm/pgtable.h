@@ -66,8 +66,19 @@ extern void pagetable_init(void);
 
 static inline unsigned long pmd_pfn(pmd_t pmd)
 {
-	return pmd_val(pmd) >> PFN_PTE_SHIFT;
+	return pmd_val(pmd) >> (PFN_PTE_SHIFT + PAGE_MMUSHIFT);
 }
+
+/*
+ * pte_advance_pfn: advance PTE by nr PAGE-granular PFNs.
+ * With PGCL, PFN_PTE_SHIFT is MMUPAGE-based, so we shift by
+ * PFN_PTE_SHIFT + PAGE_MMUSHIFT to advance by PAGE-sized steps.
+ */
+static inline pte_t pte_advance_pfn(pte_t pte, unsigned long nr)
+{
+	return __pte(pte_val(pte) + (nr << (PFN_PTE_SHIFT + PAGE_MMUSHIFT)));
+}
+#define pte_advance_pfn pte_advance_pfn
 
 #ifndef CONFIG_MIPS_HUGE_TLB_SUPPORT
 #define pmd_page(pmd)		(pfn_to_page(pmd_phys(pmd) >> PAGE_SHIFT))
@@ -219,6 +230,30 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 	if (do_sync)
 		__update_cache(addr, pte);
 
+#if PAGE_MMUSHIFT > 0
+	if (nr == 1) {
+		/* Single PTE: caller already set up sub-page offset */
+		set_pte(ptep, pte);
+	} else {
+		/*
+		 * With PGCL, nr is in kernel pages.  Each kernel page spans
+		 * PAGE_MMUCOUNT hardware pages (MMUPAGEs).  Write
+		 * nr * PAGE_MMUCOUNT PTEs with correct sub-page offsets.
+		 */
+		for (i = 0; i < nr; i++) {
+			unsigned int j;
+
+			for (j = 0; j < PAGE_MMUCOUNT; j++) {
+				set_pte(ptep, __pte(pte_val(pte) +
+					__phys_to_pte_val((phys_addr_t)j *
+							  MMUPAGE_SIZE)));
+				ptep++;
+			}
+			if (i + 1 < nr)
+				pte = pte_advance_pfn(pte, 1);
+		}
+	}
+#else
 	for (;;) {
 		set_pte(ptep, pte);
 		if (--nr == 0)
@@ -226,6 +261,7 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 		ptep++;
 		pte = __pte(pte_val(pte) + (1UL << PFN_PTE_SHIFT));
 	}
+#endif
 }
 #define set_ptes set_ptes
 
@@ -582,7 +618,7 @@ static inline void update_mmu_cache_range(struct vm_fault *vmf,
 		if (--nr == 0)
 			break;
 		ptep++;
-		address += PAGE_SIZE;
+		address += MMUPAGE_SIZE;
 	}
 }
 #define update_mmu_cache(vma, address, ptep) \

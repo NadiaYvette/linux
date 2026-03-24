@@ -60,11 +60,15 @@ extern int add_temporary_entry(unsigned long entrylo0, unsigned long entrylo1,
  * works even with the cache aliasing problem the R4k and above have.
  */
 
-/* PGDIR_SHIFT determines what a third-level page table entry can map */
+/*
+ * PGDIR_SHIFT determines what a third-level page table entry can map.
+ * Page table pages are MMUPAGE-sized, so use MMUPAGE_SHIFT for
+ * entries-per-table-page calculation.
+ */
 #if defined(CONFIG_MIPS_HUGE_TLB_SUPPORT) && !defined(CONFIG_PHYS_ADDR_T_64BIT)
-# define PGDIR_SHIFT	(PAGE_SHIFT + MMUPAGE_SHIFT - PTE_T_LOG2 - 1)
+# define PGDIR_SHIFT	(2 * MMUPAGE_SHIFT - PTE_T_LOG2 - 1)
 #else
-# define PGDIR_SHIFT	(PAGE_SHIFT + MMUPAGE_SHIFT - PTE_T_LOG2)
+# define PGDIR_SHIFT	(2 * MMUPAGE_SHIFT - PTE_T_LOG2)
 #endif
 
 #define PGDIR_SIZE	(1UL << PGDIR_SHIFT)
@@ -75,9 +79,9 @@ extern int add_temporary_entry(unsigned long entrylo0, unsigned long entrylo1,
  * we don't really have any PUD/PMD directory physically.
  */
 #if defined(CONFIG_MIPS_HUGE_TLB_SUPPORT) && !defined(CONFIG_PHYS_ADDR_T_64BIT)
-# define __PGD_TABLE_ORDER (32 - 2 * PAGE_SHIFT - MMUPAGE_SHIFT + PGD_T_LOG2 + PTE_T_LOG2 + 1)
+# define __PGD_TABLE_ORDER (32 - 3 * MMUPAGE_SHIFT + PGD_T_LOG2 + PTE_T_LOG2 + 1)
 #else
-# define __PGD_TABLE_ORDER (32 - 2 * PAGE_SHIFT - MMUPAGE_SHIFT + PGD_T_LOG2 + PTE_T_LOG2)
+# define __PGD_TABLE_ORDER (32 - 3 * MMUPAGE_SHIFT + PGD_T_LOG2 + PTE_T_LOG2)
 #endif
 
 #define PGD_TABLE_ORDER	(__PGD_TABLE_ORDER >= 0 ? __PGD_TABLE_ORDER : 0)
@@ -86,9 +90,9 @@ extern int add_temporary_entry(unsigned long entrylo0, unsigned long entrylo1,
 
 #define PTRS_PER_PGD	(USER_PTRS_PER_PGD * 2)
 #if defined(CONFIG_MIPS_HUGE_TLB_SUPPORT) && !defined(CONFIG_PHYS_ADDR_T_64BIT)
-# define PTRS_PER_PTE	(PAGE_SIZE / sizeof(pte_t) / 2)
+# define PTRS_PER_PTE	(MMUPAGE_SIZE / sizeof(pte_t) / 2)
 #else
-# define PTRS_PER_PTE	(PAGE_SIZE / sizeof(pte_t))
+# define PTRS_PER_PTE	(MMUPAGE_SIZE / sizeof(pte_t))
 #endif
 
 #define USER_PTRS_PER_PGD	(0x80000000UL/PGDIR_SIZE)
@@ -184,9 +188,9 @@ static inline pte_t pfn_pte(unsigned long pfn, pgprot_t prot)
 #else
 
 #define MAX_POSSIBLE_PHYSMEM_BITS 32
-#define pte_pfn(x)		((unsigned long)((x).pte >> PFN_PTE_SHIFT))
-#define pfn_pte(pfn, prot)	__pte(((unsigned long long)(pfn) << PFN_PTE_SHIFT) | pgprot_val(prot))
-#define pfn_pmd(pfn, prot)	__pmd(((unsigned long long)(pfn) << PFN_PTE_SHIFT) | pgprot_val(prot))
+#define pte_pfn(x)		((unsigned long)((x).pte >> (PFN_PTE_SHIFT + PAGE_MMUSHIFT)))
+#define pfn_pte(pfn, prot)	__pte(((unsigned long long)(pfn) << (PFN_PTE_SHIFT + PAGE_MMUSHIFT)) | pgprot_val(prot))
+#define pfn_pmd(pfn, prot)	__pmd(((unsigned long long)(pfn) << (PFN_PTE_SHIFT + PAGE_MMUSHIFT)) | pgprot_val(prot))
 #endif /* defined(CONFIG_PHYS_ADDR_T_64BIT) && defined(CONFIG_CPU_MIPS32) */
 
 #define pte_page(x)		pfn_to_page(pte_pfn(x))

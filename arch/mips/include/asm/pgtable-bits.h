@@ -182,10 +182,16 @@ enum pgtable_bits {
 #if defined(CONFIG_CPU_R3K_TLB)
 # define _CACHE_UNCACHED	(1 << _CACHE_UNCACHED_SHIFT)
 # define _CACHE_MASK		_CACHE_UNCACHED
-# define PFN_PTE_SHIFT		PAGE_SHIFT
+# define PFN_PTE_SHIFT		MMUPAGE_SHIFT
 #else
 # define _CACHE_MASK		(7 << _CACHE_SHIFT)
-# define PFN_PTE_SHIFT		(PAGE_SHIFT - 12 + _CACHE_SHIFT + 3)
+/*
+ * PFN_PTE_SHIFT: bit position where the PFN field starts in a Linux PTE.
+ * Uses MMUPAGE_SHIFT (hardware page size) so sub-page bits within a kernel
+ * page are preserved below PFN_PTE_SHIFT+PAGE_MMUSHIFT, which _PFN_MASK
+ * can then cover for pte_modify().
+ */
+# define PFN_PTE_SHIFT		(MMUPAGE_SHIFT - 12 + _CACHE_SHIFT + 3)
 #endif
 
 #ifndef _PAGE_NO_EXEC
@@ -196,6 +202,20 @@ enum pgtable_bits {
 #define _PAGE_SILENT_WRITE	_PAGE_DIRTY
 
 #define _PFN_MASK		(~((1 << (PFN_PTE_SHIFT)) - 1))
+
+/*
+ * Physical-address to PTE-value conversion.  On MIPS, the PFN field in the
+ * Linux PTE starts at PFN_PTE_SHIFT, which can be greater than, equal to,
+ * or less than MMUPAGE_SHIFT depending on how many software/hardware bits
+ * precede the PFN field (controlled by _CACHE_SHIFT, which is an enum
+ * value varying with CONFIG options like RIXI, HUGE_TLB, PTE_SPECIAL).
+ *
+ * Use a two-step extract-then-place approach to avoid negative shifts:
+ *   phys → PTE: extract MMUPAGE PFN (>> MMUPAGE_SHIFT), place in PTE (<< PFN_PTE_SHIFT)
+ *   PTE → phys: extract PTE PFN (>> PFN_PTE_SHIFT), convert to address (<< MMUPAGE_SHIFT)
+ */
+#define __phys_to_pte_val(phys)	(((phys) >> MMUPAGE_SHIFT) << PFN_PTE_SHIFT)
+#define __pte_val_to_phys(val)	((((val) & _PFN_MASK) >> PFN_PTE_SHIFT) << MMUPAGE_SHIFT)
 
 /*
  * The final layouts of the PTE bits are:

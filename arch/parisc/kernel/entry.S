@@ -389,7 +389,7 @@
 #else
 	extru_safe	\va,31-ASM_PGDIR_SHIFT,ASM_BITS_PER_PGD,\index
 #endif
-	dep             %r0,31,PAGE_SHIFT,\pmd  /* clear offset */
+	dep             %r0,31,ASM_PLD_SHIFT,\pmd  /* clear offset within MMUPAGE-sized page dir */
 #if CONFIG_PGTABLE_LEVELS < 3
 	copy		%r0,\pte
 #endif

@@ -59,8 +59,8 @@ static void __iomem *__ioremap(phys_addr_t addr, unsigned long size,
 	 * Before then, we use space going down from ioremap_base
 	 * (ioremap_bot records where we're up to).
 	 */
-	p = addr & PAGE_MASK;
-	size = PAGE_ALIGN(addr + size) - p;
+	p = addr & MMUPAGE_MASK;
+	size = ALIGN(addr + size, MMUPAGE_SIZE) - p;
 
 	/*
 	 * Don't allow anybody to remap normal RAM that we're using.
@@ -108,7 +108,7 @@ static void __iomem *__ioremap(phys_addr_t addr, unsigned long size,
 		flags |= _PAGE_GUARDED;
 
 	err = 0;
-	for (i = 0; i < size && err == 0; i += PAGE_SIZE)
+	for (i = 0; i < size && err == 0; i += MMUPAGE_SIZE)
 		err = map_page(v + i, p + i, flags);
 	if (err) {
 		if (mem_init_done)
@@ -116,7 +116,7 @@ static void __iomem *__ioremap(phys_addr_t addr, unsigned long size,
 		return NULL;
 	}
 
-	return (void __iomem *) (v + ((unsigned long)addr & ~PAGE_MASK));
+	return (void __iomem *) (v + ((unsigned long)addr & ~MMUPAGE_MASK));
 }
 
 void __iomem *ioremap(phys_addr_t addr, unsigned long size)
@@ -129,7 +129,7 @@ void iounmap(volatile void __iomem *addr)
 {
 	if ((__force void *)addr > high_memory &&
 					(unsigned long) addr < ioremap_bot)
-		vfree((void *) (PAGE_MASK & (unsigned long) addr));
+		vfree((void *) (MMUPAGE_MASK & (unsigned long) addr));
 }
 EXPORT_SYMBOL(iounmap);
 
@@ -152,8 +152,13 @@ int map_page(unsigned long va, phys_addr_t pa, int flags)
 
 	if (pg != NULL) {
 		err = 0;
-		set_pte_at(&init_mm, va, pg, pfn_pte(pa >> PAGE_SHIFT,
-				__pgprot(flags)));
+		/*
+		 * map_page() maps a single MMUPAGE-sized page. Bypass pfn_pte
+		 * (which uses PAGE-granular PFNs) and construct the PTE
+		 * directly with the MMUPAGE-aligned physical address.
+		 */
+		set_pte_at(&init_mm, va, pg,
+			   __pte((pa & MMUPAGE_MASK) | flags));
 		if (unlikely(mem_init_done))
 			_tlbie(va);
 	}
@@ -169,7 +174,7 @@ void __init mapin_ram(void)
 
 	v = CONFIG_KERNEL_START;
 	p = memory_start;
-	for (s = 0; s < lowmem_size; s += PAGE_SIZE) {
+	for (s = 0; s < lowmem_size; s += MMUPAGE_SIZE) {
 		f = _PAGE_PRESENT | _PAGE_ACCESSED |
 				_PAGE_SHARED | _PAGE_HWEXEC;
 		if (!is_kernel_text(v))
@@ -179,8 +184,8 @@ void __init mapin_ram(void)
 			   forces R/W kernel access */
 			f |= _PAGE_USER;
 		map_page(v, p, f);
-		v += PAGE_SIZE;
-		p += PAGE_SIZE;
+		v += MMUPAGE_SIZE;
+		p += MMUPAGE_SIZE;
 	}
 }
 
@@ -201,13 +206,13 @@ static int get_pteptr(struct mm_struct *mm, unsigned long addr, pte_t **ptep)
 	pte_t	*pte;
 	int     retval = 0;
 
-	pgd = pgd_offset(mm, addr & PAGE_MASK);
+	pgd = pgd_offset(mm, addr & MMUPAGE_MASK);
 	if (pgd) {
-		p4d = p4d_offset(pgd, addr & PAGE_MASK);
-		pud = pud_offset(p4d, addr & PAGE_MASK);
-		pmd = pmd_offset(pud, addr & PAGE_MASK);
+		p4d = p4d_offset(pgd, addr & MMUPAGE_MASK);
+		pud = pud_offset(p4d, addr & MMUPAGE_MASK);
+		pmd = pmd_offset(pud, addr & MMUPAGE_MASK);
 		if (pmd_present(*pmd)) {
-			pte = pte_offset_kernel(pmd, addr & PAGE_MASK);
+			pte = pte_offset_kernel(pmd, addr & MMUPAGE_MASK);
 			if (pte) {
 				retval = 1;
 				*ptep = pte;
@@ -237,7 +242,7 @@ unsigned long iopa(unsigned long addr)
 
 	pa = 0;
 	if (get_pteptr(mm, addr, &pte))
-		pa = (pte_val(*pte) & PAGE_MASK) | (addr & ~PAGE_MASK);
+		pa = (pte_val(*pte) & MMUPAGE_MASK) | (addr & ~MMUPAGE_MASK);
 
 	return pa;
 }
@@ -247,7 +252,7 @@ __ref pte_t *pte_alloc_one_kernel(struct mm_struct *mm)
 	if (mem_init_done)
 		return __pte_alloc_one_kernel(mm);
 	else
-		return memblock_alloc_try_nid(PAGE_SIZE, PAGE_SIZE,
+		return memblock_alloc_try_nid(MMUPAGE_SIZE, MMUPAGE_SIZE,
 					      MEMBLOCK_LOW_LIMIT,
 					      memory_start + kernel_tlb,
 					      NUMA_NO_NODE);
