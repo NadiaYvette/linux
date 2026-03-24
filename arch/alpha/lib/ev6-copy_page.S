@@ -58,6 +58,7 @@
    less important than the dcache miss case.  */
 
 #include <linux/export.h>
+#include <asm/page.h>
 	.text
 	.align 4
 	.global copy_page
@@ -78,7 +79,7 @@ copy_page:
 
 	wh64	($1)
 	ldl	$31,256($17)
-	lda	$18,118
+	lda	$18,PAGE_SIZE/64-10
 	lda	$1,3*64($16)
 
 	wh64	($1)

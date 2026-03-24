@@ -117,9 +117,9 @@ void local_flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 		unsigned long size, flags;
 
 		local_irq_save(flags);
-		start = round_down(start, PAGE_SIZE << 1);
-		end = round_up(end, PAGE_SIZE << 1);
-		size = (end - start) >> (PAGE_SHIFT + 1);
+		start = round_down(start, MMUPAGE_SIZE << 1);
+		end = round_up(end, MMUPAGE_SIZE << 1);
+		size = (end - start) >> (MMUPAGE_SHIFT + 1);
 		if (size <= (current_cpu_data.tlbsizeftlbsets ?
 			     current_cpu_data.tlbsize / 8 :
 			     current_cpu_data.tlbsize / 2)) {
@@ -140,7 +140,7 @@ void local_flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 					write_c0_entryhi(start);
 				else
 					write_c0_entryhi(start | newpid);
-				start += (PAGE_SIZE << 1);
+				start += (MMUPAGE_SIZE << 1);
 				mtc0_tlbw_hazard();
 				tlb_probe();
 				tlb_probe_hazard();
@@ -172,23 +172,23 @@ void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
 	unsigned long size, flags;
 
 	local_irq_save(flags);
-	size = (end - start + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
+	size = (end - start + (MMUPAGE_SIZE - 1)) >> MMUPAGE_SHIFT;
 	size = (size + 1) >> 1;
 	if (size <= (current_cpu_data.tlbsizeftlbsets ?
 		     current_cpu_data.tlbsize / 8 :
 		     current_cpu_data.tlbsize / 2)) {
 		int pid = read_c0_entryhi();
 
-		start &= (PAGE_MASK << 1);
-		end += ((PAGE_SIZE << 1) - 1);
-		end &= (PAGE_MASK << 1);
+		start &= (MMUPAGE_MASK << 1);
+		end += ((MMUPAGE_SIZE << 1) - 1);
+		end &= (MMUPAGE_MASK << 1);
 		htw_stop();
 
 		while (start < end) {
 			int idx;
 
 			write_c0_entryhi(start);
-			start += (PAGE_SIZE << 1);
+			start += (MMUPAGE_SIZE << 1);
 			mtc0_tlbw_hazard();
 			tlb_probe();
 			tlb_probe_hazard();
@@ -221,7 +221,7 @@ void local_flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
 		unsigned long flags, old_entryhi;
 		int idx;
 
-		page &= (PAGE_MASK << 1);
+		page &= (MMUPAGE_MASK << 1);
 		local_irq_save(flags);
 		old_entryhi = read_c0_entryhi();
 		htw_stop();
@@ -268,7 +268,7 @@ void local_flush_tlb_one(unsigned long page)
 	local_irq_save(flags);
 	oldpid = read_c0_entryhi();
 	htw_stop();
-	page &= (PAGE_MASK << 1);
+	page &= (MMUPAGE_MASK << 1);
 	write_c0_entryhi(page);
 	mtc0_tlbw_hazard();
 	tlb_probe();
@@ -313,7 +313,7 @@ void __update_tlb(struct vm_area_struct * vma, unsigned long address, pte_t pte)
 	local_irq_save(flags);
 
 	htw_stop();
-	address &= (PAGE_MASK << 1);
+	address &= (MMUPAGE_MASK << 1);
 	if (cpu_has_mmid) {
 		write_c0_entryhi(address);
 	} else {
@@ -790,7 +790,7 @@ static void r4k_tlb_configure(void)
 	write_c0_pagemask(PM_DEFAULT_MASK);
 	back_to_back_c0_hazard();
 	if (read_c0_pagemask() != PM_DEFAULT_MASK)
-		panic("MMU doesn't support PAGE_SIZE=0x%lx", PAGE_SIZE);
+		panic("MMU doesn't support MMUPAGE_SIZE=0x%lx", MMUPAGE_SIZE);
 
 	write_c0_wired(0);
 	if (current_cpu_type() == CPU_R10000 ||
