@@ -518,16 +518,16 @@ ex_handler_done:
 		tophys(r4,r4)
 		/* Create L1 (pgdir/pmd) address */
 		bsrli	r5, r3, PGDIR_SHIFT - 2
-		andi	r5, r5, PAGE_SIZE - 4
-/* Assume pgdir aligned on 4K boundary, no need for "andi r4,r4,0xfffff003" */
+		andi	r5, r5, MMUPAGE_SIZE - 4
+/* Assume pgdir aligned on MMUPAGE boundary */
 		or	r4, r4, r5
 		lwi	r4, r4, 0		/* Get L1 entry */
-		andi	r5, r4, PAGE_MASK /* Extract L2 (pte) base address */
+		andi	r5, r4, MMUPAGE_MASK /* Extract L2 (pte) base address */
 		beqi	r5, ex2			/* Bail if no table */
 
 		tophys(r5,r5)
 		bsrli	r6, r3, PTE_SHIFT /* Compute PTE address */
-		andi	r6, r6, PAGE_SIZE - 4
+		andi	r6, r6, MMUPAGE_SIZE - 4
 		or	r5, r5, r6
 		lwi	r4, r5, 0		/* Get Linux PTE */
 
@@ -547,7 +547,7 @@ ex_handler_done:
 		 * here we (properly should) assume have the appropriate value.
 		 */
 /* Ignore memory coherent, just LSB on ZSEL is used + EX/WR */
-		andi	r4, r4, PAGE_MASK | TLB_EX | TLB_WR | \
+		andi	r4, r4, MMUPAGE_MASK | TLB_EX | TLB_WR | \
 						TLB_ZSEL(1) | TLB_ATTR_MASK
 		ori	r4, r4, _PAGE_HWEXEC	/* make it executable */
 
@@ -619,16 +619,16 @@ ex_handler_done:
 		tophys(r4,r4)
 		/* Create L1 (pgdir/pmd) address */
 		bsrli	r5, r3, PGDIR_SHIFT - 2
-		andi	r5, r5, PAGE_SIZE - 4
-/* Assume pgdir aligned on 4K boundary, no need for "andi r4,r4,0xfffff003" */
+		andi	r5, r5, MMUPAGE_SIZE - 4
+/* Assume pgdir aligned on MMUPAGE boundary */
 		or	r4, r4, r5
 		lwi	r4, r4, 0		/* Get L1 entry */
-		andi	r5, r4, PAGE_MASK /* Extract L2 (pte) base address */
+		andi	r5, r4, MMUPAGE_MASK /* Extract L2 (pte) base address */
 		beqi	r5, ex7			/* Bail if no table */
 
 		tophys(r5,r5)
 		bsrli	r6, r3, PTE_SHIFT /* Compute PTE address */
-		andi	r6, r6, PAGE_SIZE - 4
+		andi	r6, r6, MMUPAGE_SIZE - 4
 		or	r5, r5, r6
 		lwi	r4, r5, 0		/* Get Linux PTE */
 
@@ -647,7 +647,7 @@ ex_handler_done:
 		 * here we (properly should) assume have the appropriate value.
 		 */
 		brid	finish_tlb_load
-		andi	r4, r4, PAGE_MASK | TLB_EX | TLB_WR | \
+		andi	r4, r4, MMUPAGE_MASK | TLB_EX | TLB_WR | \
 						TLB_ZSEL(1) | TLB_ATTR_MASK
 	ex7:
 		/* The bailout. Restore registers to pre-exception conditions
@@ -690,16 +690,16 @@ ex_handler_done:
 		tophys(r4,r4)
 		/* Create L1 (pgdir/pmd) address */
 		bsrli	r5, r3, PGDIR_SHIFT - 2
-		andi	r5, r5, PAGE_SIZE - 4
-/* Assume pgdir aligned on 4K boundary, no need for "andi r4,r4,0xfffff003" */
+		andi	r5, r5, MMUPAGE_SIZE - 4
+/* Assume pgdir aligned on MMUPAGE boundary */
 		or	r4, r4, r5
 		lwi	r4, r4, 0		/* Get L1 entry */
-		andi	r5, r4, PAGE_MASK /* Extract L2 (pte) base address */
+		andi	r5, r4, MMUPAGE_MASK /* Extract L2 (pte) base address */
 		beqi	r5, ex10		/* Bail if no table */
 
 		tophys(r5,r5)
 		bsrli	r6, r3, PTE_SHIFT /* Compute PTE address */
-		andi	r6, r6, PAGE_SIZE - 4
+		andi	r6, r6, MMUPAGE_SIZE - 4
 		or	r5, r5, r6
 		lwi	r4, r5, 0		/* Get Linux PTE */
 
@@ -718,7 +718,7 @@ ex_handler_done:
 		 * here we (properly should) assume have the appropriate value.
 		 */
 		brid	finish_tlb_load
-		andi	r4, r4, PAGE_MASK | TLB_EX | TLB_WR | \
+		andi	r4, r4, MMUPAGE_MASK | TLB_EX | TLB_WR | \
 						TLB_ZSEL(1) | TLB_ATTR_MASK
 	ex10:
 		/* The bailout. Restore registers to pre-exception conditions
@@ -772,7 +772,7 @@ ex_handler_done:
 		 * set of bits. These are size, valid, E, U0, and ensure
 		 * bits 20 and 21 are zero.
 		 */
-		andi	r3, r3, PAGE_MASK
+		andi	r3, r3, MMUPAGE_MASK
 		ori	r3, r3, TLB_VALID | TLB_PAGESZ(PAGESZ_4K)
 		mts	rtlbhi,	r3		/* Load TLB HI */
 		nop

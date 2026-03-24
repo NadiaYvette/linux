@@ -53,7 +53,7 @@ SYSCALL_DEFINE6(mmap2, unsigned long, addr, size_t, len,
 		unsigned long, prot, unsigned long, flags,
 		unsigned long, fd, unsigned long, pgoff)
 {
-	return do_mmap2(addr, len, prot, flags, fd, pgoff, PAGE_SHIFT-12);
+	return do_mmap2(addr, len, prot, flags, fd, pgoff, MMUPAGE_SHIFT-12);
 }
 
 #ifdef CONFIG_COMPAT
@@ -62,7 +62,7 @@ COMPAT_SYSCALL_DEFINE6(mmap2,
 		       unsigned long, prot, unsigned long, flags,
 		       unsigned long, fd, unsigned long, off_4k)
 {
-	return do_mmap2(addr, len, prot, flags, fd, off_4k, PAGE_SHIFT-12);
+	return do_mmap2(addr, len, prot, flags, fd, off_4k, MMUPAGE_SHIFT-12);
 }
 #endif
 
@@ -70,7 +70,7 @@ SYSCALL_DEFINE6(mmap, unsigned long, addr, size_t, len,
 		unsigned long, prot, unsigned long, flags,
 		unsigned long, fd, off_t, offset)
 {
-	return do_mmap2(addr, len, prot, flags, fd, offset, PAGE_SHIFT);
+	return do_mmap2(addr, len, prot, flags, fd, offset, MMUPAGE_SHIFT);
 }
 
 #ifdef CONFIG_PPC64
