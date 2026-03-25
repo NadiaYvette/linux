@@ -236,21 +236,14 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 		set_pte(ptep, pte);
 	} else {
 		/*
-		 * With PGCL, nr is in kernel pages.  Each kernel page spans
-		 * PAGE_MMUCOUNT hardware pages (MMUPAGEs).  Write
-		 * nr * PAGE_MMUCOUNT PTEs with correct sub-page offsets.
+		 * With PGCL, nr is the number of PTEs (MMUPAGE-granular)
+		 * to write.  Advance by one MMUPAGE per PTE.
 		 */
 		for (i = 0; i < nr; i++) {
-			unsigned int j;
-
-			for (j = 0; j < PAGE_MMUCOUNT; j++) {
-				set_pte(ptep, __pte(pte_val(pte) +
-					__phys_to_pte_val((phys_addr_t)j *
-							  MMUPAGE_SIZE)));
-				ptep++;
-			}
-			if (i + 1 < nr)
-				pte = pte_advance_pfn(pte, 1);
+			set_pte(ptep, pte);
+			ptep++;
+			pte = __pte(pte_val(pte) +
+				    __phys_to_pte_val(MMUPAGE_SIZE));
 		}
 	}
 #else
