@@ -386,14 +386,11 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 	} else {
 		unsigned int i;
 		for (i = 0; i < nr; i++) {
-			unsigned int j;
-			for (j = 0; j < PAGE_MMUCOUNT; j++) {
-				*ptep = __pte(pte_val(pte) + j * MMUPAGE_SIZE);
-				purge_tlb_entries(mm, addr);
-				ptep++;
-				addr += MMUPAGE_SIZE;
-			}
-			pte_val(pte) += PAGE_SIZE;
+			*ptep = pte;
+			purge_tlb_entries(mm, addr);
+			ptep++;
+			addr += MMUPAGE_SIZE;
+			pte_val(pte) += MMUPAGE_SIZE;
 		}
 	}
 }
