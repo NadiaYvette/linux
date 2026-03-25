@@ -54,7 +54,7 @@ static vm_fault_t vvar_fault(const struct vm_special_mapping *sm,
 			 * Fault in VVAR page too, since it will be accessed
 			 * to get clock data anyway.
 			 */
-			addr = vmf->address + VDSO_TIMENS_PAGE_OFFSET * PAGE_SIZE;
+			addr = vmf->address + VDSO_TIMENS_PAGE_OFFSET * MMUPAGE_SIZE;
 			err = vmf_insert_pfn(vma, addr, pfn);
 			if (unlikely(err & VM_FAULT_ERROR))
 				return err;

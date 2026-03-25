@@ -384,7 +384,7 @@ static void walk_pte(struct pg_state *st, pmd_t *pmd, unsigned long start)
 	int i, status;
 
 	for (i = 0; i < PTRS_PER_PTE; i++, pte++) {
-		addr = start + i * PAGE_SIZE;
+		addr = start + i * MMUPAGE_SIZE;
 		pteval = pte_val(*pte);
 
 		if (addr < VMALLOC_END)
