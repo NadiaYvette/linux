@@ -942,23 +942,15 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 		unsigned int i;
 
 		/*
-		 * With page clustering, nr is in kernel pages but each
-		 * kernel page spans PAGE_MMUCOUNT MMUPAGEs.  Fill
-		 * nr * PAGE_MMUCOUNT PTEs, using sub-page offsets
-		 * within each kernel page.
+		 * With page clustering, nr is the number of PTEs
+		 * (MMUPAGE-granular) to write.  Advance by MMUPAGE_SIZE
+		 * per PTE.
 		 */
 		for (i = 0; i < nr; i++) {
-			unsigned int j;
-
-			for (j = 0; j < PAGE_MMUCOUNT; j++) {
-				pte_t sub = __pte(pte_val(pte) +
-						  j * MMUPAGE_SIZE);
-				__set_pte_at(mm, addr, ptep, sub, 0);
-				ptep++;
-				addr += MMUPAGE_SIZE;
-			}
-			if (i + 1 < nr)
-				pte_val(pte) += PAGE_SIZE;
+			__set_pte_at(mm, addr, ptep, pte, 0);
+			ptep++;
+			addr += MMUPAGE_SIZE;
+			pte_val(pte) += MMUPAGE_SIZE;
 		}
 	}
 #else
