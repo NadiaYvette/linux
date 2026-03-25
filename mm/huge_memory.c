@@ -3071,18 +3071,18 @@ static void __split_huge_zero_page_pmd(struct vm_area_struct *vma,
 
 	pte = pte_offset_map(&_pmd, haddr);
 	VM_BUG_ON(!pte);
-	for (i = 0, addr = haddr; i < HPAGE_PMD_NR; i++, addr += PAGE_SIZE) {
+	for (i = 0, addr = haddr; i < HPAGE_PMD_MMUNR;
+	     i++, addr += MMUPAGE_SIZE) {
 		pte_t entry;
 
 		entry = pfn_pte(zero_pfn(addr), vma->vm_page_prot);
 		entry = pte_mkspecial(entry);
 		if (pmd_uffd_wp(old_pmd))
 			entry = pte_mkuffd_wp(entry);
-		VM_BUG_ON(!pte_none(ptep_get(pte)));
-		set_pte_at(mm, addr, pte, entry);
-		pte++;
+		VM_BUG_ON(!pte_none(ptep_get(pte + i)));
+		set_pte_at(mm, addr, pte + i, entry);
 	}
-	pte_unmap(pte - 1);
+	pte_unmap(pte + HPAGE_PMD_MMUNR - 1);
 	smp_wmb(); /* make pte visible before pmd */
 	pmd_populate(mm, pmd, pgtable);
 }
