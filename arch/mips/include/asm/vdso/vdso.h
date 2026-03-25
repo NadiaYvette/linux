@@ -67,7 +67,7 @@ static inline const struct vdso_time_data *get_vdso_time_data(void)
 
 static inline void __iomem *get_gic(const struct vdso_time_data *data)
 {
-	return (void __iomem *)((unsigned long)data & PAGE_MASK) - PAGE_SIZE;
+	return (void __iomem *)((unsigned long)data & MMUPAGE_MASK) - MMUPAGE_SIZE;
 }
 
 #endif /* CONFIG_CLKSRC_MIPS_GIC */
