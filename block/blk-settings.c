@@ -394,12 +394,12 @@ int blk_validate_limits(struct queue_limits *lim)
 	 * value.
 	 *
 	 * The block layer relies on the fact that every driver can
-	 * handle at lest a page worth of data per I/O, and needs the value
-	 * aligned to the logical block size.
+	 * handle at least an MMU page worth of data per I/O, and needs
+	 * the value aligned to the logical block size.
 	 */
 	if (!lim->max_hw_sectors)
 		lim->max_hw_sectors = BLK_SAFE_MAX_SECTORS;
-	if (WARN_ON_ONCE(lim->max_hw_sectors < PAGE_SECTORS))
+	if (WARN_ON_ONCE(lim->max_hw_sectors < MMUPAGE_SECTORS))
 		return -EINVAL;
 	logical_block_sectors = lim->logical_block_size >> SECTOR_SHIFT;
 	if (WARN_ON_ONCE(logical_block_sectors > lim->max_hw_sectors))

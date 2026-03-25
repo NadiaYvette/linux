@@ -63,7 +63,7 @@ static unsigned long vdso_base(void)
 
 	if (IS_ENABLED(CONFIG_MIPS_FP_SUPPORT)) {
 		/* Skip the delay slot emulation page */
-		base += PAGE_SIZE;
+		base += MMUPAGE_SIZE;
 	}
 
 	if (current->flags & PF_RANDOMIZE) {
@@ -106,8 +106,8 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	 * only map a page even though the total area is 64K, as we only need
 	 * the counter registers at the start.
 	 */
-	gic_size = mips_gic_present() ? PAGE_SIZE : 0;
-	size = gic_size + VDSO_NR_PAGES * PAGE_SIZE + image->size;
+	gic_size = mips_gic_present() ? MMUPAGE_SIZE : 0;
+	size = gic_size + VDSO_NR_PAGES * MMUPAGE_SIZE + image->size;
 
 	/*
 	 * Find a region that's large enough for us to perform the
@@ -134,7 +134,7 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	}
 
 	data_addr = base + gic_size;
-	vdso_addr = data_addr + VDSO_NR_PAGES * PAGE_SIZE;
+	vdso_addr = data_addr + VDSO_NR_PAGES * MMUPAGE_SIZE;
 
 	vma = vdso_install_vvar_mapping(mm, data_addr);
 	if (IS_ERR(vma)) {
