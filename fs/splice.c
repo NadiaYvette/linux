@@ -1455,7 +1455,8 @@ static ssize_t iter_to_pipe(struct iov_iter *from,
 		struct page *pages[16];
 		ssize_t left;
 		size_t start;
-		int i, n;
+		int i, n, pidx, npages;
+		bool user_pages = user_backed_iter(from);
 
 		left = iov_iter_get_pages2(from, pages, ~0UL, 16, &start);
 		if (left <= 0) {
@@ -1463,21 +1464,44 @@ static ssize_t iter_to_pipe(struct iov_iter *from,
 			break;
 		}
 
+		/*
+		 * For user-backed iterators, pages[] is MMUPAGE-granular
+		 * (one entry per hardware page from GUP).  For bvec/folioq,
+		 * pages[] is PAGE-granular.  We create kernel-page-granular
+		 * pipe buffers in both cases, but must track and release
+		 * the extra sub-page references from GUP.
+		 */
 		n = DIV_ROUND_UP(left + start, PAGE_SIZE);
+		if (user_pages)
+			npages = DIV_ROUND_UP(left + (start & ~MMUPAGE_MASK),
+					      MMUPAGE_SIZE);
+		else
+			npages = n;
+		pidx = 0;
 		for (i = 0; i < n; i++) {
 			int size = umin(left, PAGE_SIZE - start);
+			int skip = user_pages ?
+				   DIV_ROUND_UP(size + (start & ~MMUPAGE_MASK),
+						MMUPAGE_SIZE) : 1;
 
-			buf.page = pages[i];
+			buf.page = pages[pidx];
 			buf.offset = start;
 			buf.len = size;
 			ret = add_to_pipe(pipe, &buf);
 			if (unlikely(ret < 0)) {
+				int j;
+
 				iov_iter_revert(from, left);
-				// this one got dropped by add_to_pipe()
-				while (++i < n)
-					put_page(pages[i]);
+				/* add_to_pipe() dropped pages[pidx] */
+				for (j = pidx + 1; j < npages; j++)
+					put_page(pages[j]);
 				goto out;
 			}
+			/* Release extra sub-page refs within this chunk;
+			 * the pipe buffer took ownership of pages[pidx]. */
+			for (int j = 1; j < skip; j++)
+				put_page(pages[pidx + j]);
+			pidx += skip;
 			total += ret;
 			left -= size;
 			start = 0;

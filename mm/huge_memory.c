@@ -1314,7 +1314,7 @@ static void map_anon_folio_pmd_pf(struct folio *folio, pmd_t *pmd,
 		struct vm_area_struct *vma, unsigned long haddr)
 {
 	map_anon_folio_pmd_nopf(folio, pmd, vma, haddr);
-	add_mm_counter(vma->vm_mm, MM_ANONPAGES, HPAGE_PMD_NR);
+	add_mm_counter(vma->vm_mm, MM_ANONPAGES, HPAGE_PMD_MMUNR);
 	count_vm_event(THP_FAULT_ALLOC);
 	count_mthp_stat(HPAGE_PMD_ORDER, MTHP_STAT_ANON_FAULT_ALLOC);
 	count_memcg_event_mm(vma->vm_mm, THP_FAULT_ALLOC);
@@ -1567,7 +1567,7 @@ static vm_fault_t insert_pmd(struct vm_area_struct *vma, unsigned long addr,
 		} else {
 			folio_get(fop.folio);
 			folio_add_file_rmap_pmd(fop.folio, &fop.folio->page, vma);
-			add_mm_counter(mm, mm_counter_file(fop.folio), HPAGE_PMD_NR);
+			add_mm_counter(mm, mm_counter_file(fop.folio), HPAGE_PMD_MMUNR);
 		}
 	} else {
 		entry = pmd_mkhuge(pfn_pmd(fop.pfn, prot));
@@ -1686,7 +1686,7 @@ static vm_fault_t insert_pud(struct vm_area_struct *vma, unsigned long addr,
 
 		folio_get(fop.folio);
 		folio_add_file_rmap_pud(fop.folio, &fop.folio->page, vma);
-		add_mm_counter(mm, mm_counter_file(fop.folio), HPAGE_PUD_NR);
+		add_mm_counter(mm, mm_counter_file(fop.folio), HPAGE_PUD_MMUNR);
 	} else {
 		entry = pud_mkhuge(pfn_pud(fop.pfn, prot));
 		entry = pud_mkspecial(entry);
@@ -1838,7 +1838,7 @@ static void copy_huge_non_present_pmd(
 					    dst_vma, src_vma);
 	}
 
-	add_mm_counter(dst_mm, MM_ANONPAGES, HPAGE_PMD_NR);
+	add_mm_counter(dst_mm, MM_ANONPAGES, HPAGE_PMD_MMUNR);
 	mm_inc_nr_ptes(dst_mm);
 	pgtable_trans_huge_deposit(dst_mm, dst_pmd, pgtable);
 	if (!userfaultfd_wp(dst_vma))
@@ -1932,7 +1932,7 @@ int copy_huge_pmd(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		__split_huge_pmd(src_vma, src_pmd, addr, false);
 		return -EAGAIN;
 	}
-	add_mm_counter(dst_mm, MM_ANONPAGES, HPAGE_PMD_NR);
+	add_mm_counter(dst_mm, MM_ANONPAGES, HPAGE_PMD_MMUNR);
 out_zero_page:
 	mm_inc_nr_ptes(dst_mm);
 	pgtable_trans_huge_deposit(dst_mm, dst_pmd, pgtable);
@@ -2233,7 +2233,7 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
 	if (!migrate_misplaced_folio(folio, target_nid)) {
 		flags |= TNF_MIGRATED;
 		nid = target_nid;
-		task_numa_fault(last_cpupid, nid, HPAGE_PMD_NR, flags);
+		task_numa_fault(last_cpupid, nid, HPAGE_PMD_MMUNR, flags);
 		return 0;
 	}
 
@@ -2254,7 +2254,7 @@ out_map:
 	spin_unlock(vmf->ptl);
 
 	if (nid != NUMA_NO_NODE)
-		task_numa_fault(last_cpupid, nid, HPAGE_PMD_NR, flags);
+		task_numa_fault(last_cpupid, nid, HPAGE_PMD_MMUNR, flags);
 	return 0;
 }
 
@@ -2393,12 +2393,12 @@ int zap_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 
 		if (folio_test_anon(folio)) {
 			zap_deposited_table(tlb->mm, pmd);
-			add_mm_counter(tlb->mm, MM_ANONPAGES, -HPAGE_PMD_NR);
+			add_mm_counter(tlb->mm, MM_ANONPAGES, -HPAGE_PMD_MMUNR);
 		} else {
 			if (arch_needs_pgtable_deposit())
 				zap_deposited_table(tlb->mm, pmd);
 			add_mm_counter(tlb->mm, mm_counter_file(folio),
-				       -HPAGE_PMD_NR);
+				       -HPAGE_PMD_MMUNR);
 
 			/*
 			 * Use flush_needed to indicate whether the PMD entry
@@ -2878,7 +2878,7 @@ int zap_huge_pud(struct mmu_gather *tlb, struct vm_area_struct *vma,
 		page = pud_page(orig_pud);
 		folio = page_folio(page);
 		folio_remove_rmap_pud(folio, page, vma);
-		add_mm_counter(tlb->mm, mm_counter_file(folio), -HPAGE_PUD_NR);
+		add_mm_counter(tlb->mm, mm_counter_file(folio), -HPAGE_PUD_MMUNR);
 
 		spin_unlock(ptl);
 		tlb_remove_page_size(tlb, page, HPAGE_PUD_SIZE);
@@ -2915,7 +2915,7 @@ static void __split_huge_pud_locked(struct vm_area_struct *vma, pud_t *pud,
 	folio_remove_rmap_pud(folio, page, vma);
 	folio_put(folio);
 	add_mm_counter(vma->vm_mm, mm_counter_file(folio),
-		-HPAGE_PUD_NR);
+		-HPAGE_PUD_MMUNR);
 }
 
 void __split_huge_pud(struct vm_area_struct *vma, pud_t *pud,
@@ -3033,7 +3033,7 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 			folio_remove_rmap_pmd(folio, page, vma);
 			folio_put(folio);
 		}
-		add_mm_counter(mm, mm_counter_file(folio), -HPAGE_PMD_NR);
+		add_mm_counter(mm, mm_counter_file(folio), -HPAGE_PMD_MMUNR);
 		return;
 	}
 
@@ -3091,12 +3091,29 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 		if (!freeze) {
 			rmap_t rmap_flags = RMAP_NONE;
 
-			folio_ref_add(folio, HPAGE_PMD_NR - 1);
+			folio_ref_add(folio, HPAGE_PMD_MMUNR - 1);
 			if (anon_exclusive)
 				rmap_flags |= RMAP_EXCLUSIVE;
 
 			folio_add_anon_rmap_ptes(folio, page, HPAGE_PMD_NR,
 						 vma, haddr, rmap_flags);
+#if PAGE_MMUSHIFT
+			/*
+			 * PGCL rmap fixup: folio_add_anon_rmap_ptes added 1
+			 * mapcount per kernel page, but set_ptes will write
+			 * PAGE_MMUCOUNT PTEs per kernel page.  Each PTE zap
+			 * decrements mapcount by 1, so bump each page's
+			 * _mapcount by (PAGE_MMUCOUNT - 1).
+			 */
+			{
+				int pgcl_i;
+				for (pgcl_i = 0; pgcl_i < HPAGE_PMD_NR; pgcl_i++)
+					atomic_add(PAGE_MMUCOUNT - 1,
+						   &(page + pgcl_i)->_mapcount);
+				folio_add_large_mapcount(folio,
+					HPAGE_PMD_MMUNR - HPAGE_PMD_NR, vma);
+			}
+#endif
 		}
 	} else {
 		/*
@@ -3159,11 +3176,24 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 		if (!freeze) {
 			rmap_t rmap_flags = RMAP_NONE;
 
-			folio_ref_add(folio, HPAGE_PMD_NR - 1);
+			folio_ref_add(folio, HPAGE_PMD_MMUNR - 1);
 			if (anon_exclusive)
 				rmap_flags |= RMAP_EXCLUSIVE;
 			folio_add_anon_rmap_ptes(folio, page, HPAGE_PMD_NR,
 						 vma, haddr, rmap_flags);
+#if PAGE_MMUSHIFT
+			/*
+			 * PGCL rmap fixup: same as device private case above.
+			 */
+			{
+				int pgcl_i;
+				for (pgcl_i = 0; pgcl_i < HPAGE_PMD_NR; pgcl_i++)
+					atomic_add(PAGE_MMUCOUNT - 1,
+						   &(page + pgcl_i)->_mapcount);
+				folio_add_large_mapcount(folio,
+					HPAGE_PMD_MMUNR - HPAGE_PMD_NR, vma);
+			}
+#endif
 		}
 	}
 
@@ -3185,16 +3215,17 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 		pte_t entry;
 		swp_entry_t swp_entry;
 
-		for (i = 0, addr = haddr; i < HPAGE_PMD_NR; i++, addr += PAGE_SIZE) {
+		for (i = 0, addr = haddr; i < HPAGE_PMD_MMUNR;
+		     i++, addr += MMUPAGE_SIZE) {
 			if (write)
 				swp_entry = make_writable_migration_entry(
-							page_to_pfn(page + i));
+					page_to_pfn(page + i / PAGE_MMUCOUNT));
 			else if (anon_exclusive)
 				swp_entry = make_readable_exclusive_migration_entry(
-							page_to_pfn(page + i));
+					page_to_pfn(page + i / PAGE_MMUCOUNT));
 			else
 				swp_entry = make_readable_migration_entry(
-							page_to_pfn(page + i));
+					page_to_pfn(page + i / PAGE_MMUCOUNT));
 			if (young)
 				swp_entry = make_migration_entry_young(swp_entry);
 			if (dirty)
@@ -3211,7 +3242,8 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 		pte_t entry;
 		swp_entry_t swp_entry;
 
-		for (i = 0, addr = haddr; i < HPAGE_PMD_NR; i++, addr += PAGE_SIZE) {
+		for (i = 0, addr = haddr; i < HPAGE_PMD_MMUNR;
+		     i++, addr += MMUPAGE_SIZE) {
 			/*
 			 * anon_exclusive was already propagated to the relevant
 			 * pages corresponding to the pte entries when freeze
@@ -3219,10 +3251,10 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 			 */
 			if (write)
 				swp_entry = make_writable_device_private_entry(
-							page_to_pfn(page + i));
+					page_to_pfn(page + i / PAGE_MMUCOUNT));
 			else
 				swp_entry = make_readable_device_private_entry(
-							page_to_pfn(page + i));
+					page_to_pfn(page + i / PAGE_MMUCOUNT));
 			/*
 			 * Young and dirty bits are not progated via swp_entry
 			 */
@@ -3250,10 +3282,10 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 		if (uffd_wp)
 			entry = pte_mkuffd_wp(entry);
 
-		for (i = 0; i < HPAGE_PMD_NR; i++)
+		for (i = 0; i < HPAGE_PMD_MMUNR; i++)
 			VM_WARN_ON(!pte_none(ptep_get(pte + i)));
 
-		set_ptes(mm, haddr, pte, entry, HPAGE_PMD_NR);
+		set_ptes(mm, haddr, pte, entry, HPAGE_PMD_MMUNR);
 	}
 	pte_unmap(pte);
 
@@ -3407,7 +3439,7 @@ static bool __discard_anon_folio_pmd_locked(struct vm_area_struct *vma,
 
 	folio_remove_rmap_pmd(folio, pmd_page(orig_pmd), vma);
 	zap_deposited_table(mm, pmdp);
-	add_mm_counter(mm, MM_ANONPAGES, -HPAGE_PMD_NR);
+	add_mm_counter(mm, MM_ANONPAGES, -HPAGE_PMD_MMUNR);
 	if (vma->vm_flags & VM_LOCKED)
 		mlock_drain_local();
 	folio_put(folio);

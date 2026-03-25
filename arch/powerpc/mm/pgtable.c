@@ -211,9 +211,7 @@ void set_ptes(struct mm_struct *mm, unsigned long addr, pte_t *ptep,
 	/*
 	 * With PGCL (PAGE_MMUSHIFT > 0), set_ptes semantics are:
 	 *   nr == 1: set a single PTE (caller already adjusted sub-page)
-	 *   nr >  1: nr is in kernel pages; write nr * PAGE_MMUCOUNT PTEs,
-	 *            filling sub-pages within each kernel page.
-	 * This matches the generic set_ptes in include/linux/pgtable.h.
+	 *   nr >  1: nr is the number of PTEs (MMUPAGE-granular) to write.
 	 */
 #if PAGE_MMUSHIFT > 0
 	if (nr == 1) {
@@ -221,11 +219,10 @@ void set_ptes(struct mm_struct *mm, unsigned long addr, pte_t *ptep,
 		VM_WARN_ON(pte_hw_valid(*ptep) && !pte_protnone(*ptep));
 		__set_pte_at(mm, addr, ptep, pte, 0);
 	} else {
-		unsigned int total = nr * PAGE_MMUCOUNT;
 		unsigned int i;
 
-		page_table_check_ptes_set(mm, addr, ptep, pte, total);
-		for (i = 0; i < total; i++) {
+		page_table_check_ptes_set(mm, addr, ptep, pte, nr);
+		for (i = 0; i < nr; i++) {
 			VM_WARN_ON(pte_hw_valid(*ptep) && !pte_protnone(*ptep));
 			__set_pte_at(mm, addr, ptep, pte, 0);
 			ptep++;

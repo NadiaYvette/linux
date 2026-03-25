@@ -430,22 +430,16 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 		unsigned int i;
 
 		/*
-		 * With page clustering, nr is in kernel pages but each
-		 * kernel page spans PAGE_MMUCOUNT MMUPAGEs.  Fill
-		 * nr * PAGE_MMUCOUNT PTEs, using sub-page offsets
-		 * within each kernel page.
+		 * With page clustering, nr is the number of PTEs
+		 * (MMUPAGE-granular entries) to write.  Each PTE
+		 * maps one MMUPAGE.  Advance physical address by
+		 * MMUPAGE_SIZE per PTE.
 		 */
 		for (i = 0; i < nr; i++) {
-			unsigned int j;
-
-			for (j = 0; j < PAGE_MMUCOUNT; j++) {
-				set_pte(ptep, __pte(pte_val(pte) +
-					__phys_to_pte_val((phys_addr_t)j *
-							  MMUPAGE_SIZE)));
-				ptep++;
-			}
-			if (i + 1 < nr)
-				pte = pte_next_pfn(pte);
+			set_pte(ptep, pte);
+			ptep++;
+			pte = __pte(pte_val(pte) +
+				    __phys_to_pte_val(MMUPAGE_SIZE));
 		}
 	}
 #else
