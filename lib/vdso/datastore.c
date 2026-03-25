@@ -82,7 +82,7 @@ static vm_fault_t vvar_fault(const struct vm_special_mapping *sm,
 			unsigned long addr;
 			vm_fault_t err;
 
-			addr = vmf->address + VDSO_TIMENS_PAGE_OFFSET * PAGE_SIZE;
+			addr = vmf->address + VDSO_TIMENS_PAGE_OFFSET * MMUPAGE_SIZE;
 			err = vmf_insert_page(vma, addr, page);
 			if (unlikely(err & VM_FAULT_ERROR))
 				return err;
