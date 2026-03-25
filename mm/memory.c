@@ -1127,10 +1127,10 @@ static __always_inline void __copy_present_ptes(struct vm_area_struct *dst_vma,
 
 #if PAGE_MMUSHIFT
 	/*
-	 * With PGCL, set_ptes(nr>1) writes nr*PAGE_MMUCOUNT PTEs
-	 * (treating nr as kernel page count).  The large folio batch
-	 * path passes nr in MMUPAGE-granular units from folio_pte_batch,
-	 * so write individual PTEs with MMUPAGE_SIZE stride instead.
+	 * Legacy safety: folio_pte_batch returns MMUPAGE-granular counts
+	 * on PGCL (always 1 for order-0 folios).  Since S48, set_ptes(nr)
+	 * writes exactly nr PTEs, so this per-PTE fallback is only needed
+	 * if folio_pte_batch ever returns nr>1 on PGCL (currently doesn't).
 	 */
 	if (nr > 1) {
 		int i;
@@ -5308,7 +5308,9 @@ check_folio:
 	}
 	{
 	/*
-	 * PGCL: set_ptes(nr>1) maps nr*PAGE_MMUCOUNT PTEs.
+	 * PGCL: nr_ptes is the PTE count (= MMUPAGE count) to map.
+	 * For PGCL large folios this is nr_pages * PAGE_MMUCOUNT;
+	 * for non-PGCL or single-page folios it equals nr_pages.
 	 * Refs and rmap must account for all hardware PTEs.
 	 */
 	unsigned long nr_ptes = (PAGE_MMUSHIFT && nr_pages > 1) ?
@@ -5351,13 +5353,13 @@ check_folio:
 		folio_add_large_mapcount(folio,
 					nr_ptes - nr_pages, vma);
 	}
-	}
 
 	VM_BUG_ON(!folio_test_anon(folio) ||
 			(pte_write(pte) && !PageAnonExclusive(page)));
-	set_ptes(vma->vm_mm, address, ptep, pte, nr_pages);
+	set_ptes(vma->vm_mm, address, ptep, pte, nr_ptes);
 	arch_do_swap_page_nr(vma->vm_mm, vma, address,
-			pte, pte, nr_pages);
+			pte, pte, nr_ptes);
+	}
 
 	/*
 	 * Remove the swap entry and conditionally try to free up the swapcache.
@@ -5648,7 +5650,8 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	/*
 	 * With PAGE_MMUSHIFT > 0 and a single-page fault, adjust PTE to
 	 * the correct MMUPAGE within the allocated page.  For large folios
-	 * (nr_pages > 1), set_ptes() handles sub-page offsets internally.
+	 * (nr_pages > 1), the PGCL path above calls set_ptes(nr_ptes)
+	 * directly with full PTE count and goes to unlock.
 	 */
 	if (PAGE_MMUSHIFT > 0 && nr_pages == 1) {
 		unsigned int sub = pgoff_sub_page_index(vmf->pgoff);
@@ -5711,6 +5714,12 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		}
 		folio_add_large_mapcount(folio,
 					nr_ptes - nr_pages, vma);
+		folio_add_lru_vma(folio, vma);
+		if (vmf_orig_pte_uffd_wp(vmf))
+			entry = pte_mkuffd_wp(entry);
+		set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr_ptes);
+		update_mmu_cache_range(vmf, vma, addr, vmf->pte, nr_ptes);
+		goto unlock;
 	} else {
 		folio_ref_add(folio, nr_pages - 1);
 		add_mm_counter(vma->vm_mm, MM_ANONPAGES, nr_pages);
@@ -6156,12 +6165,14 @@ fallback:
 	}
 
 	/*
-	 * With page clustering (PAGE_MMUSHIFT > 0), set_ptes(nr>1) maps
-	 * nr * PAGE_MMUCOUNT PTEs, but set_ptes(nr=1) maps a single PTE.
-	 * Match refcount and RSS to actual PTEs created by set_ptes.
+	 * With page clustering (PAGE_MMUSHIFT > 0), nr_ptes is the actual
+	 * number of hardware PTEs to create (PTE/MMUPAGE count).
+	 * For file faults, fault_around_pages = 1 on PGCL so nr_pages = 1
+	 * and nr_ptes = nr_pages.  The nr_pages > 1 case only matters
+	 * for anon/swap faults which are handled above.
 	 */
 	{
-		unsigned long nr_ptes = (nr_pages > 1) ?
+		unsigned long nr_ptes = (PAGE_MMUSHIFT && nr_pages > 1) ?
 			(unsigned long)nr_pages * PAGE_MMUCOUNT : nr_pages;
 		folio_ref_add(folio, nr_ptes - 1);
 		set_pte_range(vmf, folio, page, nr_pages, addr);
