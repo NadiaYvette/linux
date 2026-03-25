@@ -5988,7 +5988,7 @@ vm_fault_t do_set_pmd(struct vm_fault *vmf, struct folio *folio, struct page *pa
 	if (write)
 		entry = maybe_pmd_mkwrite(pmd_mkdirty(entry), vma);
 
-	add_mm_counter(vma->vm_mm, mm_counter_file(folio), HPAGE_PMD_NR);
+	add_mm_counter(vma->vm_mm, mm_counter_file(folio), HPAGE_PMD_MMUNR);
 	folio_add_file_rmap_pmd(folio, page, vma);
 
 	/*
@@ -6066,20 +6066,6 @@ void set_pte_range(struct vm_fault *vmf, struct folio *folio,
 		folio_add_lru_vma(folio, vma);
 	} else {
 		folio_add_file_rmap_ptes(folio, page, nr, vma);
-		/*
-		 * PGCL: set_ptes(nr>1) maps nr*PAGE_MMUCOUNT PTEs,
-		 * but rmap functions only accept kernel page counts.
-		 * Bump per-page mapcount and large_mapcount for the
-		 * extra PGCL sub-page PTEs.
-		 */
-		if (PAGE_MMUSHIFT && nr > 1 && folio_test_large(page_folio(page))) {
-			int i;
-			for (i = 0; i < nr; i++)
-				atomic_add(PAGE_MMUCOUNT - 1,
-					   &(page + i)->_mapcount);
-			folio_add_large_mapcount(page_folio(page),
-				(unsigned long)nr * (PAGE_MMUCOUNT - 1), vma);
-		}
 	}
 	set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr);
 
