@@ -84,10 +84,10 @@ static inline void __flush_hugetlb_tlb_range(struct vm_area_struct *vma,
 		__flush_tlb_range(vma, start, end, PMD_SIZE, 2, flags);
 		break;
 	case CONT_PTE_SIZE:
-		__flush_tlb_range(vma, start, end, PAGE_SIZE, 3, flags);
+		__flush_tlb_range(vma, start, end, MMUPAGE_SIZE, 3, flags);
 		break;
 	default:
-		__flush_tlb_range(vma, start, end, PAGE_SIZE, TLBI_TTL_UNKNOWN, flags);
+		__flush_tlb_range(vma, start, end, MMUPAGE_SIZE, TLBI_TTL_UNKNOWN, flags);
 	}
 }
 
