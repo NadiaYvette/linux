@@ -306,18 +306,24 @@ map_ldt_struct(struct mm_struct *mm, struct ldt_struct *ldt, int slot)
 
 	is_vmalloc = is_vmalloc_addr(ldt->entries);
 
-	nr_pages = DIV_ROUND_UP(ldt->nr_entries * LDT_ENTRY_SIZE, PAGE_SIZE);
+	nr_pages = DIV_ROUND_UP(ldt->nr_entries * LDT_ENTRY_SIZE, MMUPAGE_SIZE);
 
 	for (i = 0; i < nr_pages; i++) {
-		unsigned long offset = i << PAGE_SHIFT;
+		unsigned long offset = i << MMUPAGE_SHIFT;
 		const void *src = (char *)ldt->entries + offset;
 		unsigned long pfn;
 		pgprot_t pte_prot;
 		pte_t pte, *ptep;
 
 		va = (unsigned long)ldt_slot_va(slot) + offset;
-		pfn = is_vmalloc ? vmalloc_to_pfn(src) :
-			page_to_pfn(virt_to_page(src));
+		if (is_vmalloc) {
+			struct page *page = vmalloc_to_page(src);
+			pfn = page_to_pfn(page) * PAGE_MMUCOUNT +
+				(((unsigned long)src >> MMUPAGE_SHIFT) &
+				 (PAGE_MMUCOUNT - 1));
+		} else {
+			pfn = __pa(src) >> MMUPAGE_SHIFT;
+		}
 		/*
 		 * Treat the PTI LDT range as a *userspace* range.
 		 * get_locked_pte() will allocate all needed pagetables
@@ -358,10 +364,10 @@ static void unmap_ldt_struct(struct mm_struct *mm, struct ldt_struct *ldt)
 	if (!boot_cpu_has(X86_FEATURE_PTI))
 		return;
 
-	nr_pages = DIV_ROUND_UP(ldt->nr_entries * LDT_ENTRY_SIZE, PAGE_SIZE);
+	nr_pages = DIV_ROUND_UP(ldt->nr_entries * LDT_ENTRY_SIZE, MMUPAGE_SIZE);
 
 	for (i = 0; i < nr_pages; i++) {
-		unsigned long offset = i << PAGE_SHIFT;
+		unsigned long offset = i << MMUPAGE_SHIFT;
 		spinlock_t *ptl;
 		pte_t *ptep;
 
@@ -374,7 +380,7 @@ static void unmap_ldt_struct(struct mm_struct *mm, struct ldt_struct *ldt)
 	}
 
 	va = (unsigned long)ldt_slot_va(ldt->slot);
-	flush_tlb_mm_range(mm, va, va + nr_pages * PAGE_SIZE, PAGE_SHIFT, false);
+	flush_tlb_mm_range(mm, va, va + nr_pages * MMUPAGE_SIZE, MMUPAGE_SHIFT, false);
 }
 
 #else /* !CONFIG_MITIGATION_PAGE_TABLE_ISOLATION */
