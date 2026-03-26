@@ -317,7 +317,7 @@ void flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 		     unsigned long end)
 
 {
-	if (end - start == PAGE_SIZE && !(start & ~PAGE_MASK))
+	if (end - start == MMUPAGE_SIZE && !(start & ~MMUPAGE_MASK))
 		flush_tlb_page(vma, start);
 	else
 		flush_tlb_mm(vma->vm_mm);

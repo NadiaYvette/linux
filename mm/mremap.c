@@ -309,10 +309,10 @@ static int move_ptes(struct pagetable_move_control *pmc,
 			}
 #if PAGE_MMUSHIFT
 			/*
-			 * With PGCL, set_ptes(nr>1) treats nr as kernel
-			 * page count (writes nr*PAGE_MMUCOUNT PTEs).
-			 * When nr comes from pgcl_pte_batch (MMUPAGE
-			 * count), write individual PTEs instead.
+			 * With PGCL, pgcl_pte_batch returns an MMUPAGE
+			 * count of contiguous sub-page PTEs within the
+			 * same kernel page. Write individual PTEs with
+			 * sub-page offset increments.
 			 */
 			if (nr_ptes > 1) {
 				int j;

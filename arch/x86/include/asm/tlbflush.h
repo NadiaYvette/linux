@@ -310,7 +310,7 @@ static inline bool mm_in_asid_transition(struct mm_struct *mm) { return false; }
 	flush_tlb_mm_range((vma)->vm_mm, start, end,			\
 			   ((vma)->vm_flags & VM_HUGETLB)		\
 				? huge_page_shift(hstate_vma(vma))	\
-				: PAGE_SHIFT, true)
+				: MMUPAGE_SHIFT, true)
 
 extern void flush_tlb_all(void);
 extern void flush_tlb_mm_range(struct mm_struct *mm, unsigned long start,
@@ -320,7 +320,7 @@ extern void flush_tlb_kernel_range(unsigned long start, unsigned long end);
 
 static inline void flush_tlb_page(struct vm_area_struct *vma, unsigned long a)
 {
-	flush_tlb_mm_range(vma->vm_mm, a, a + PAGE_SIZE, PAGE_SHIFT, false);
+	flush_tlb_mm_range(vma->vm_mm, a, a + MMUPAGE_SIZE, MMUPAGE_SHIFT, false);
 }
 
 static inline bool arch_tlbbatch_should_defer(struct mm_struct *mm)

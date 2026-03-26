@@ -1552,7 +1552,7 @@ void flush_tlb_kernel_range(unsigned long start, unsigned long end)
 
 	guard(preempt)();
 
-	info = get_flush_tlb_info(NULL, start, end, PAGE_SHIFT, false,
+	info = get_flush_tlb_info(NULL, start, end, MMUPAGE_SHIFT, false,
 				  TLB_GENERATION_INVALID);
 
 	if (info->end == TLB_FLUSH_ALL)
