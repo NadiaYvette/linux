@@ -18,6 +18,14 @@
 #include <linux/sys.h>
 #include <linux/linkage.h>
 
+/*
+ * Microblaze C ABI: the callee may spill arguments into the caller's
+ * outgoing parameter save area at [caller_sp + 0 .. caller_sp + 23].
+ * Assembly entry points must reserve this space below pt_regs before
+ * calling any C function, otherwise the spills corrupt saved registers.
+ */
+#define C_ABI_SAVE_AREA	28
+
 #include <asm/entry.h>
 #include <asm/current.h>
 #include <asm/processor.h>
@@ -381,8 +389,10 @@ C_ENTRY(_user_exception):
 
 	addik	r3, r0, -ENOSYS
 	swi	r3, r1, PT_R3
+	addik	r1, r1, -C_ABI_SAVE_AREA
 	brlid	r15, do_syscall_trace_enter
-	addik	r5, r1, PT_R0
+	addik	r5, r1, C_ABI_SAVE_AREA	/* PT_R0 = 0, so +PT_R0 is implicit */
+	addik	r1, r1, C_ABI_SAVE_AREA
 
 	# do_syscall_trace_enter returns the new syscall nr.
 	addk	r12, r0, r3
@@ -420,14 +430,20 @@ C_ENTRY(_user_exception):
 
 	# Find and jump into the syscall handler.
 	lwi	r12, r12, sys_call_table
+
+	addik	r1, r1, -C_ABI_SAVE_AREA
+
 	/* where the trap should return need -8 to adjust for rtsd r15, 8 */
-	addi	r15, r0, ret_from_trap-8
+	addi	r15, r0, ret_from_trap_syscall-8
 	bra	r12
 
 	/* The syscall number is invalid, return an error.  */
 5:
 	braid	ret_from_trap
 	addi	r3, r0, -ENOSYS;
+
+ret_from_trap_syscall:
+	addik	r1, r1, C_ABI_SAVE_AREA
 
 /* Entry point used to return from a syscall/trap */
 /* We re-enable BIP bit before state restore */
@@ -438,6 +454,7 @@ C_ENTRY(ret_from_trap):
 	lwi	r11, r1, PT_MODE;
 /* See if returning to kernel mode, if so, skip resched &c.  */
 	bnei	r11, 2f;
+
 	/* We're returning to user mode, so check for various conditions that
 	 * trigger rescheduling. */
 	/* FIXME: Restructure all these flag checks. */
@@ -446,8 +463,10 @@ C_ENTRY(ret_from_trap):
 	andi	r11, r11, _TIF_WORK_SYSCALL_MASK
 	beqi	r11, 1f
 
+	addik	r1, r1, -C_ABI_SAVE_AREA
 	brlid	r15, do_syscall_trace_leave
-	addik	r5, r1, PT_R0
+	addik	r5, r1, C_ABI_SAVE_AREA	/* PT_R0 = 0, so +PT_R0 is implicit */
+	addik	r1, r1, C_ABI_SAVE_AREA
 1:
 	/* We're returning to user mode, so check for various conditions that
 	 * trigger rescheduling. */
@@ -457,8 +476,10 @@ C_ENTRY(ret_from_trap):
 	andi	r11, r19, _TIF_NEED_RESCHED;
 	beqi	r11, 5f;
 
+	addik	r1, r1, -C_ABI_SAVE_AREA
 	bralid	r15, schedule;	/* Call scheduler */
 	nop;				/* delay slot */
+	addik	r1, r1, C_ABI_SAVE_AREA
 	bri	1b
 
 	/* Maybe handle a signal */
@@ -466,9 +487,11 @@ C_ENTRY(ret_from_trap):
 	andi	r11, r19, _TIF_SIGPENDING | _TIF_NOTIFY_RESUME;
 	beqi	r11, 4f;		/* Signals to handle, handle them */
 
-	addik	r5, r1, 0;		/* Arg 1: struct pt_regs *regs */
+	addik	r1, r1, -C_ABI_SAVE_AREA
+	addik	r5, r1, C_ABI_SAVE_AREA;	/* Arg 1: struct pt_regs *regs */
 	bralid	r15, do_notify_resume;	/* Handle any signals */
 	add	r6, r30, r0;		/* Arg 2: int in_syscall */
+	addik	r1, r1, C_ABI_SAVE_AREA
 	add	r30, r0, r0		/* no more restarts */
 	bri	1b
 
@@ -501,18 +524,22 @@ TRAP_return:		/* Make global symbol for debugging */
    (copy_thread makes ret_from_fork the return address in each new thread's
    saved context).  */
 C_ENTRY(ret_from_fork):
+	addik	r1, r1, -C_ABI_SAVE_AREA
 	bralid	r15, schedule_tail; /* ...which is schedule_tail's arg */
 	add	r5, r3, r0;	/* switch_thread returns the prev task */
 				/* ( in the delay slot ) */
+	addik	r1, r1, C_ABI_SAVE_AREA
 	brid	ret_from_trap;	/* Do normal trap return */
 	add	r3, r0, r0;	/* Child's fork call should return 0. */
 
 C_ENTRY(ret_from_kernel_thread):
+	addik	r1, r1, -C_ABI_SAVE_AREA
 	bralid	r15, schedule_tail; /* ...which is schedule_tail's arg */
 	add	r5, r3, r0;	/* switch_thread returns the prev task */
 				/* ( in the delay slot ) */
 	brald	r15, r20	/* fn was left in r20 */
 	addk	r5, r0, r19	/* ... and argument - in r19 */
+	addik	r1, r1, C_ABI_SAVE_AREA
 	brid	ret_from_trap
 	add	r3, r0, r0
 
@@ -535,12 +562,13 @@ C_ENTRY(full_exception_trap):
 	/* FIXME this can be store directly in PT_ESR reg.
 	 * I tested it but there is a fault */
 	/* where the trap should return need -8 to adjust for rtsd r15, 8 */
-	addik	r15, r0, ret_from_exc - 8
+	addik	r15, r0, ret_from_exc_c - 8
 	mfs	r6, resr
 	mfs	r7, rfsr;		/* save FSR */
 	mts	rfsr, r0;	/* Clear sticky fsr */
+	addik	r1, r1, -C_ABI_SAVE_AREA
 	rted	r0, full_exception
-	addik	r5, r1, 0		 /* parameter struct pt_regs * regs */
+	addik	r5, r1, C_ABI_SAVE_AREA	 /* parameter struct pt_regs * regs */
 
 /*
  * Unaligned data trap.
@@ -569,11 +597,12 @@ C_ENTRY(unaligned_data_trap):
 	swi	r17, r1, PT_PC;
 	tovirt(r1,r1)
 	/* where the trap should return need -8 to adjust for rtsd r15, 8 */
-	addik	r15, r0, ret_from_exc-8
+	addik	r15, r0, ret_from_exc_c-8
 	mfs	r3, resr		/* ESR */
 	mfs	r4, rear		/* EAR */
+	addik	r1, r1, -C_ABI_SAVE_AREA
 	rtbd	r0, _unaligned_data_exception
-	addik	r7, r1, 0		/* parameter struct pt_regs * regs */
+	addik	r7, r1, C_ABI_SAVE_AREA	/* parameter struct pt_regs * regs */
 
 /*
  * Page fault traps.
@@ -599,11 +628,12 @@ C_ENTRY(page_fault_data_trap):
 	swi	r17, r1, PT_PC;
 	tovirt(r1,r1)
 	/* where the trap should return need -8 to adjust for rtsd r15, 8 */
-	addik	r15, r0, ret_from_exc-8
+	addik	r15, r0, ret_from_exc_c-8
 	mfs	r6, rear		/* parameter unsigned long address */
 	mfs	r7, resr		/* parameter unsigned long error_code */
+	addik	r1, r1, -C_ABI_SAVE_AREA
 	rted	r0, do_page_fault
-	addik	r5, r1, 0		/* parameter struct pt_regs * regs */
+	addik	r5, r1, C_ABI_SAVE_AREA	/* parameter struct pt_regs * regs */
 
 C_ENTRY(page_fault_instr_trap):
 	SAVE_STATE		/* Save registers.*/
@@ -611,12 +641,16 @@ C_ENTRY(page_fault_instr_trap):
 	swi	r17, r1, PT_PC;
 	tovirt(r1,r1)
 	/* where the trap should return need -8 to adjust for rtsd r15, 8 */
-	addik	r15, r0, ret_from_exc-8
+	addik	r15, r0, ret_from_exc_c-8
 	mfs	r6, rear		/* parameter unsigned long address */
 	ori	r7, r0, 0		/* parameter unsigned long error_code */
+	addik	r1, r1, -C_ABI_SAVE_AREA
 	rted	r0, do_page_fault
-	addik	r5, r1, 0		/* parameter struct pt_regs * regs */
+	addik	r5, r1, C_ABI_SAVE_AREA	/* parameter struct pt_regs * regs */
 
+/* Return from C exception handler — restore C ABI save area offset. */
+ret_from_exc_c:
+	addik	r1, r1, C_ABI_SAVE_AREA
 /* Entry point used to return from an exception.  */
 C_ENTRY(ret_from_exc):
 	lwi	r11, r1, PT_MODE;
@@ -632,8 +666,10 @@ C_ENTRY(ret_from_exc):
 	beqi	r11, 5f;
 
 /* Call the scheduler before returning from a syscall/trap. */
+	addik	r1, r1, -C_ABI_SAVE_AREA
 	bralid	r15, schedule;	/* Call scheduler */
 	nop;				/* delay slot */
+	addik	r1, r1, C_ABI_SAVE_AREA
 	bri	1b
 
 	/* Maybe handle a signal */
@@ -651,9 +687,11 @@ C_ENTRY(ret_from_exc):
 	 * complete register state.  Here we save anything not saved by
 	 * the normal entry sequence, so that it may be safely restored
 	 * (in a possibly modified form) after do_notify_resume returns. */
-	addik	r5, r1, 0;		/* Arg 1: struct pt_regs *regs */
+	addik	r1, r1, -C_ABI_SAVE_AREA
+	addik	r5, r1, C_ABI_SAVE_AREA;	/* Arg 1: struct pt_regs *regs */
 	bralid	r15, do_notify_resume;	/* Handle any signals */
 	addi	r6, r0, 0;		/* Arg 2: int in_syscall */
+	addik	r1, r1, C_ABI_SAVE_AREA
 	bri	1b
 
 /* Finally, return to user state.  */
@@ -728,12 +766,14 @@ C_ENTRY(_interrupt):
 2:
 	lwi	CURRENT_TASK, r0, TOPHYS(PER_CPU(CURRENT_SAVE));
 	tovirt(r1,r1)
+	addik	r1, r1, -C_ABI_SAVE_AREA
 	addik	r15, r0, irq_call;
 irq_call:rtbd	r0, do_IRQ;
-	addik	r5, r1, 0;
+	addik	r5, r1, C_ABI_SAVE_AREA;
 
 /* MS: we are in virtual mode */
 ret_from_irq:
+	addik	r1, r1, C_ABI_SAVE_AREA
 	lwi	r11, r1, PT_MODE;
 	bnei	r11, 2f;
 
@@ -742,17 +782,22 @@ ret_from_irq:
 	lwi	r19, r11, TI_FLAGS; /* MS: get flags from thread info */
 	andi	r11, r19, _TIF_NEED_RESCHED;
 	beqi	r11, 5f
+	addik	r1, r1, -C_ABI_SAVE_AREA
 	bralid	r15, schedule;
 	nop; /* delay slot */
+	addik	r1, r1, C_ABI_SAVE_AREA
 	bri	1b
 
     /* Maybe handle a signal */
 5:	andi	r11, r19, _TIF_SIGPENDING | _TIF_NOTIFY_RESUME;
 	beqid	r11, no_intr_resched
 /* Handle a signal return; Pending signals should be in r18. */
-	addik	r5, r1, 0; /* Arg 1: struct pt_regs *regs */
+	nop
+	addik	r1, r1, -C_ABI_SAVE_AREA
+	addik	r5, r1, C_ABI_SAVE_AREA; /* Arg 1: struct pt_regs *regs */
 	bralid	r15, do_notify_resume;	/* Handle any signals */
 	addi	r6, r0, 0; /* Arg 2: int in_syscall */
+	addik	r1, r1, C_ABI_SAVE_AREA
 	bri	1b
 
 /* Finally, return to user state. */
@@ -779,8 +824,10 @@ no_intr_resched:
 	beqi	r5, restore /* if zero jump over */
 
 	/* interrupts are off that's why I am calling preempt_chedule_irq */
+	addik	r1, r1, -C_ABI_SAVE_AREA
 	bralid	r15, preempt_schedule_irq
 	nop
+	addik	r1, r1, C_ABI_SAVE_AREA
 restore:
 #endif
 	VM_OFF /* MS: turn off MMU */
@@ -843,12 +890,14 @@ restore_tlb:
 	lwi  	r5, r0, TOPHYS(xmb_manager_dev)
 	lwi	r8, r0, TOPHYS(xmb_manager_reset_callback)
 	set_vms
+	addik	r1, r1, -C_ABI_SAVE_AREA
 	/* return from reset need -8 to adjust for rtsd r15, 8 */
 	addik   r15, r0, ret_from_reset - 8
 	rtbd	r8, 0
 	nop
 
 ret_from_reset:
+	addik	r1, r1, C_ABI_SAVE_AREA
 	set_bip /* Ints masked for state restore */
 	VM_OFF
 	/* MS: Restore all regs */
@@ -921,12 +970,14 @@ save_tlb:
 
 	lwi  	r5, r0, TOPHYS(xmb_manager_dev)
 	lwi	r8, r0, TOPHYS(xmb_manager_callback)
+	addik	r1, r1, -C_ABI_SAVE_AREA
 	/* return from break need -8 to adjust for rtsd r15, 8 */
 	addik   r15, r0, ret_from_break - 8
 	rtbd	r8, 0
 	nop
 
 ret_from_break:
+	addik	r1, r1, C_ABI_SAVE_AREA
 	/* flush the d-cache */
 	bralid	r15, mb_flush_dcache
 	nop
@@ -984,7 +1035,8 @@ C_ENTRY(_debug_exception):
 	/* MS: r31 - current pointer isn't changed */
 	tovirt(r1,r1)
 #ifdef CONFIG_KGDB
-	addi	r5, r1, 0 /* pass pt_reg address as the first arg */
+	addik	r1, r1, -C_ABI_SAVE_AREA
+	addi	r5, r1, C_ABI_SAVE_AREA /* pass pt_reg address as the first arg */
 	addik	r15, r0, dbtrap_call; /* return address */
 	rtbd	r0, microblaze_kgdb_break
 	nop;
@@ -1009,11 +1061,13 @@ C_ENTRY(_debug_exception):
 	lwi	CURRENT_TASK, r0, TOPHYS(PER_CPU(CURRENT_SAVE));
 	tovirt(r1,r1)
 	set_vms;
-	addik	r5, r1, 0;
+	addik	r1, r1, -C_ABI_SAVE_AREA
+	addik	r5, r1, C_ABI_SAVE_AREA;
 	addik	r15, r0, dbtrap_call;
 dbtrap_call: /* Return point for kernel/user entry + 8 because of rtsd r15, 8 */
 	rtbd	r0, sw_exception
 	nop
+	addik	r1, r1, C_ABI_SAVE_AREA
 
 	/* MS: The first instruction for the second part of the gdb/kgdb */
 	set_bip; /* Ints masked for state restore */
@@ -1028,17 +1082,21 @@ dbtrap_call: /* Return point for kernel/user entry + 8 because of rtsd r15, 8 */
 	beqi	r11, 5f;
 
 	/* Call the scheduler before returning from a syscall/trap. */
+	addik	r1, r1, -C_ABI_SAVE_AREA
 	bralid	r15, schedule;	/* Call scheduler */
 	nop;				/* delay slot */
+	addik	r1, r1, C_ABI_SAVE_AREA
 	bri	1b
 
 	/* Maybe handle a signal */
 5:	andi	r11, r19, _TIF_SIGPENDING | _TIF_NOTIFY_RESUME;
 	beqi	r11, 4f;		/* Signals to handle, handle them */
 
-	addik	r5, r1, 0;		/* Arg 1: struct pt_regs *regs */
+	addik	r1, r1, -C_ABI_SAVE_AREA
+	addik	r5, r1, C_ABI_SAVE_AREA;	/* Arg 1: struct pt_regs *regs */
 	bralid	r15, do_notify_resume;	/* Handle any signals */
 	addi  r6, r0, 0;	/* Arg 2: int in_syscall */
+	addik	r1, r1, C_ABI_SAVE_AREA
 	bri	1b
 
 /* Finally, return to user state.  */
