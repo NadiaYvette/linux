@@ -218,9 +218,9 @@ pmd_page_vaddr(pmd_t pmd)
 	return ((pmd_val(pmd) & _PFN_MASK) >> (32-MMUPAGE_SHIFT)) + PAGE_OFFSET;
 }
 
-#define pmd_pfn(pmd)	(pmd_val(pmd) >> 32)
-#define pmd_page(pmd)	(pfn_to_page(pmd_val(pmd) >> 32))
-#define pud_page(pud)	(pfn_to_page(pud_val(pud) >> 32))
+#define pmd_pfn(pmd)	((pmd_val(pmd) >> 32) >> PAGE_MMUSHIFT)
+#define pmd_page(pmd)	(pfn_to_page(pmd_pfn(pmd)))
+#define pud_page(pud)	(pfn_to_page((pud_val(pud) >> 32) >> PAGE_MMUSHIFT))
 
 extern inline pmd_t *pud_pgtable(pud_t pgd)
 {
