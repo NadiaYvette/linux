@@ -3348,5 +3348,8 @@ int insert_vm_struct(struct mm_struct *mm, struct vm_area_struct *vma)
  */
 __weak unsigned long vma_mmu_pagesize(struct vm_area_struct *vma)
 {
-	return vma_kernel_pagesize(vma);
+	/* For hugetlb, delegate to kernel pagesize; otherwise MMUPAGE_SIZE */
+	if (is_vm_hugetlb_page(vma))
+		return vma_kernel_pagesize(vma);
+	return MMUPAGE_SIZE;
 }
