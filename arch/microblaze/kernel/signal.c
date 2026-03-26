@@ -314,3 +314,4 @@ asmlinkage void do_notify_resume(struct pt_regs *regs, int in_syscall)
 	if (test_thread_flag(TIF_NOTIFY_RESUME))
 		resume_user_mode_work(regs);
 }
+
