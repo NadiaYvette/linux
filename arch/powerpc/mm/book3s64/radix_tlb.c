@@ -1323,7 +1323,7 @@ void radix__flush_tlb_collapsed_pmd(struct mm_struct *mm, unsigned long addr)
 		return;
 
 	/* 4k page size, just blow the world */
-	if (PAGE_SIZE == 0x1000) {
+	if (MMUPAGE_SIZE == 0x1000) {
 		radix__flush_all_mm(mm);
 		return;
 	}
@@ -1335,7 +1335,7 @@ void radix__flush_tlb_collapsed_pmd(struct mm_struct *mm, unsigned long addr)
 	smp_mb(); /* see radix__flush_tlb_mm */
 	type = flush_type_needed(mm, false);
 	if (type == FLUSH_TYPE_LOCAL) {
-		_tlbiel_va_range(addr, end, pid, PAGE_SIZE, mmu_virtual_psize, true);
+		_tlbiel_va_range(addr, end, pid, MMUPAGE_SIZE, mmu_virtual_psize, true);
 	} else if (type == FLUSH_TYPE_GLOBAL) {
 		if (!mmu_has_feature(MMU_FTR_GTSE)) {
 			unsigned long tgt, type, pg_sizes;
@@ -1350,10 +1350,10 @@ void radix__flush_tlb_collapsed_pmd(struct mm_struct *mm, unsigned long addr)
 			pseries_rpt_invalidate(pid, tgt, type, pg_sizes,
 					       addr, end);
 		} else if (cputlb_use_tlbie())
-			_tlbie_va_range(addr, end, pid, PAGE_SIZE, mmu_virtual_psize, true);
+			_tlbie_va_range(addr, end, pid, MMUPAGE_SIZE, mmu_virtual_psize, true);
 		else
 			_tlbiel_va_range_multicast(mm,
-					addr, end, pid, PAGE_SIZE, mmu_virtual_psize, true);
+					addr, end, pid, MMUPAGE_SIZE, mmu_virtual_psize, true);
 	}
 
 	preempt_enable();
