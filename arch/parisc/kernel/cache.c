@@ -697,7 +697,7 @@ int __flush_tlb_range(unsigned long sid, unsigned long start,
 		pdtlb(SR_TEMP1, start);
 		pitlb(SR_TEMP1, start);
 		purge_tlb_end(flags);
-		start += PAGE_SIZE;
+		start += MMUPAGE_SIZE;
 	}
 	return 0;
 }
@@ -706,7 +706,7 @@ static void flush_cache_pages(struct vm_area_struct *vma, unsigned long start, u
 {
 	unsigned long addr;
 
-	for (addr = start; addr < end; addr += PAGE_SIZE)
+	for (addr = start; addr < end; addr += MMUPAGE_SIZE)
 		flush_cache_page_if_present(vma, addr);
 }
 

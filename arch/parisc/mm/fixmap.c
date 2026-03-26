@@ -21,7 +21,7 @@ void notrace set_fixmap(enum fixed_addresses idx, phys_addr_t phys)
 
 	pte = pte_offset_kernel(pmd, vaddr);
 	set_pte_at(&init_mm, vaddr, pte, __mk_pte(phys, PAGE_KERNEL_RWX));
-	flush_tlb_kernel_range(vaddr, vaddr + PAGE_SIZE);
+	flush_tlb_kernel_range(vaddr, vaddr + MMUPAGE_SIZE);
 }
 
 void notrace clear_fixmap(enum fixed_addresses idx)
@@ -34,5 +34,5 @@ void notrace clear_fixmap(enum fixed_addresses idx)
 
 	pte_clear(&init_mm, vaddr, pte);
 
-	flush_tlb_kernel_range(vaddr, vaddr + PAGE_SIZE);
+	flush_tlb_kernel_range(vaddr, vaddr + MMUPAGE_SIZE);
 }

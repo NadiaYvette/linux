@@ -93,9 +93,9 @@ static inline int map_pte_uncached(pte_t * pte,
 		set_pte(pte, __mk_pte(*paddr_ptr, PAGE_KERNEL_UNC));
 		pdtlb(SR_KERNEL, orig_vaddr);
 		purge_tlb_end(flags);
-		vaddr += PAGE_SIZE;
-		orig_vaddr += PAGE_SIZE;
-		(*paddr_ptr) += PAGE_SIZE;
+		vaddr += MMUPAGE_SIZE;
+		orig_vaddr += MMUPAGE_SIZE;
+		(*paddr_ptr) += MMUPAGE_SIZE;
 		pte++;
 	} while (vaddr < end);
 	return 0;
@@ -177,8 +177,8 @@ static inline void unmap_uncached_pte(pmd_t * pmd, unsigned long vaddr,
 		purge_tlb_start(flags);
 		pdtlb(SR_KERNEL, orig_vaddr);
 		purge_tlb_end(flags);
-		vaddr += PAGE_SIZE;
-		orig_vaddr += PAGE_SIZE;
+		vaddr += MMUPAGE_SIZE;
+		orig_vaddr += MMUPAGE_SIZE;
 		pte++;
 		if (pte_none(page) || pte_present(page))
 			continue;
