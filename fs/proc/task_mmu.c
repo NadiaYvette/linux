@@ -2546,7 +2546,7 @@ static void pagemap_scan_backout_range(struct pagemap_scan_private *p,
 	else
 		cur_buf->start = cur_buf->end = 0;
 
-	p->found_pages -= (end - addr) / PAGE_SIZE;
+	p->found_pages -= (end - addr) / MMUPAGE_SIZE;
 }
 #endif
 
@@ -2658,11 +2658,11 @@ static int pagemap_scan_output(unsigned long categories,
 
 	categories &= p->arg.return_mask;
 
-	n_pages = (*end - addr) / PAGE_SIZE;
+	n_pages = (*end - addr) / MMUPAGE_SIZE;
 	if (check_add_overflow(p->found_pages, n_pages, &total_pages) ||
 	    total_pages > p->arg.max_pages) {
 		size_t n_too_much = total_pages - p->arg.max_pages;
-		*end -= n_too_much * PAGE_SIZE;
+		*end -= n_too_much * MMUPAGE_SIZE;
 		n_pages -= n_too_much;
 		ret = -ENOSPC;
 	}
@@ -2756,7 +2756,7 @@ static int pagemap_scan_pmd_entry(pmd_t *pmd, unsigned long start,
 
 	if ((p->arg.flags & PM_SCAN_WP_MATCHING) && !p->vec_out) {
 		/* Fast path for performing exclusive WP */
-		for (addr = start; addr != end; pte++, addr += PAGE_SIZE) {
+		for (addr = start; addr != end; pte++, addr += MMUPAGE_SIZE) {
 			pte_t ptent = ptep_get(pte);
 
 			if ((pte_present(ptent) && pte_uffd_wp(ptent)) ||
@@ -2765,7 +2765,7 @@ static int pagemap_scan_pmd_entry(pmd_t *pmd, unsigned long start,
 			make_uffd_wp_pte(vma, addr, pte, ptent);
 			if (!flush_end)
 				start = addr;
-			flush_end = addr + PAGE_SIZE;
+			flush_end = addr + MMUPAGE_SIZE;
 		}
 		goto flush_and_return;
 	}
@@ -2773,8 +2773,8 @@ static int pagemap_scan_pmd_entry(pmd_t *pmd, unsigned long start,
 	if (!p->arg.category_anyof_mask && !p->arg.category_inverted &&
 	    p->arg.category_mask == PAGE_IS_WRITTEN &&
 	    p->arg.return_mask == PAGE_IS_WRITTEN) {
-		for (addr = start; addr < end; pte++, addr += PAGE_SIZE) {
-			unsigned long next = addr + PAGE_SIZE;
+		for (addr = start; addr < end; pte++, addr += MMUPAGE_SIZE) {
+			unsigned long next = addr + MMUPAGE_SIZE;
 			pte_t ptent = ptep_get(pte);
 
 			if ((pte_present(ptent) && pte_uffd_wp(ptent)) ||
@@ -2794,11 +2794,11 @@ static int pagemap_scan_pmd_entry(pmd_t *pmd, unsigned long start,
 		goto flush_and_return;
 	}
 
-	for (addr = start; addr != end; pte++, addr += PAGE_SIZE) {
+	for (addr = start; addr != end; pte++, addr += MMUPAGE_SIZE) {
 		pte_t ptent = ptep_get(pte);
 		unsigned long categories = p->cur_vma_category |
 					   pagemap_page_category(p, vma, addr, ptent);
-		unsigned long next = addr + PAGE_SIZE;
+		unsigned long next = addr + MMUPAGE_SIZE;
 
 		if (!pagemap_scan_is_interesting_page(categories, p))
 			continue;
@@ -2942,7 +2942,7 @@ static int pagemap_scan_get_args(struct pm_scan_arg *arg,
 	arg->vec = untagged_addr((unsigned long)arg->vec);
 
 	/* Validate memory pointers */
-	if (!IS_ALIGNED(arg->start, PAGE_SIZE))
+	if (!IS_ALIGNED(arg->start, MMUPAGE_SIZE))
 		return -EINVAL;
 	if (!access_ok((void __user *)(long)arg->start, arg->end - arg->start))
 		return -EFAULT;
@@ -2955,7 +2955,7 @@ static int pagemap_scan_get_args(struct pm_scan_arg *arg,
 		return -EFAULT;
 
 	/* Fixup default values */
-	arg->end = ALIGN(arg->end, PAGE_SIZE);
+	arg->end = ALIGN(arg->end, MMUPAGE_SIZE);
 	arg->walk_end = 0;
 	if (!arg->max_pages)
 		arg->max_pages = ULONG_MAX;
