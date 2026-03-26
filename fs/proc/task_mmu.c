@@ -919,7 +919,12 @@ static void smaps_account(struct mem_size_stats *mss, struct page *page,
 {
 	struct folio *folio = page_folio(page);
 	int i, nr = compound ? compound_nr(page) : 1;
-	unsigned long size = nr * PAGE_SIZE;
+	/*
+	 * For PTE-level entries (compound=false), each call represents one
+	 * MMUPAGE of virtual address space.  For PMD-level entries
+	 * (compound=true), nr is in kernel pages.
+	 */
+	unsigned long size = compound ? nr * PAGE_SIZE : MMUPAGE_SIZE;
 	bool exclusive;
 	int mapcount;
 
