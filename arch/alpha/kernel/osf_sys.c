@@ -534,7 +534,7 @@ SYSCALL_DEFINE1(osf_utsname, char __user *, name)
 
 SYSCALL_DEFINE0(getpagesize)
 {
-	return PAGE_SIZE;
+	return MMUPAGE_SIZE;
 }
 
 SYSCALL_DEFINE0(getdtablesize)

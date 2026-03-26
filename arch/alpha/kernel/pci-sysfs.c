@@ -26,7 +26,7 @@ static int hose_mmap_page_range(struct pci_controller *hose,
 	else
 		base = sparse ? hose->sparse_io_base : hose->dense_io_base;
 
-	vma->vm_pgoff += base >> PAGE_SHIFT;
+	vma->vm_pgoff += base >> MMUPAGE_SHIFT;
 
 	return io_remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
 				  vma->vm_end - vma->vm_start,
@@ -41,7 +41,7 @@ static int __pci_mmap_fits(struct pci_dev *pdev, int num,
 
 	nr = vma_pages(vma);
 	start = vma->vm_pgoff;
-	size = ((pci_resource_len(pdev, num) - 1) >> (PAGE_SHIFT - shift)) + 1;
+	size = ((pci_resource_len(pdev, num) - 1) >> (MMUPAGE_SHIFT - shift)) + 1;
 
 	if (start < size && size - start >= nr)
 		return 1;
@@ -86,7 +86,7 @@ static int pci_mmap_resource(struct kobject *kobj,
 		return -EINVAL;
 
 	pcibios_resource_to_bus(pdev->bus, &bar, res);
-	vma->vm_pgoff += bar.start >> (PAGE_SHIFT - (sparse ? 5 : 0));
+	vma->vm_pgoff += bar.start >> (MMUPAGE_SHIFT - (sparse ? 5 : 0));
 	mmap_type = res->flags & IORESOURCE_MEM ? pci_mmap_mem : pci_mmap_io;
 
 	return hose_mmap_page_range(pdev->sysdata, vma, mmap_type, sparse);
@@ -261,7 +261,7 @@ static int __legacy_mmap_fits(struct pci_controller *hose,
 
 	nr = vma_pages(vma);
 	start = vma->vm_pgoff;
-	size = ((res_size - 1) >> PAGE_SHIFT) + 1;
+	size = ((res_size - 1) >> MMUPAGE_SHIFT) + 1;
 
 	if (start < size && size - start >= nr)
 		return 1;
