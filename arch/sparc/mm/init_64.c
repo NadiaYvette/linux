@@ -446,9 +446,13 @@ void update_mmu_cache_range(struct vm_fault *vmf, struct vm_area_struct *vma,
 			__update_mmu_tsb_insert(mm, MM_TSB_BASE, MMUPAGE_SHIFT,
 						address, pte_val(pte));
 		} else {
-			unsigned int total = nr * PAGE_MMUCOUNT;
-
-			for (i = 0; i < total; i++) {
+			/*
+			 * nr is the number of PTEs (MMUPAGE-granular) that
+			 * exist in the page table.  Insert one TSB entry per
+			 * PTE.  Do NOT multiply by PAGE_MMUCOUNT — callers
+			 * already pass the MMUPAGE count.
+			 */
+			for (i = 0; i < nr; i++) {
 				__update_mmu_tsb_insert(mm, MM_TSB_BASE,
 							MMUPAGE_SHIFT,
 							address, pte_val(pte));
