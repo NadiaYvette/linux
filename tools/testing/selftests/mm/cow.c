@@ -375,17 +375,38 @@ static void do_test_vmsplice_in_parent(char *mem, size_t size,
 
 	if (!memcmp(old, new, transferred)) {
 		log_test_result(KSFT_PASS);
-	} else if (xfail) {
-		/*
-		 * With hugetlb, some vmsplice() tests are currently expected to
-		 * fail because (a) harder to fix and (b) nobody really cares.
-		 * Flag them as expected failure for now.
-		 */
-		ksft_print_msg("Leak from child into parent\n");
-		log_test_result(KSFT_XFAIL);
 	} else {
-		ksft_print_msg("Leak from child into parent\n");
-		log_test_result(KSFT_FAIL);
+		ssize_t i;
+		int count_ff = 0, count_00 = 0, count_other = 0;
+		ssize_t first_off = -1;
+
+		for (i = 0; i < transferred; i++) {
+			if (old[i] != new[i]) {
+				if (first_off < 0)
+					first_off = i;
+				if ((unsigned char)new[i] == 0xff)
+					count_ff++;
+				else if ((unsigned char)new[i] == 0x00)
+					count_00++;
+				else
+					count_other++;
+			}
+		}
+		ksft_print_msg("DIAG: first_mismatch=%zd/%zd old=0x%02x new=0x%02x "
+			       "ff_count=%d zero_count=%d other_count=%d "
+			       "transferred=%zd size=%zu\n",
+			       first_off, transferred,
+			       first_off >= 0 ? (unsigned char)old[first_off] : 0,
+			       first_off >= 0 ? (unsigned char)new[first_off] : 0,
+			       count_ff, count_00, count_other,
+			       transferred, size);
+		if (xfail) {
+			ksft_print_msg("Leak from child into parent\n");
+			log_test_result(KSFT_XFAIL);
+		} else {
+			ksft_print_msg("Leak from child into parent\n");
+			log_test_result(KSFT_FAIL);
+		}
 	}
 close_pipe:
 	close(fds[0]);
