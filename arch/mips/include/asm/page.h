@@ -40,7 +40,7 @@ static inline unsigned int page_size_ftlb(unsigned int mmuextdef)
 }
 
 #ifdef CONFIG_MIPS_HUGE_TLB_SUPPORT
-#define HPAGE_SHIFT	(PAGE_SHIFT + MMUPAGE_SHIFT - 3)
+#define HPAGE_SHIFT	(2 * MMUPAGE_SHIFT - 3)
 #define HPAGE_SIZE	(_AC(1,UL) << HPAGE_SHIFT)
 #define HPAGE_MASK	(~(HPAGE_SIZE - 1))
 #define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
