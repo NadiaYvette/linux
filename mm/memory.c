@@ -6038,7 +6038,7 @@ vm_fault_t do_set_pmd(struct vm_fault *vmf, struct folio *folio, struct page *pa
  * @vmf: Fault description.
  * @folio: The folio that contains @page.
  * @page: The first page to create a PTE for.
- * @nr: The number of PTEs to create.
+ * @nr: The number of kernel pages to map (1 PTE for nr==1, nr*PAGE_MMUCOUNT PTEs for nr>1).
  * @addr: The first address to create a PTE for.
  */
 void set_pte_range(struct vm_fault *vmf, struct folio *folio,
@@ -6048,6 +6048,14 @@ void set_pte_range(struct vm_fault *vmf, struct folio *folio,
 	bool write = vmf->flags & FAULT_FLAG_WRITE;
 	bool prefault = !in_range(vmf->address, addr, nr * PAGE_SIZE);
 	pte_t entry;
+	/*
+	 * nr is the kernel page count.  For PGCL with nr > 1 (large
+	 * folio), each kernel page has PAGE_MMUCOUNT sub-pages, so we
+	 * need nr * PAGE_MMUCOUNT PTEs.  For nr == 1, we map a single
+	 * sub-page (one PTE).
+	 */
+	unsigned int nr_ptes = (PAGE_MMUSHIFT && nr > 1) ?
+		nr * PAGE_MMUCOUNT : nr;
 
 	flush_icache_pages(vma, page, nr);
 	entry = mk_pte(page, vma->vm_page_prot);
@@ -6085,10 +6093,10 @@ void set_pte_range(struct vm_fault *vmf, struct folio *folio,
 	} else {
 		folio_add_file_rmap_ptes(folio, page, nr, vma);
 	}
-	set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr);
+	set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr_ptes);
 
 	/* no need to invalidate: a not-present page won't be cached */
-	update_mmu_cache_range(vmf, vma, addr, vmf->pte, nr);
+	update_mmu_cache_range(vmf, vma, addr, vmf->pte, nr_ptes);
 }
 
 static bool vmf_pte_changed(struct vm_fault *vmf)
@@ -6237,9 +6245,8 @@ fallback:
 	/*
 	 * With page clustering (PAGE_MMUSHIFT > 0), nr_ptes is the actual
 	 * number of hardware PTEs to create (PTE/MMUPAGE count).
-	 * For file faults, fault_around_pages = 1 on PGCL so nr_pages = 1
-	 * and nr_ptes = nr_pages.  The nr_pages > 1 case only matters
-	 * for anon/swap faults which are handled above.
+	 * nr_pages > 1 occurs for large folios; set_pte_range handles
+	 * the PGCL nr_pages-to-nr_ptes conversion internally.
 	 */
 	{
 		unsigned long nr_ptes = (PAGE_MMUSHIFT && nr_pages > 1) ?
