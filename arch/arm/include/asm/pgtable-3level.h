@@ -134,7 +134,7 @@
 
 static inline pmd_t *pud_pgtable(pud_t pud)
 {
-	return __va(pud_val(pud) & PHYS_MASK & (s32)PAGE_MASK);
+	return __va(pud_val(pud) & PHYS_MASK & (s32)MMUPAGE_MASK);
 }
 
 #define pmd_bad(pmd)		(!(pmd_val(pmd) & PMD_TABLE_BIT))
