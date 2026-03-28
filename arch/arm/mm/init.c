@@ -431,44 +431,74 @@ void free_initmem(void)
 			free_initmem_default(-1);
 		} else {
 			/*
-			 * PGCL: scan ALL 4096 ARM hardware L1 page table
-			 * entries directly (not via Linux PGD abstraction,
-			 * which only exposes the first L1 desc per 2MB pair).
+			 * PGCL: scan page table entries to find PTE tables.
 			 * Skip any init page containing a PTE table.
+			 *
+			 * LPAE: 4 PGD entries × 512 PMD entries (64-bit each).
+			 *   PMD TABLE entry: bits[39:12] = PTE table phys addr.
+			 * Non-LPAE: 4096 L1 entries (32-bit each).
+			 *   Coarse PT entry: bits[31:10] = PTE table phys addr.
 			 */
 			unsigned long pos;
 			unsigned long start = PAGE_ALIGN((unsigned long)__init_begin);
 			unsigned long end = (unsigned long)__init_end & PAGE_MASK;
 			unsigned long freed = 0;
-			u32 *l1 = (u32 *)init_mm.pgd;
-			int i;
 
 			for (pos = start; pos < end; pos += PAGE_SIZE) {
 				unsigned long page_phys = __pa(pos);
 				unsigned long page_phys_end = page_phys + PAGE_SIZE;
 				bool has_pgtable = false;
 
-				/*
-				 * Scan all 4096 L1 descriptors.  Each covers 1MB.
-				 * Type bits [1:0]: 01 = coarse page table.
-				 * PTE table phys addr in bits [31:10].
-				 */
-				for (i = 0; i < 4096; i++) {
-					u32 desc = l1[i];
-					unsigned long pte_phys;
+#ifdef CONFIG_ARM_LPAE
+				{
+					pgd_t *pgd;
+					pud_t *pud;
+					pmd_t *pmd;
+					int gi, pi;
 
-					if ((desc & PMD_TYPE_MASK) != PMD_TYPE_TABLE)
-						continue;
-					pte_phys = (unsigned long)(desc & ~0x3FFU) & PAGE_MASK;
-					if (pte_phys >= page_phys && pte_phys < page_phys_end) {
-						has_pgtable = true;
-						break;
+					for (gi = 0; gi < PTRS_PER_PGD && !has_pgtable; gi++) {
+						pgd = init_mm.pgd + gi;
+						if (pgd_none(*pgd))
+							continue;
+						pud = pud_offset(p4d_offset(pgd, 0), 0);
+						pmd = (pmd_t *)pud_pgtable(*pud);
+						for (pi = 0; pi < PTRS_PER_PMD; pi++) {
+							pmdval_t val = pmd_val(pmd[pi]);
+							unsigned long pte_phys;
+
+							if ((val & PMD_TYPE_MASK) != PMD_TYPE_TABLE)
+								continue;
+							pte_phys = val & PHYS_MASK & MMUPAGE_MASK;
+							if (pte_phys >= page_phys &&
+							    pte_phys < page_phys_end) {
+								has_pgtable = true;
+								break;
+							}
+						}
 					}
 				}
+#else
+				{
+					u32 *l1 = (u32 *)init_mm.pgd;
+					int i;
 
-				if (has_pgtable) {
-					continue;
+					for (i = 0; i < 4096; i++) {
+						u32 desc = l1[i];
+						unsigned long pte_phys;
+
+						if ((desc & PMD_TYPE_MASK) != PMD_TYPE_TABLE)
+							continue;
+						pte_phys = (unsigned long)(desc & ~0x3FFU) & PAGE_MASK;
+						if (pte_phys >= page_phys &&
+						    pte_phys < page_phys_end) {
+							has_pgtable = true;
+							break;
+						}
+					}
 				}
+#endif
+				if (has_pgtable)
+					continue;
 				free_reserved_page(virt_to_page((void *)pos));
 				freed++;
 			}
