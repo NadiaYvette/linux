@@ -69,7 +69,7 @@ SECTIONS
 #endif
 	_etext = .;			/* End of text section */
 
-	RO_DATA(PAGE_SIZE)
+	RO_DATA(MMUPAGE_SIZE)
 
 	. = ALIGN(4);
 	__ex_table : AT(ADDR(__ex_table) - LOAD_OFFSET) {
@@ -85,7 +85,7 @@ SECTIONS
 #ifdef CONFIG_STRICT_KERNEL_RWX
 	. = ALIGN(1<<SECTION_SHIFT);
 #else
-	. = ALIGN(PAGE_SIZE);
+	. = ALIGN(MMUPAGE_SIZE);
 #endif
 	__init_begin = .;
 
@@ -142,7 +142,7 @@ SECTIONS
 	__init_end = .;
 
 	_sdata = .;
-	RW_DATA(L1_CACHE_BYTES, PAGE_SIZE, THREAD_ALIGN)
+	RW_DATA(L1_CACHE_BYTES, MMUPAGE_SIZE, THREAD_ALIGN)
 	_edata = .;
 
 	BSS_SECTION(0, 0, 0)

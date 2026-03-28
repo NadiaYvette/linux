@@ -1322,8 +1322,8 @@ static __init void prepare_page_table(void)
 }
 
 #ifdef CONFIG_ARM_LPAE
-/* the first page is reserved for pgd */
-#define SWAPPER_PG_DIR_SIZE	(PAGE_SIZE + \
+/* the first page is reserved for pgd (hardware page, not kernel page) */
+#define SWAPPER_PG_DIR_SIZE	(MMUPAGE_SIZE + \
 				 PTRS_PER_PGD * PTRS_PER_PMD * sizeof(pmd_t))
 #else
 #define SWAPPER_PG_DIR_SIZE	(PTRS_PER_PGD * sizeof(pgd_t))
