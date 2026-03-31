@@ -2760,6 +2760,15 @@ static vm_fault_t shmem_fault(struct vm_fault *vmf)
 	int err;
 
 	/*
+	 * SIGBUS at MMUPAGE granularity: userspace sees MMUPAGE_SIZE pages,
+	 * so accesses beyond the file must SIGBUS at MMUPAGE boundaries,
+	 * not at kernel PAGE boundaries.
+	 */
+	if (unlikely(vmf->pgoff >=
+		     DIV_ROUND_UP(i_size_read(inode), MMUPAGE_SIZE)))
+		return VM_FAULT_SIGBUS;
+
+	/*
 	 * Trinity finds that probing a hole which tmpfs is punching can
 	 * prevent the hole-punch from ever completing: noted in i_private.
 	 */

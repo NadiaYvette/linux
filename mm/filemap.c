@@ -3531,8 +3531,12 @@ vm_fault_t filemap_fault(struct vm_fault *vmf)
 	vm_fault_t ret = 0;
 	bool mapping_locked = false;
 
-	max_idx = DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE);
-	if (unlikely(index >= max_idx))
+	/*
+	 * SIGBUS at MMUPAGE granularity: userspace sees MMUPAGE_SIZE pages,
+	 * so accesses beyond the file must SIGBUS at MMUPAGE boundaries.
+	 */
+	max_idx = DIV_ROUND_UP(i_size_read(inode), MMUPAGE_SIZE);
+	if (unlikely(vmf->pgoff >= max_idx))
 		return VM_FAULT_SIGBUS;
 
 	trace_mm_filemap_fault(mapping, index);
@@ -3635,8 +3639,8 @@ retry_find:
 	 * Found the page and have a reference on it.
 	 * We must recheck i_size under page lock.
 	 */
-	max_idx = DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE);
-	if (unlikely(index >= max_idx)) {
+	max_idx = DIV_ROUND_UP(i_size_read(inode), MMUPAGE_SIZE);
+	if (unlikely(vmf->pgoff >= max_idx)) {
 		folio_unlock(folio);
 		folio_put(folio);
 		return VM_FAULT_SIGBUS;
