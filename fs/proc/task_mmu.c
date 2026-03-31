@@ -33,7 +33,7 @@
 #define SENTINEL_VMA_GATE	-2
 
 #define SEQ_PUT_DEC(str, val) \
-		seq_put_decimal_ull_width(m, str, (val) << (PAGE_SHIFT-10), 8)
+		seq_put_decimal_ull_width(m, str, (val) << (MMUPAGE_SHIFT-10), 8)
 void task_mem(struct seq_file *m, struct mm_struct *mm)
 {
 	unsigned long text, lib, swap, anon, file, shmem;
@@ -58,9 +58,9 @@ void task_mem(struct seq_file *m, struct mm_struct *mm)
 		hiwater_rss = mm->hiwater_rss;
 
 	/* split executable areas between text and lib */
-	text = PAGE_ALIGN(mm->end_code) - (mm->start_code & PAGE_MASK);
-	text = min(text, mm->exec_vm << PAGE_SHIFT);
-	lib = (mm->exec_vm << PAGE_SHIFT) - text;
+	text = MMUPAGE_ALIGN(mm->end_code) - (mm->start_code & MMUPAGE_MASK);
+	text = min(text, mm->exec_vm << MMUPAGE_SHIFT);
+	lib = (mm->exec_vm << MMUPAGE_SHIFT) - text;
 
 	swap = get_mm_counter_sum(mm, MM_SWAPENTS);
 	SEQ_PUT_DEC("VmPeak:\t", hiwater_vm);
@@ -88,7 +88,7 @@ void task_mem(struct seq_file *m, struct mm_struct *mm)
 
 unsigned long task_vsize(struct mm_struct *mm)
 {
-	return PAGE_SIZE * mm->total_vm;
+	return MMUPAGE_SIZE * mm->total_vm;
 }
 
 unsigned long task_statm(struct mm_struct *mm,
@@ -97,8 +97,8 @@ unsigned long task_statm(struct mm_struct *mm,
 {
 	*shared = get_mm_counter_sum(mm, MM_FILEPAGES) +
 			get_mm_counter_sum(mm, MM_SHMEMPAGES);
-	*text = (PAGE_ALIGN(mm->end_code) - (mm->start_code & PAGE_MASK))
-								>> PAGE_SHIFT;
+	*text = (MMUPAGE_ALIGN(mm->end_code) - (mm->start_code & MMUPAGE_MASK))
+								>> MMUPAGE_SHIFT;
 	*data = mm->data_vm + mm->stack_vm;
 	*resident = *shared + get_mm_counter_sum(mm, MM_ANONPAGES);
 	return mm->total_vm;
@@ -983,6 +983,15 @@ static void smaps_account(struct mem_size_stats *mss, struct page *page,
 
 		if (IS_ENABLED(CONFIG_PAGE_MAPCOUNT)) {
 			mapcount = folio_precise_page_mapcount(folio, page);
+			/*
+			 * With PGCL, non-large folios have one struct page
+			 * mapped by PAGE_MMUCOUNT PTEs per process.  The raw
+			 * mapcount counts PTEs, not processes.  Normalize to
+			 * approximate the number of sharing processes.
+			 */
+			if (!folio_test_large(folio))
+				mapcount = DIV_ROUND_UP(mapcount,
+							PAGE_MMUCOUNT);
 			exclusive = mapcount < 2;
 		}
 
