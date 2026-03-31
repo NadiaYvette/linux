@@ -564,11 +564,16 @@ int get_futex_key(u32 __user *uaddr, unsigned int flags, union futex_key *key,
 
 	/*
 	 * The futex address must be "naturally" aligned.
+	 *
+	 * The offset records the position within a kernel page for key
+	 * discrimination, but we round the address down to MMUPAGE_SIZE
+	 * for the GUP lookup because VMAs are MMUPAGE-aligned — the
+	 * PAGE-aligned address may fall below the VMA start.
 	 */
 	key->both.offset = address % PAGE_SIZE;
 	if (unlikely((address % size) != 0))
 		return -EINVAL;
-	address -= key->both.offset;
+	address -= address % MMUPAGE_SIZE;
 
 	if (unlikely(!access_ok(uaddr, size)))
 		return -EFAULT;
