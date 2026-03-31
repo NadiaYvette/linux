@@ -5780,12 +5780,15 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		return handle_userfault(vmf, VM_UFFD_MISSING);
 	}
 #if PAGE_MMUSHIFT
-	if (nr_pages == 1) {
+	if (nr_pages == 1 && !(vma->vm_flags & VM_RAND_READ)) {
 		/*
 		 * Page clustering: map all sub-page PTEs within the
 		 * allocated kernel page that fall inside the VMA and
 		 * are currently pte_none.  This avoids wasting memory
 		 * by using only 1/PAGE_MMUCOUNT of each allocated page.
+		 *
+		 * Suppress clustering when MADV_RANDOM is set — the VMA
+		 * has opted out of prefaulting around the fault address.
 		 *
 		 * For anonymous VMAs (pgoff typically 0), the cluster
 		 * never crosses PMD boundaries since PAGE_MMUCOUNT
