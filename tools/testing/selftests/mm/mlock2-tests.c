@@ -202,6 +202,15 @@ static void test_mlock_lock(void)
 
 static int onfault_check(char *map)
 {
+	unsigned long page_size = getpagesize();
+
+	/*
+	 * Suppress sub-page clustering so that faulting one page
+	 * doesn't prefault the adjacent page within the same kernel
+	 * allocation unit.  Without this, RSS == Size and the
+	 * "only one page faulted" assertion fails on PGCL kernels.
+	 */
+	madvise(map, 2 * page_size, MADV_RANDOM);
 	*map = 'a';
 	if (!is_vma_lock_on_fault((unsigned long)map)) {
 		ksft_print_msg("VMA is not marked for lock on fault\n");
@@ -261,6 +270,8 @@ static void test_lock_onfault_of_present(void)
 	if (map == MAP_FAILED)
 		ksft_exit_fail_msg("mmap error: %s", strerror(errno));
 
+	/* Suppress clustering so only the touched page is resident */
+	madvise(map, 2 * page_size, MADV_RANDOM);
 	*map = 'a';
 
 	if (mlock2_(map, 2 * page_size, MLOCK_ONFAULT)) {
