@@ -37,7 +37,7 @@ SYM_TYPED_FUNC_START(v4_flush_user_tlb_range)
 	bic	r0, r0, #0x0ff
 	bic	r0, r0, #0xf00
 1:	mcr	p15, 0, r0, c8, c7, 1		@ invalidate TLB entry
-	add	r0, r0, #PAGE_SZ
+	add	r0, r0, #MMUPAGE_SZ
 	cmp	r0, r1
 	blo	1b
 	ret	lr
