@@ -222,24 +222,41 @@ void __init arch_zone_limits_init(unsigned long *max_zone_pfn)
 }
 
 /*
- * Page-aligned zero page for PGCL.  With PGCL, ZERO_PGE (phys 0x0A000)
- * is not at a PAGE_SIZE boundary, so pfn_pte(page_to_pfn()) would map
- * physical 0 instead of 0x0A000.  This dedicated array is PAGE_SIZE-aligned,
- * ensuring the zero page PTE maps correct zeroed memory.
+ * With PGCL, ZERO_PGE (phys 0x0A000) is not at a PAGE_SIZE boundary,
+ * so pfn_pte(page_to_pfn(ZERO_PAGE(0))) would map the wrong sub-page.
+ *
+ * We need a PAGE_SIZE-aligned zero page.  Alpha assembler caps .balign
+ * at 2^16, but PAGE_SIZE can be 2^17 with MMUSHIFT=4.  However, the
+ * linker can achieve this alignment: a PAGE_SIZE-sized BSS object with
+ * 2^16 alignment will be placed at a 2^16 boundary, and since the linker
+ * aligns the .bss section to the largest alignment in it (and the kernel
+ * linker script ensures page-aligned sections), we get PAGE_SIZE alignment.
+ *
+ * We use order-0 page allocation during mem_init to get proper alignment.
  */
-unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)]
-	__attribute__((aligned(PAGE_SIZE)));
-EXPORT_SYMBOL(empty_zero_page);
+struct page *empty_zero_page_struct;
+EXPORT_SYMBOL(empty_zero_page_struct);
 
 /*
- * paging_init() initializes the zero page.
+ * paging_init() zeros the SRM ZERO_PGE.  The actual zero page is
+ * allocated later in alpha_zero_page_init() when the page allocator is up.
  */
 void __init paging_init(void)
 {
-	memset(empty_zero_page, 0, PAGE_SIZE);
-	/* Also zero the SRM ZERO_PGE for legacy users */
 	memset(absolute_pointer(ZERO_PGE), 0, MMUPAGE_SIZE);
 }
+
+/*
+ * Called after the page allocator is initialized.
+ */
+static int __init alpha_zero_page_init(void)
+{
+	empty_zero_page_struct = alloc_pages(GFP_KERNEL | __GFP_ZERO, 0);
+	if (!empty_zero_page_struct)
+		panic("Failed to allocate zero page");
+	return 0;
+}
+early_initcall(alpha_zero_page_init);
 
 #if defined(CONFIG_ALPHA_GENERIC) || defined(CONFIG_ALPHA_SRM)
 void

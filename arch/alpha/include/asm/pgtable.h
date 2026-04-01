@@ -134,11 +134,11 @@ struct vm_area_struct;
  *
  * With PGCL, ZERO_PGE (at 0x0A000) is not at a PAGE_SIZE boundary,
  * so pfn_pte(page_to_pfn(ZERO_PAGE(0))) would map the wrong sub-page.
- * Use a dedicated page-aligned zero page instead.
+ * Dynamically allocated at boot (alpha assembler caps alignment at 2^16,
+ * but PAGE_SIZE can be 2^17 with MMUSHIFT=4).
  */
-extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)]
-	__attribute__((aligned(PAGE_SIZE)));
-#define ZERO_PAGE(vaddr)	(virt_to_page(empty_zero_page))
+extern struct page *empty_zero_page_struct;
+#define ZERO_PAGE(vaddr)	(empty_zero_page_struct)
 
 /*
  * On certain platforms whose physical address space can overlap KSEG,
