@@ -176,7 +176,7 @@ static int __init vdso_init(void)
 		return -ENOEXEC;
 	}
 
-	text_pages = (vdso_end - vdso_start) >> PAGE_SHIFT;
+	text_pages = (vdso_end - vdso_start) >> MMUPAGE_SHIFT;
 
 	/* Allocate the VDSO text pagelist */
 	vdso_text_pagelist = kzalloc_objs(struct page *, text_pages);
@@ -187,7 +187,7 @@ static int __init vdso_init(void)
 	for (i = 0; i < text_pages; i++) {
 		struct page *page;
 
-		page = virt_to_page(vdso_start + i * PAGE_SIZE);
+		page = virt_to_page(vdso_start + i * MMUPAGE_SIZE);
 		vdso_text_pagelist[i] = page;
 	}
 
@@ -219,8 +219,8 @@ void arm_install_vdso(struct mm_struct *mm, unsigned long addr)
 		return;
 
 	/* Account for vvar pages. */
-	addr += VDSO_NR_PAGES * PAGE_SIZE;
-	len = (vdso_total_pages - VDSO_NR_PAGES) << PAGE_SHIFT;
+	addr += VDSO_NR_PAGES * MMUPAGE_SIZE;
+	len = (vdso_total_pages - VDSO_NR_PAGES) << MMUPAGE_SHIFT;
 
 	vma = _install_special_mapping(mm, addr, len,
 		VM_READ | VM_EXEC | VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC,
