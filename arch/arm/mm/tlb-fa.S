@@ -42,7 +42,7 @@ SYM_TYPED_FUNC_START(fa_flush_user_tlb_range)
 	bic	r0, r0, #0x0ff
 	bic	r0, r0, #0xf00
 1:	mcr	p15, 0, r0, c8, c7, 1		@ invalidate UTLB entry
-	add	r0, r0, #PAGE_SZ
+	add	r0, r0, #MMUPAGE_SZ
 	cmp	r0, r1
 	blo	1b
 	mcr	p15, 0, r3, c7, c10, 4		@ data write barrier
@@ -56,7 +56,7 @@ SYM_TYPED_FUNC_START(fa_flush_kern_tlb_range)
 	bic	r0, r0, #0x0ff
 	bic	r0, r0, #0xf00
 1:	mcr	p15, 0, r0, c8, c7, 1		@ invalidate UTLB entry
-	add	r0, r0, #PAGE_SZ
+	add	r0, r0, #MMUPAGE_SZ
 	cmp	r0, r1
 	blo	1b
 	mcr	p15, 0, r3, c7, c10, 4		@ data write barrier

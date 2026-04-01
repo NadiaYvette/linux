@@ -40,7 +40,7 @@ SYM_TYPED_FUNC_START(v4wb_flush_user_tlb_range)
 	bic	r0, r0, #0x0ff
 	bic	r0, r0, #0xf00
 1:	mcr	p15, 0, r0, c8, c6, 1		@ invalidate D TLB entry
-	add	r0, r0, #PAGE_SZ
+	add	r0, r0, #MMUPAGE_SZ
 	cmp	r0, r1
 	blo	1b
 	ret	lr
@@ -62,7 +62,7 @@ SYM_TYPED_FUNC_START(v4wb_flush_kern_tlb_range)
 	bic	r0, r0, #0xf00
 	mcr	p15, 0, r3, c8, c5, 0		@ invalidate I TLB
 1:	mcr	p15, 0, r0, c8, c6, 1		@ invalidate D TLB entry
-	add	r0, r0, #PAGE_SZ
+	add	r0, r0, #MMUPAGE_SZ
 	cmp	r0, r1
 	blo	1b
 	ret	lr
