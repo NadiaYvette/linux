@@ -693,7 +693,7 @@ static inline void clear_young_dirty_ptes(struct vm_area_struct *vma,
 		if (--nr == 0)
 			break;
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 	}
 }
 #endif
@@ -1170,7 +1170,7 @@ static inline int clear_flush_young_ptes(struct vm_area_struct *vma,
 		if (--nr == 0)
 			break;
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 	}
 
 	return young;
