@@ -83,7 +83,7 @@ static inline unsigned long COLOR_ALIGN(unsigned long addr,
 					 unsigned long pgoff)
 {
 	unsigned long base = (addr+SHMLBA-1)&~(SHMLBA-1);
-	unsigned long off = (pgoff<<PAGE_SHIFT) & (SHMLBA-1);
+	unsigned long off = (pgoff<<MMUPAGE_SHIFT) & (SHMLBA-1);
 
 	return base + off;
 }
@@ -115,7 +115,7 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr, unsi
 		 * cache aliasing constraints.
 		 */
 		if (!file_hugepage && (flags & MAP_SHARED) &&
-		    ((addr - (pgoff << PAGE_SHIFT)) & (SHMLBA - 1)))
+		    ((addr - (pgoff << MMUPAGE_SHIFT)) & (SHMLBA - 1)))
 			return -EINVAL;
 		return addr;
 	}
@@ -146,7 +146,7 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr, unsi
 	info.high_limit = min(task_size, VA_EXCLUDE_START);
 	info.align_mask = get_align_mask(filp, flags);
 	if (!file_hugepage)
-		info.align_offset = pgoff << PAGE_SHIFT;
+		info.align_offset = pgoff << MMUPAGE_SHIFT;
 	addr = vm_unmapped_area(&info);
 
 	if ((addr & ~PAGE_MASK) && task_size > VA_EXCLUDE_END) {
@@ -183,7 +183,7 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 		 * cache aliasing constraints.
 		 */
 		if (!file_hugepage && (flags & MAP_SHARED) &&
-		    ((addr - (pgoff << PAGE_SHIFT)) & (SHMLBA - 1)))
+		    ((addr - (pgoff << MMUPAGE_SHIFT)) & (SHMLBA - 1)))
 			return -EINVAL;
 		return addr;
 	}
@@ -214,7 +214,7 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 	info.high_limit = mm->mmap_base;
 	info.align_mask = get_align_mask(filp, flags);
 	if (!file_hugepage)
-		info.align_offset = pgoff << PAGE_SHIFT;
+		info.align_offset = pgoff << MMUPAGE_SHIFT;
 	addr = vm_unmapped_area(&info);
 
 	/*

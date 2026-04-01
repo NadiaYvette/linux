@@ -222,10 +222,22 @@ void __init arch_zone_limits_init(unsigned long *max_zone_pfn)
 }
 
 /*
- * paging_init() initializes the kernel's ZERO_PGE.
+ * Page-aligned zero page for PGCL.  With PGCL, ZERO_PGE (phys 0x0A000)
+ * is not at a PAGE_SIZE boundary, so pfn_pte(page_to_pfn()) would map
+ * physical 0 instead of 0x0A000.  This dedicated array is PAGE_SIZE-aligned,
+ * ensuring the zero page PTE maps correct zeroed memory.
+ */
+unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)]
+	__attribute__((aligned(PAGE_SIZE)));
+EXPORT_SYMBOL(empty_zero_page);
+
+/*
+ * paging_init() initializes the zero page.
  */
 void __init paging_init(void)
 {
+	memset(empty_zero_page, 0, PAGE_SIZE);
+	/* Also zero the SRM ZERO_PGE for legacy users */
 	memset(absolute_pointer(ZERO_PGE), 0, MMUPAGE_SIZE);
 }
 

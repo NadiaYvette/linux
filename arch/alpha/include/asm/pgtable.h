@@ -131,8 +131,14 @@ struct vm_area_struct;
 /*
  * ZERO_PAGE is a global shared page that is always zero:  used
  * for zero-mapped memory areas etc..
+ *
+ * With PGCL, ZERO_PGE (at 0x0A000) is not at a PAGE_SIZE boundary,
+ * so pfn_pte(page_to_pfn(ZERO_PAGE(0))) would map the wrong sub-page.
+ * Use a dedicated page-aligned zero page instead.
  */
-#define ZERO_PAGE(vaddr)	(virt_to_page(ZERO_PGE))
+extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)]
+	__attribute__((aligned(PAGE_SIZE)));
+#define ZERO_PAGE(vaddr)	(virt_to_page(empty_zero_page))
 
 /*
  * On certain platforms whose physical address space can overlap KSEG,
