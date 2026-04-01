@@ -28,6 +28,7 @@
 #include <asm/page.h>
 #include <asm/highmem.h>
 #include <asm/cacheflush.h>
+#include <asm/fixmap.h>
 #include <asm/tlbflush.h>
 #include <asm/mach/arch.h>
 #include <asm/dma-iommu.h>
@@ -113,6 +114,23 @@ static void __dma_clear_buffer(struct page *page, size_t size, int coherent_flag
 	if (PageHighMem(page)) {
 		phys_addr_t base = __pfn_to_phys(page_to_pfn(page));
 		phys_addr_t end = base + size;
+#if PAGE_MMUSHIFT > 0
+		/*
+		 * With PGCL, kmap_atomic() maps only MMUPAGE_SIZE per
+		 * call (one hardware PTE).  Use set_fixmap() directly
+		 * to supply MMUPAGE-granular physical addresses.
+		 */
+		phys_addr_t pa;
+		for (pa = base; pa < end; pa += MMUPAGE_SIZE) {
+			void *ptr;
+			set_fixmap(FIX_KMAP_BEGIN, pa);
+			ptr = (void *)__fix_to_virt(FIX_KMAP_BEGIN);
+			memset(ptr, 0, MMUPAGE_SIZE);
+			if (coherent_flag != COHERENT)
+				dmac_flush_range(ptr, ptr + MMUPAGE_SIZE);
+			clear_fixmap(FIX_KMAP_BEGIN);
+		}
+#else
 		while (size > 0) {
 			void *ptr = kmap_atomic(page);
 			memset(ptr, 0, PAGE_SIZE);
@@ -122,6 +140,7 @@ static void __dma_clear_buffer(struct page *page, size_t size, int coherent_flag
 			page++;
 			size -= PAGE_SIZE;
 		}
+#endif
 		if (coherent_flag != COHERENT)
 			outer_flush_range(base, end);
 	} else {
@@ -204,7 +223,7 @@ static int __init atomic_pool_init(void)
 	struct page *page;
 	void *ptr;
 
-	atomic_pool = gen_pool_create(PAGE_SHIFT, -1);
+	atomic_pool = gen_pool_create(MMUPAGE_SHIFT, -1);
 	if (!atomic_pool)
 		goto out;
 	/*
