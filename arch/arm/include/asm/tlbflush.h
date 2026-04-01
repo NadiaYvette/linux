@@ -415,7 +415,7 @@ __local_flush_tlb_page(struct vm_area_struct *vma, unsigned long uaddr)
 	const int zero = 0;
 	const unsigned int __tlb_flag = __cpu_tlb_flags;
 
-	uaddr = (uaddr & PAGE_MASK) | ASID(vma->vm_mm);
+	uaddr = (uaddr & MMUPAGE_MASK) | ASID(vma->vm_mm);
 
 	if (possible_tlb_flags & (TLB_V4_U_PAGE|TLB_V4_D_PAGE|TLB_V4_I_PAGE|TLB_V4_I_FULL) &&
 	    cpumask_test_cpu(smp_processor_id(), mm_cpumask(vma->vm_mm))) {
@@ -436,7 +436,7 @@ local_flush_tlb_page(struct vm_area_struct *vma, unsigned long uaddr)
 {
 	const unsigned int __tlb_flag = __cpu_tlb_flags;
 
-	uaddr = (uaddr & PAGE_MASK) | ASID(vma->vm_mm);
+	uaddr = (uaddr & MMUPAGE_MASK) | ASID(vma->vm_mm);
 
 	if (tlb_flag(TLB_WB))
 		dsb(nshst);
@@ -453,14 +453,14 @@ __flush_tlb_page(struct vm_area_struct *vma, unsigned long uaddr)
 {
 	const unsigned int __tlb_flag = __cpu_tlb_flags;
 
-	uaddr = (uaddr & PAGE_MASK) | ASID(vma->vm_mm);
+	uaddr = (uaddr & MMUPAGE_MASK) | ASID(vma->vm_mm);
 
 	if (tlb_flag(TLB_WB))
 		dsb(ishst);
 
 	__local_flush_tlb_page(vma, uaddr);
 #ifdef CONFIG_ARM_ERRATA_720789
-	tlb_op(TLB_V7_UIS_PAGE, "c8, c3, 3", uaddr & PAGE_MASK);
+	tlb_op(TLB_V7_UIS_PAGE, "c8, c3, 3", uaddr & MMUPAGE_MASK);
 #else
 	tlb_op(TLB_V7_UIS_PAGE, "c8, c3, 1", uaddr);
 #endif
@@ -489,7 +489,7 @@ static inline void local_flush_tlb_kernel_page(unsigned long kaddr)
 {
 	const unsigned int __tlb_flag = __cpu_tlb_flags;
 
-	kaddr &= PAGE_MASK;
+	kaddr &= MMUPAGE_MASK;
 
 	if (tlb_flag(TLB_WB))
 		dsb(nshst);
@@ -507,7 +507,7 @@ static inline void __flush_tlb_kernel_page(unsigned long kaddr)
 {
 	const unsigned int __tlb_flag = __cpu_tlb_flags;
 
-	kaddr &= PAGE_MASK;
+	kaddr &= MMUPAGE_MASK;
 
 	if (tlb_flag(TLB_WB))
 		dsb(ishst);

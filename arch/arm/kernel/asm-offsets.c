@@ -114,6 +114,7 @@ int main(void)
   DEFINE(VM_EXEC,	       	VM_EXEC);
   BLANK();
   DEFINE(PAGE_SZ,	       	PAGE_SIZE);
+  DEFINE(MMUPAGE_SZ,		MMUPAGE_SIZE);
   BLANK();
   DEFINE(SYS_ERROR0,		0x9f0000);
   BLANK();
