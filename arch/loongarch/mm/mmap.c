@@ -10,7 +10,7 @@
 #include <linux/mm.h>
 #include <linux/mman.h>
 
-#define SHM_ALIGN_MASK	(SHMLBA - 1)
+#define SHM_ALIGN_MASK	(MMUPAGE_SIZE - 1)
 
 #define COLOUR_ALIGN(addr, pgoff)			\
 	((((addr) + SHM_ALIGN_MASK) & ~SHM_ALIGN_MASK)	\
