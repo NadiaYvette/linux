@@ -109,7 +109,7 @@ static void show_stacktrace(struct task_struct *task,
 
 	printk("%sStack :", loglvl);
 	i = 0;
-	while ((unsigned long) sp & (PAGE_SIZE - 1)) {
+	while ((unsigned long) sp & (THREAD_SIZE - 1)) {
 		if (i && ((i % (64 / field)) == 0)) {
 			pr_cont("\n");
 			printk("%s       ", loglvl);

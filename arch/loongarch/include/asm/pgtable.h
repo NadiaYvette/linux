@@ -164,7 +164,7 @@ static inline int p4d_none(p4d_t p4d)
 
 static inline int p4d_bad(p4d_t p4d)
 {
-	return p4d_val(p4d) & ~PAGE_MASK;
+	return p4d_val(p4d) & ~MMUPAGE_MASK;
 }
 
 static inline int p4d_present(p4d_t p4d)
@@ -210,7 +210,7 @@ static inline int pud_none(pud_t pud)
 
 static inline int pud_bad(pud_t pud)
 {
-	return pud_val(pud) & ~PAGE_MASK;
+	return pud_val(pud) & ~MMUPAGE_MASK;
 }
 
 static inline int pud_present(pud_t pud)
@@ -248,7 +248,7 @@ static inline int pmd_none(pmd_t pmd)
 
 static inline int pmd_bad(pmd_t pmd)
 {
-	return (pmd_val(pmd) & ~PAGE_MASK);
+	return (pmd_val(pmd) & ~MMUPAGE_MASK);
 }
 
 static inline int pmd_present(pmd_t pmd)

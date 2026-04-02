@@ -213,6 +213,7 @@ static void __used output_mm_defines(void)
 	BLANK();
 	DEFINE(_PAGE_SHIFT, PAGE_SHIFT);
 	DEFINE(_PAGE_SIZE, PAGE_SIZE);
+	DEFINE(_MMUPAGE_SIZE, MMUPAGE_SIZE);
 	BLANK();
 }
 
