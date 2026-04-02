@@ -324,7 +324,7 @@ unsigned long stack_top(void)
 
 	if (current->thread.vdso) {
 		/* Space for the VDSO & data page */
-		top -= PAGE_ALIGN(current->thread.vdso->size);
+		top -= MMUPAGE_ALIGN(current->thread.vdso->size);
 		top -= VVAR_SIZE;
 
 		/* Space to randomize the VDSO base */
