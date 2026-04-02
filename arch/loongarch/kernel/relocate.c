@@ -214,10 +214,10 @@ static inline void __init *determine_relocation_address(void)
 
 	kernel_length = (unsigned long)_end - (unsigned long)_text;
 
-	random_offset = get_random_boot() << 16;
+	random_offset = get_random_boot() << PAGE_SHIFT;
 	random_offset &= (CONFIG_RANDOMIZE_BASE_MAX_OFFSET - 1);
 	if (random_offset < kernel_length)
-		random_offset += ALIGN(kernel_length, 0xffff);
+		random_offset += ALIGN(kernel_length, PAGE_SIZE - 1);
 
 	return RELOCATED_KASLR(destination);
 }
@@ -252,7 +252,7 @@ static inline int __init relocation_addr_valid(void *location_new)
 	unsigned long kernel_start, kernel_size;
 	unsigned long initrd_start, initrd_size = 0;
 
-	if ((unsigned long)location_new & 0x00000ffff)
+	if ((unsigned long)location_new & (PAGE_SIZE - 1))
 		return 0; /* Inappropriately aligned new location */
 
 	if ((unsigned long)location_new < (unsigned long)_end)
