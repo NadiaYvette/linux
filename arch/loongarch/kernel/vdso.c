@@ -7,6 +7,7 @@
 #include <linux/binfmts.h>
 #include <linux/elf.h>
 #include <linux/err.h>
+#include <linux/gfp.h>
 #include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/kernel.h>
@@ -14,6 +15,7 @@
 #include <linux/random.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 #include <linux/vdso_datastore.h>
 
 #include <asm/page.h>
@@ -58,7 +60,26 @@ static int __init init_vdso(void)
 	if (!vdso_info.code_mapping.pages)
 		return -ENOMEM;
 
-	pfn = __phys_to_pfn(__pa_symbol(vdso_info.vdso));
+	/*
+	 * With PGCL (PAGE_MMUSHIFT > 0), the vDSO binary is only
+	 * MMUPAGE-aligned in the kernel image, not PAGE-aligned.
+	 * Special mappings create PTEs using vm_pgoff-based sub-page
+	 * indexing, so sub-page 0 of the struct page is always mapped
+	 * first.  Copy the vDSO to a fresh PAGE-aligned allocation so
+	 * the code starts at sub-page 0.
+	 */
+	if (PAGE_MMUSHIFT > 0 && !PAGE_ALIGNED(__pa_symbol(vdso_info.vdso))) {
+		unsigned int order = get_order(vdso_info.size);
+		struct page *p = alloc_pages(GFP_KERNEL | __GFP_ZERO, order);
+
+		if (!p)
+			return -ENOMEM;
+		memcpy(page_address(p), vdso_info.vdso, vdso_end - vdso_start);
+		pfn = page_to_pfn(p);
+	} else {
+		pfn = __phys_to_pfn(__pa_symbol(vdso_info.vdso));
+	}
+
 	for (i = 0; i < vdso_info.size / MMUPAGE_SIZE; i++)
 		vdso_info.code_mapping.pages[i] = pfn_to_page(pfn + i / PAGE_MMUCOUNT);
 
