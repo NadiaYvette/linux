@@ -46,7 +46,7 @@ static int __init init_vdso(void)
 {
 	unsigned long i, cpu, pfn;
 
-	BUG_ON(!PAGE_ALIGNED(vdso_info.vdso));
+	BUG_ON(!MMUPAGE_ALIGNED(vdso_info.vdso));
 
 	for_each_possible_cpu(cpu)
 		vdso_k_arch_data->pdata[cpu].node = cpu_to_node(cpu);

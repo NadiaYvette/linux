@@ -175,7 +175,7 @@ pte_t * __init populate_kernel_pte(unsigned long addr)
 	pmd_t *pmd;
 
 	if (p4d_none(p4dp_get(p4d))) {
-		pud = memblock_alloc_or_panic(PAGE_SIZE, PAGE_SIZE);
+		pud = memblock_alloc_or_panic(MMUPAGE_SIZE, MMUPAGE_SIZE);
 		p4d_populate(&init_mm, p4d, pud);
 #ifndef __PAGETABLE_PUD_FOLDED
 		pud_init(pud);
@@ -184,7 +184,7 @@ pte_t * __init populate_kernel_pte(unsigned long addr)
 
 	pud = pud_offset(p4d, addr);
 	if (pud_none(pudp_get(pud))) {
-		pmd = memblock_alloc_or_panic(PAGE_SIZE, PAGE_SIZE);
+		pmd = memblock_alloc_or_panic(MMUPAGE_SIZE, MMUPAGE_SIZE);
 		pud_populate(&init_mm, pud, pmd);
 #ifndef __PAGETABLE_PMD_FOLDED
 		pmd_init(pmd);
@@ -195,7 +195,7 @@ pte_t * __init populate_kernel_pte(unsigned long addr)
 	if (!pmd_present(pmdp_get(pmd))) {
 		pte_t *pte;
 
-		pte = memblock_alloc_or_panic(PAGE_SIZE, PAGE_SIZE);
+		pte = memblock_alloc_or_panic(MMUPAGE_SIZE, MMUPAGE_SIZE);
 		pmd_populate_kernel(&init_mm, pmd, pte);
 		kernel_pte_init(pte);
 	}
@@ -234,16 +234,16 @@ void __init __set_fixmap(enum fixed_addresses idx,
  */
 pgd_t swapper_pg_dir[_PTRS_PER_PGD] __section(".bss..swapper_pg_dir");
 
-pgd_t invalid_pg_dir[_PTRS_PER_PGD] __page_aligned_bss;
+pgd_t invalid_pg_dir[_PTRS_PER_PGD] __section(".bss..page_aligned") __aligned(MMUPAGE_SIZE);
 #ifndef __PAGETABLE_PUD_FOLDED
-pud_t invalid_pud_table[PTRS_PER_PUD] __page_aligned_bss;
+pud_t invalid_pud_table[PTRS_PER_PUD] __section(".bss..page_aligned") __aligned(MMUPAGE_SIZE);
 EXPORT_SYMBOL(invalid_pud_table);
 #endif
 #ifndef __PAGETABLE_PMD_FOLDED
-pmd_t invalid_pmd_table[PTRS_PER_PMD] __page_aligned_bss;
+pmd_t invalid_pmd_table[PTRS_PER_PMD] __section(".bss..page_aligned") __aligned(MMUPAGE_SIZE);
 EXPORT_SYMBOL(invalid_pmd_table);
 #endif
-pte_t invalid_pte_table[PTRS_PER_PTE] __page_aligned_bss;
+pte_t invalid_pte_table[PTRS_PER_PTE] __section(".bss..page_aligned") __aligned(MMUPAGE_SIZE);
 EXPORT_SYMBOL(invalid_pte_table);
 
 #if defined(CONFIG_EXECMEM) && defined(MODULES_VADDR)
