@@ -21,10 +21,18 @@
  * XXX No longer using virtual page tables, kill this upper limit...
  */
 #define VA_BITS		44
+/*
+ * VPTE_SIZE: Virtual Page Table Entries size.  One 8-byte entry per
+ * hardware MMU page, so the VPTE region size depends on the MMU page
+ * shift (MMUPAGE_SHIFT), not the kernel page shift (PAGE_SHIFT).
+ * With PGCL, PAGE_SHIFT > MMUPAGE_SHIFT, and using PAGE_SHIFT here
+ * makes VPTE_SIZE too small, pushing TASK_SIZE into the kernel VA
+ * range and causing userspace to be mapped at kernel addresses.
+ */
 #ifndef __ASSEMBLER__
-#define VPTE_SIZE	(1UL << (VA_BITS - PAGE_SHIFT + 3))
+#define VPTE_SIZE	(1UL << (VA_BITS - MMUPAGE_SHIFT + 3))
 #else
-#define VPTE_SIZE	(1 << (VA_BITS - PAGE_SHIFT + 3))
+#define VPTE_SIZE	(1 << (VA_BITS - MMUPAGE_SHIFT + 3))
 #endif
 
 #define TASK_SIZE_OF(tsk) \
