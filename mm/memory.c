@@ -5668,6 +5668,18 @@ void map_anon_folio_pte_nopf(struct folio *folio, pte_t *pte,
 {
 	const unsigned int nr_pages = folio_nr_pages(folio);
 	pte_t entry = folio_mk_pte(folio, vma->vm_page_prot);
+#if PAGE_MMUSHIFT
+	/*
+	 * For large folios (nr_pages > 1), every kernel page maps
+	 * PAGE_MMUCOUNT PTEs.  For single-page (nr_pages == 1), we
+	 * install exactly 1 PTE — clustering of the remaining sub-pages
+	 * is handled by the caller (do_anonymous_page inline block).
+	 */
+	const unsigned long nr_ptes = (nr_pages > 1)
+		? (unsigned long)nr_pages * PAGE_MMUCOUNT : 1;
+#else
+	const unsigned long nr_ptes = nr_pages;
+#endif
 
 	entry = pte_sw_mkyoung(entry);
 
@@ -5676,11 +5688,45 @@ void map_anon_folio_pte_nopf(struct folio *folio, pte_t *pte,
 	if (uffd_wp)
 		entry = pte_mkuffd_wp(entry);
 
+#if PAGE_MMUSHIFT
+	/*
+	 * PGCL sub-page adjustment.  folio_mk_pte() returns a PTE pointing
+	 * to sub-page 0 of the folio.  For single-page faults (nr_pages==1),
+	 * adjust the PTE to the correct MMUPAGE within the kernel page based
+	 * on the faulting virtual address.  For large folios (nr_pages>1),
+	 * addr is already aligned to the folio size and we start from sub-page 0.
+	 */
+	if (nr_pages == 1) {
+		unsigned int sub = (addr >> MMUPAGE_SHIFT) & (PAGE_MMUCOUNT - 1);
+		entry = pte_mksub(entry, (unsigned long)sub * MMUPAGE_SIZE);
+	}
+
+	folio_ref_add(folio, nr_ptes - 1);
+	folio_add_new_anon_rmap(folio, vma, addr, RMAP_EXCLUSIVE);
+	if (nr_pages > 1) {
+		/*
+		 * For large folios, folio_add_new_anon_rmap set per-page
+		 * _mapcount to 0 (= 1 mapping) and _large_mapcount to
+		 * nr_pages - 1.  We need PAGE_MMUCOUNT mappings per page
+		 * and nr_ptes total large mapcount.
+		 */
+		int i;
+
+		for (i = 0; i < nr_pages; i++)
+			atomic_add(PAGE_MMUCOUNT - 1,
+				   &folio_page(folio, i)->_mapcount);
+		folio_add_large_mapcount(folio, nr_ptes - nr_pages, vma);
+	}
+	folio_add_lru_vma(folio, vma);
+	set_ptes(vma->vm_mm, addr, pte, entry, nr_ptes);
+	update_mmu_cache_range(NULL, vma, addr, pte, nr_ptes);
+#else
 	folio_ref_add(folio, nr_pages - 1);
 	folio_add_new_anon_rmap(folio, vma, addr, RMAP_EXCLUSIVE);
 	folio_add_lru_vma(folio, vma);
 	set_ptes(vma->vm_mm, addr, pte, entry, nr_pages);
 	update_mmu_cache_range(NULL, vma, addr, pte, nr_pages);
+#endif
 }
 
 static void map_anon_folio_pte_pf(struct folio *folio, pte_t *pte,
@@ -5689,7 +5735,21 @@ static void map_anon_folio_pte_pf(struct folio *folio, pte_t *pte,
 	const unsigned int order = folio_order(folio);
 
 	map_anon_folio_pte_nopf(folio, pte, vma, addr, uffd_wp);
+#if PAGE_MMUSHIFT
+	/*
+	 * MM_ANONPAGES is MMUPAGE-granular.  For large folios (order > 0),
+	 * we installed nr_pages * PAGE_MMUCOUNT PTEs.  For single-page
+	 * (order == 0), we installed exactly 1 PTE (clustering adds
+	 * the rest separately in do_anonymous_page).
+	 */
+	if (order > 0)
+		add_mm_counter(vma->vm_mm, MM_ANONPAGES,
+			       (1L << order) * PAGE_MMUCOUNT);
+	else
+		add_mm_counter(vma->vm_mm, MM_ANONPAGES, 1);
+#else
 	add_mm_counter(vma->vm_mm, MM_ANONPAGES, 1L << order);
+#endif
 	count_mthp_stat(order, MTHP_STAT_ANON_FAULT_ALLOC);
 }
 
