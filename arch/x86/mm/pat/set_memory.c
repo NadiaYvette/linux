@@ -1146,7 +1146,7 @@ static int
 __split_large_page(struct cpa_data *cpa, pte_t *kpte, unsigned long address,
 		   struct ptdesc *ptdesc)
 {
-	unsigned long lpaddr, lpinc, ref_pfn, pfn, pfninc = 1;
+	unsigned long lpaddr, lpinc, ref_pfn;
 	struct page *base = ptdesc_page(ptdesc);
 	pte_t *pbase = (pte_t *)page_address(base);
 	unsigned int i, level;
