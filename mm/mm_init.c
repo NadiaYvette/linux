@@ -57,7 +57,20 @@ unsigned long zero_page_pfn __ro_after_init;
 EXPORT_SYMBOL(zero_page_pfn);
 
 #ifndef __HAVE_COLOR_ZERO_PAGE
+/*
+ * PGCL: with large PAGE_SIZE the __aligned(PAGE_SIZE) attribute can
+ * exceed the assembler's maximum .align directive on some architectures
+ * (alpha max 2^16, microblaze max 2^15).  Use MMUPAGE_SIZE alignment
+ * for the static buffer — it is only a fallback for PAGE_MMUSHIFT == 0.
+ * When PAGE_MMUSHIFT > 0, arch_setup_zero_pages() allocates a properly
+ * aligned zero page from memblock instead.
+ */
+#if PAGE_MMUSHIFT > 0
+uint8_t empty_zero_page[PAGE_SIZE]
+	__section(".bss..page_aligned") __aligned(MMUPAGE_SIZE);
+#else
 uint8_t empty_zero_page[PAGE_SIZE] __page_aligned_bss;
+#endif
 EXPORT_SYMBOL(empty_zero_page);
 
 struct page *__zero_page __ro_after_init;
@@ -2664,7 +2677,21 @@ static void __init mem_init_print_info(void)
  */
 void __init __weak arch_setup_zero_pages(void)
 {
+#if PAGE_MMUSHIFT > 0
+	/*
+	 * PGCL: allocate a dedicated PAGE_SIZE-aligned zero page from
+	 * memblock.  The static empty_zero_page may not be PAGE_SIZE
+	 * aligned (assembler limit on some arches), and even if it is,
+	 * sharing a BSS page risks non-zero writes from other variables.
+	 */
+	void *z = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
+
+	if (!z)
+		panic("Failed to allocate zero page");
+	__zero_page = virt_to_page(z);
+#else
 	__zero_page = virt_to_page(empty_zero_page);
+#endif
 }
 #endif
 
