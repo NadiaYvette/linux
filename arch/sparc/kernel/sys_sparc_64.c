@@ -149,7 +149,7 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr, unsi
 		info.align_offset = pgoff << MMUPAGE_SHIFT;
 	addr = vm_unmapped_area(&info);
 
-	if ((addr & ~PAGE_MASK) && task_size > VA_EXCLUDE_END) {
+	if ((addr & ~MMUPAGE_MASK) && task_size > VA_EXCLUDE_END) {
 		VM_BUG_ON(addr != -ENOMEM);
 		info.low_limit = VA_EXCLUDE_END;
 		info.high_limit = task_size;
@@ -223,7 +223,7 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 	 * can happen with large stack limits and large mmap()
 	 * allocations.
 	 */
-	if (addr & ~PAGE_MASK) {
+	if (addr & ~MMUPAGE_MASK) {
 		VM_BUG_ON(addr != -ENOMEM);
 		info.flags = 0;
 		info.low_limit = TASK_UNMAPPED_BASE;
