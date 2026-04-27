@@ -692,8 +692,8 @@ unsigned long mips_stack_top(void)
 	/* Space for the VDSO, data page & GIC user page */
 	if (current->thread.abi) {
 		top -= PAGE_ALIGN(current->thread.abi->vdso->size);
-		top -= VDSO_NR_PAGES * PAGE_SIZE;
-		top -= mips_gic_present() ? PAGE_SIZE : 0;
+		top -= VDSO_NR_PAGES * MMUPAGE_SIZE;
+		top -= mips_gic_present() ? MMUPAGE_SIZE : 0;
 
 		/* Space to randomize the VDSO base */
 		if (current->flags & PF_RANDOMIZE)
