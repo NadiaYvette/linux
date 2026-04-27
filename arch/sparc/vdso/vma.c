@@ -144,7 +144,7 @@ static_assert(VDSO_NR_PAGES == __VDSO_PAGES);
 static int map_vdso(const struct vdso_image *image,
 		struct vm_special_mapping *vdso_mapping)
 {
-	const size_t area_size = image->size + VDSO_NR_PAGES * PAGE_SIZE;
+	const size_t area_size = image->size + VDSO_NR_PAGES * MMUPAGE_SIZE;
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
 	unsigned long text_start, addr = 0;
@@ -170,7 +170,7 @@ static int map_vdso(const struct vdso_image *image,
 		goto up_fail;
 	}
 
-	text_start = addr + VDSO_NR_PAGES * PAGE_SIZE;
+	text_start = addr + VDSO_NR_PAGES * MMUPAGE_SIZE;
 	current->mm->context.vdso = (void __user *)text_start;
 
 	/*
