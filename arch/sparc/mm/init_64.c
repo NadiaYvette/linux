@@ -2504,10 +2504,26 @@ static void __init register_page_bootmem_info(void)
 
 void __init arch_setup_zero_pages(void)
 {
+#if PAGE_MMUSHIFT > 0
+	/*
+	 * PGCL: the static empty_zero_page buffer is only MMUPAGE_SIZE
+	 * aligned (assembler limit on some arches forced relaxation in
+	 * mm_init.c).  Using its symbol address would yield a struct
+	 * page covering a kernel page that also contains adjacent BSS
+	 * data, leaking it through the zero-page mapping.  Allocate a
+	 * fresh PAGE_SIZE-aligned zero page from memblock instead.
+	 */
+	void *z = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
+
+	if (!z)
+		panic("Failed to allocate zero page");
+	__zero_page = virt_to_page(z);
+#else
 	phys_addr_t zero_page_pa = kern_base +
 		((unsigned long)&empty_zero_page[0] - KERNBASE);
 
 	__zero_page = phys_to_page(zero_page_pa);
+#endif
 }
 
 void __init mem_init(void)
