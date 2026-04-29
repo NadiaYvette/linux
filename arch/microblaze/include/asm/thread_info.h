@@ -8,10 +8,29 @@
 
 #ifdef __KERNEL__
 
-/* we have 8k stack */
+#include <vdso/page.h>
+
+/*
+ * Thread stack is allocated as (1 << THREAD_SIZE_ORDER) PAGE_SIZE pages,
+ * but THREAD_SIZE is the mask used to find thread_info from any stack
+ * pointer.  These must agree, otherwise current_thread_info() returns
+ * a stale boundary that is not the start of the allocation.
+ *
+ * For PGCL kernels (PAGE_MMUSHIFT > 0) PAGE_SIZE is larger than the
+ * MMUPAGE, and a single PAGE already exceeds the 8K stack we want.
+ * Use PAGE_SIZE for both so the mask matches the allocation; the small
+ * waste is harmless on a 128MB target.  Without PGCL keep the
+ * traditional 8K stack out of two 4K pages.
+ */
+#if PAGE_MMUSHIFT > 0
+#define THREAD_SHIFT		PAGE_SHIFT
+#define THREAD_SIZE		PAGE_SIZE
+#define THREAD_SIZE_ORDER	0
+#else
 #define THREAD_SHIFT		13
 #define THREAD_SIZE		(1 << THREAD_SHIFT)
 #define THREAD_SIZE_ORDER	1
+#endif
 
 #ifndef __ASSEMBLER__
 # include <linux/types.h>
