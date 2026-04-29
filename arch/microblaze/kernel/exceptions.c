@@ -71,11 +71,9 @@ asmlinkage void full_exception(struct pt_regs *regs, unsigned int type,
 {
 	addr = regs->pc;
 
-#if 0
 	pr_warn("Exception %02x in %s mode, FSR=%08x PC=%08x ESR=%08x\n",
 			type, user_mode(regs) ? "user" : "kernel", fsr,
 			(unsigned int) regs->pc, (unsigned int) regs->esr);
-#endif
 
 	switch (type & 0x1F) {
 	case MICROBLAZE_ILL_OPCODE_EXCEPTION:
