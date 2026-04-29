@@ -331,37 +331,50 @@ static int mmap_mem_prepare(struct vm_area_desc *desc)
 {
 	struct file *file = desc->file;
 	const size_t size = vma_desc_size(desc);
-	const phys_addr_t offset = (phys_addr_t)desc->pgoff << PAGE_SHIFT;
+	/*
+	 * PGCL: desc->pgoff is MMUPAGE-granular, but the upstream APIs
+	 * here (valid_mmap_phys_addr_range, range_is_allowed,
+	 * phys_mem_access_prot, mmap_action_remap_full) expect PAGE-
+	 * granular PFNs (they shift by PAGE_SHIFT internally).  Require
+	 * the offset to be PAGE-aligned and convert.
+	 */
+	const unsigned long pfn = desc->pgoff >> PAGE_MMUSHIFT;
+	const phys_addr_t offset = (phys_addr_t)pfn << PAGE_SHIFT;
+
+#if PAGE_MMUSHIFT > 0
+	if (desc->pgoff & (PAGE_MMUCOUNT - 1))
+		return -EINVAL;
+#endif
 
 	/* Does it even fit in phys_addr_t? */
-	if (offset >> PAGE_SHIFT != desc->pgoff)
+	if (offset >> PAGE_SHIFT != pfn)
 		return -EINVAL;
 
 	/* It's illegal to wrap around the end of the physical address space. */
 	if (offset + (phys_addr_t)size - 1 < offset)
 		return -EINVAL;
 
-	if (!valid_mmap_phys_addr_range(desc->pgoff, size))
+	if (!valid_mmap_phys_addr_range(pfn, size))
 		return -EINVAL;
 
 	if (!private_mapping_ok(desc))
 		return -ENOSYS;
 
-	if (!range_is_allowed(desc->pgoff, size))
+	if (!range_is_allowed(pfn, size))
 		return -EPERM;
 
-	if (!phys_mem_access_prot_allowed(file, desc->pgoff, size,
+	if (!phys_mem_access_prot_allowed(file, pfn, size,
 					  &desc->page_prot))
 		return -EINVAL;
 
-	desc->page_prot = phys_mem_access_prot(file, desc->pgoff,
+	desc->page_prot = phys_mem_access_prot(file, pfn,
 					       size,
 					       desc->page_prot);
 
 	desc->vm_ops = &mmap_mem_ops;
 
 	/* Remap-pfn-range will mark the range with the I/O flag. */
-	mmap_action_remap_full(desc, desc->pgoff);
+	mmap_action_remap_full(desc, pfn);
 	/* We filter remap errors to -EAGAIN. */
 	desc->action.error_hook = mmap_filter_error;
 
