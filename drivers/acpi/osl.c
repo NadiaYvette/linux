@@ -282,8 +282,17 @@ acpi_map_lookup_virt(void __iomem *virt, acpi_size size)
 	return NULL;
 }
 
-#if defined(CONFIG_ARM64) || defined(CONFIG_RISCV)
-/* ioremap will take care of cache attributes */
+#if defined(CONFIG_ARM64) || defined(CONFIG_RISCV) || defined(CONFIG_LOONGARCH)
+/*
+ * ioremap will take care of cache attributes (LoongArch uses the DMW
+ * direct-mapped window, ioremap is essentially free there).
+ *
+ * The kmap path is also unsafe under PGCL (PAGE_MMUSHIFT > 0): each
+ * struct page covers PAGE_SIZE bytes which spans multiple MMUPAGEs, so
+ * pfn_to_page(pg_off >> MMUPAGE_SHIFT) and the per-MMUPAGE offset
+ * arithmetic in acpi_os_map_iomem() would read from a wrong physical
+ * region.  Routing LoongArch through ioremap dodges that.
+ */
 #define should_use_kmap(pfn)   0
 #else
 #define should_use_kmap(pfn)   page_is_ram(pfn)
