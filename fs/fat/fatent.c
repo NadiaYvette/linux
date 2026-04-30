@@ -474,10 +474,18 @@ int fat_alloc_clusters(struct inode *inode, int *cluster, int nr_cluster)
 	struct msdos_sb_info *sbi = MSDOS_SB(sb);
 	const struct fatent_operations *ops = sbi->fatent_ops;
 	struct fat_entry fatent, prev_ent;
-	struct buffer_head *bhs[MAX_BUF_PER_PAGE];
+	struct buffer_head **bhs;
 	int i, count, err, nr_bhs, idx_clus;
 
 	BUG_ON(nr_cluster > (MAX_BUF_PER_PAGE / 2));	/* fixed limit */
+
+	/*
+	 * MAX_BUF_PER_PAGE scales with PAGE_SIZE; heap-allocate to avoid
+	 * blowing the 2 KiB stack frame budget under PGCL.
+	 */
+	bhs = kmalloc_array(MAX_BUF_PER_PAGE, sizeof(*bhs), GFP_KERNEL);
+	if (!bhs)
+		return -ENOMEM;
 
 	lock_fat(sbi);
 	if (sbi->free_clusters != -1 && sbi->free_clus_valid &&
@@ -553,6 +561,7 @@ out:
 	if (err && idx_clus)
 		fat_free_clusters(inode, cluster[0]);
 
+	kfree(bhs);
 	return err;
 }
 
@@ -562,9 +571,17 @@ int fat_free_clusters(struct inode *inode, int cluster)
 	struct msdos_sb_info *sbi = MSDOS_SB(sb);
 	const struct fatent_operations *ops = sbi->fatent_ops;
 	struct fat_entry fatent;
-	struct buffer_head *bhs[MAX_BUF_PER_PAGE];
+	struct buffer_head **bhs;
 	int i, err, nr_bhs;
 	int first_cl = cluster, dirty_fsinfo = 0;
+
+	/*
+	 * MAX_BUF_PER_PAGE scales with PAGE_SIZE; heap-allocate to avoid
+	 * blowing the 2 KiB stack frame budget under PGCL.
+	 */
+	bhs = kmalloc_array(MAX_BUF_PER_PAGE, sizeof(*bhs), GFP_KERNEL);
+	if (!bhs)
+		return -ENOMEM;
 
 	nr_bhs = 0;
 	fatent_init(&fatent);
@@ -635,6 +652,7 @@ error:
 	if (dirty_fsinfo)
 		mark_fsinfo_dirty(sb);
 
+	kfree(bhs);
 	return err;
 }
 EXPORT_SYMBOL_GPL(fat_free_clusters);
