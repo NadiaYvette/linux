@@ -5674,11 +5674,12 @@ void map_anon_folio_pte_nopf(struct folio *folio, pte_t *pte,
 	 * PAGE_MMUCOUNT PTEs.  For single-page (nr_pages == 1), we
 	 * install exactly 1 PTE — clustering of the remaining sub-pages
 	 * is handled by the caller (do_anonymous_page inline block).
+	 *
+	 * PGCL=0 (PAGE_MMUSHIFT == 0) doesn't need this — the #else
+	 * branch below uses nr_pages directly.
 	 */
 	const unsigned long nr_ptes = (nr_pages > 1)
 		? (unsigned long)nr_pages * PAGE_MMUCOUNT : 1;
-#else
-	const unsigned long nr_ptes = nr_pages;
 #endif
 
 	entry = pte_sw_mkyoung(entry);
