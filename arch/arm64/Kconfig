@@ -1638,6 +1638,11 @@ config XEN
 # 64K |       29          |      16      |       13             |         13              |
 config ARCH_FORCE_MAX_ORDER
 	int
+	# PGCL widens PAGE_SIZE by 2^PAGE_MMUSHIFT; cap MAX_PAGE_ORDER so
+	# PAGE_SHIFT + MAX_PAGE_ORDER stays under SECTION_SIZE_BITS.
+	default "4" if PAGE_MMUSHIFT >= 6
+	default "6" if PAGE_MMUSHIFT >= 4
+	default "8" if PAGE_MMUSHIFT >= 2
 	default "13" if ARM64_64K_PAGES
 	default "11" if ARM64_16K_PAGES
 	default "10"
