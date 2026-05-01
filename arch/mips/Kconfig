@@ -2126,6 +2126,15 @@ config ZBOOT_LOAD_ADDRESS
 
 config ARCH_FORCE_MAX_ORDER
 	int "Maximum zone order"
+	# PGCL widens PAGE_SIZE by 2^PAGE_MMUSHIFT; cap MAX_PAGE_ORDER so
+	# PAGE_SHIFT + MAX_PAGE_ORDER stays under SECTION_SIZE_BITS (=28-29).
+	# `range` clauses force `make olddefconfig` to clamp a stale value.
+	range 1 4 if PAGE_MMUSHIFT >= 6
+	range 1 6 if PAGE_MMUSHIFT >= 4
+	range 1 8 if PAGE_MMUSHIFT >= 2
+	default "4" if PAGE_MMUSHIFT >= 6
+	default "6" if PAGE_MMUSHIFT >= 4
+	default "8" if PAGE_MMUSHIFT >= 2
 	default "13" if MIPS_HUGE_TLB_SUPPORT && PAGE_SIZE_64KB
 	default "12" if MIPS_HUGE_TLB_SUPPORT && PAGE_SIZE_32KB
 	default "11" if MIPS_HUGE_TLB_SUPPORT && PAGE_SIZE_16KB
