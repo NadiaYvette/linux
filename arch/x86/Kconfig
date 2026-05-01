@@ -1584,9 +1584,9 @@ config ARCH_SPARSEMEM_DEFAULT
 # section.
 config ARCH_FORCE_MAX_ORDER
 	int
-	default 4 if PAGE_MMUSHIFT >= 6
-	default 6 if PAGE_MMUSHIFT >= 4
-	default 8 if PAGE_MMUSHIFT >= 2
+	default 5 if PAGE_MMUSHIFT >= 6
+	default 8 if PAGE_MMUSHIFT >= 4
+	default 10 if PAGE_MMUSHIFT >= 2
 	default 10
 
 config ARCH_SELECT_MEMORY_MODEL
