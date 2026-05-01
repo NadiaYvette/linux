@@ -718,9 +718,9 @@ config ARCH_SPARSEMEM_DEFAULT
 # PAGE_SHIFT + MAX_PAGE_ORDER stays under SECTION_SIZE_BITS (=27).
 config ARCH_FORCE_MAX_ORDER
 	int
-	default "4" if PAGE_MMUSHIFT >= 6
-	default "6" if PAGE_MMUSHIFT >= 4
-	default "8" if PAGE_MMUSHIFT >= 2
+	default "5" if PAGE_MMUSHIFT >= 6
+	default "8" if PAGE_MMUSHIFT >= 4
+	default "10" if PAGE_MMUSHIFT >= 2
 	default "10"
 
 config ILLEGAL_POINTER_VALUE
