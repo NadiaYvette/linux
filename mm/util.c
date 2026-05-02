@@ -1548,7 +1548,7 @@ EXPORT_SYMBOL(mmap_action_complete);
 unsigned int folio_pte_batch(struct folio *folio, pte_t *ptep, pte_t pte,
 		unsigned int max_nr)
 {
-	return folio_pte_batch_flags(folio, NULL, ptep, &pte, max_nr, 0);
+	return folio_pte_batch_flags(folio, NULL, ptep, &pte, max_nr, 0).nr;
 }
 #endif /* CONFIG_MMU */
 
