@@ -1977,7 +1977,7 @@ static inline unsigned int folio_unmap_pte_batch(struct folio *folio,
 	 * appropriate FPB flags.
 	 */
 	return folio_pte_batch_flags(folio, vma, pvmw->pte, &pte, max_nr,
-				     FPB_RESPECT_WRITE | FPB_RESPECT_SOFT_DIRTY);
+				     FPB_RESPECT_WRITE | FPB_RESPECT_SOFT_DIRTY).nr;
 }
 
 /*
