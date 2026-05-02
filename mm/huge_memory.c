@@ -3718,6 +3718,28 @@ static void __split_folio_to_order(struct folio *folio, int old_order,
 		folio_set_order(folio, new_order);
 	else
 		ClearPageCompound(&folio->page);
+
+	/*
+	 * PGCL fix: Reset head's _mapcount to -1 (= 0 mappings) when
+	 * splitting to order 0.  folio_add_new_anon_rmap() bulk-initializes
+	 * all per-page _mapcount to 0 even when the fault path only creates
+	 * one PTE (partial mapping under THP=on).  unmap_folio() dec's
+	 * _mapcount only for the PTE-present sub-page; if the head sub-page
+	 * was never PTE-mapped, its _mapcount stays at 0 (phantom mapping).
+	 *
+	 * After split, that phantom causes folio_mapped(head) to return
+	 * true, and the caller's folio_put (e.g., in
+	 * madvise_cold_or_pageout_pte_range) frees the folio while
+	 * "still mapped" — leading to a stale PTE for the actually-mapped
+	 * post-split sub-folio and rss-counter imbalance at exit_mmap.
+	 *
+	 * Sub-folios at idx > 0 already have _mapcount == -1 (per the
+	 * VM_BUG_ON_PAGE check at the top of this function).  This fix
+	 * extends the same invariant to the head, which remap_page() will
+	 * inc back to 0 if and only if there's a migration entry for it.
+	 */
+	if (!new_order && IS_ENABLED(CONFIG_PAGE_MAPCOUNT))
+		atomic_set(&folio->page._mapcount, -1);
 }
 
 /**
