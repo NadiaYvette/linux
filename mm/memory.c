@@ -5907,20 +5907,22 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 			rss++;
 		}
 		/*
-		 * Adjust refcount and rmap for the extra PTEs.
-		 * folio_add_new_anon_rmap set mapcount to 0 (= 1 mapping)
-		 * and PageAnonExclusive.  Add rmap for the extras.
+		 * Adjust refcount for the extra PTEs created by fault-around.
+		 * folio_add_new_anon_rmap already set _mapcount = 0 (= 1
+		 * mapping = 1 kernel page) which is correct under PGCL: even
+		 * though we just installed PAGE_MMUCOUNT sub-page PTEs, they
+		 * collectively represent ONE mapping of this kernel page from
+		 * this VMA.  The walker (page_vma_mapped_walk) yields once
+		 * per kernel page, and try_to_unmap_one decrements _mapcount
+		 * once per yield; the previous +(rss-1) compensation that
+		 * matched a per-PTE walker is no longer needed.
+		 *
+		 * Refcount remains MMUPAGE-granular (one per PTE) since each
+		 * PTE-level operation in the unmap path takes one reference.
+		 * RSS counter is also MMUPAGE-granular.
 		 */
-		if (rss > 1) {
+		if (rss > 1)
 			folio_ref_add(folio, rss - 1);
-			/*
-			 * For a newly allocated exclusive folio, all sub-page
-			 * PTEs map the same folio.  Use atomic_add on _mapcount
-			 * directly since folio_add_new_anon_rmap already set
-			 * up the anon_vma and the folio is exclusively owned.
-			 */
-			atomic_add(rss - 1, &folio->_mapcount);
-		}
 		/* Fix RSS: we added 1 above (nr_pages), need rss total */
 		add_mm_counter(vma->vm_mm, MM_ANONPAGES, rss - 1);
 		update_mmu_cache_range(vmf, vma, addr, vmf->pte, 1);
