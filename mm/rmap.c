@@ -2457,6 +2457,7 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 	struct page *subpage;
 	struct mmu_notifier_range range;
 	enum ttu_flags flags = (enum ttu_flags)(long)arg;
+	unsigned long nr_pages = 1, end_addr;
 	unsigned long pfn;
 	unsigned long hsz = 0;
 
@@ -2608,23 +2609,35 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 				folio_mark_dirty(folio);
 			writable = pte_write(pteval);
 		} else if (likely(pte_present(pteval))) {
-			flush_cache_page(vma, address, pfn);
-			/* Nuke the page table entry. */
-			if (should_defer_flush(mm, flags)) {
-				/*
-				 * We clear the PTE but do not flush so potentially
-				 * a remote CPU could still be writing to the folio.
-				 * If the entry was previously clean then the
-				 * architecture must guarantee that a clear->dirty
-				 * transition on a cached TLB entry is written through
-				 * and traps if the PTE is unmapped.
-				 */
-				pteval = ptep_get_and_clear(mm, address, pvmw.pte);
+			/*
+			 * Under PGCL the walker yields one kernel page worth
+			 * of consecutive same-PFN PTEs at a time
+			 * (pvmw.nr_mmupages, typically PAGE_MMUCOUNT).  Use
+			 * that batch count for PTE-level operations (cache /
+			 * TLB flush, get_and_clear_ptes, set_pte restore on
+			 * abort, RSS accounting, refcount).  Issue a single
+			 * rmap event per yield (one struct page).  For
+			 * non-PGCL builds, nr_mmupages is always 1 so this
+			 * collapses to the per-PTE legacy behavior.
+			 */
+			nr_pages = pvmw.nr_mmupages;
+			end_addr = address + nr_pages * MMUPAGE_SIZE;
+			flush_cache_range(vma, address, end_addr);
 
-				set_tlb_ubc_flush_pending(mm, pteval, address, address + MMUPAGE_SIZE);
-			} else {
-				pteval = ptep_clear_flush(vma, address, pvmw.pte);
-			}
+			/* Nuke the page table entries. */
+			pteval = get_and_clear_ptes(mm, address, pvmw.pte, nr_pages);
+			/*
+			 * We clear the PTEs but do not flush so potentially
+			 * a remote CPU could still be writing to the folio.
+			 * If the entry was previously clean then the
+			 * architecture must guarantee that a clear->dirty
+			 * transition on a cached TLB entry is written through
+			 * and traps if the PTE is unmapped.
+			 */
+			if (should_defer_flush(mm, flags))
+				set_tlb_ubc_flush_pending(mm, pteval, address, end_addr);
+			else
+				flush_tlb_range(vma, address, end_addr);
 			if (pte_dirty(pteval))
 				folio_mark_dirty(folio);
 			writable = pte_write(pteval);
@@ -2651,8 +2664,21 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 				set_huge_pte_at(mm, address, pvmw.pte, pteval,
 						hsz);
 			} else {
-				dec_mm_counter(mm, mm_counter(folio));
-				set_pte_at(mm, address, pvmw.pte, pteval);
+				unsigned int i;
+
+				add_mm_counter(mm, mm_counter(folio), -nr_pages);
+				/*
+				 * Swap entries don't have a PFN-stride
+				 * semantic, so set_ptes can't be used to
+				 * batch.  Loop one set_pte_at per cleared
+				 * sub-page PTE — same hwpoison entry for
+				 * every PTE within the kernel page (all map
+				 * the same struct page under PGCL).
+				 */
+				for (i = 0; i < nr_pages; i++)
+					set_pte_at(mm,
+						address + (unsigned long)i * MMUPAGE_SIZE,
+						pvmw.pte + i, pteval);
 			}
 		} else if (likely(pte_present(pteval)) && pte_unused(pteval) &&
 			   !userfaultfd_armed(vma)) {
@@ -2666,10 +2692,11 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 			 * migration) will not expect userfaults on already
 			 * copied pages.
 			 */
-			dec_mm_counter(mm, mm_counter(folio));
+			add_mm_counter(mm, mm_counter(folio), -nr_pages);
 		} else {
 			swp_entry_t entry;
 			pte_t swp_pte;
+			unsigned int i;
 
 			/*
 			 * arch_unmap_one() is expected to be a NOP on
@@ -2681,7 +2708,7 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 					set_huge_pte_at(mm, address, pvmw.pte,
 							pteval, hsz);
 				else
-					set_pte_at(mm, address, pvmw.pte, pteval);
+					set_ptes(mm, address, pvmw.pte, pteval, nr_pages);
 				ret = false;
 				page_vma_mapped_walk_done(&pvmw);
 				break;
@@ -2699,7 +2726,7 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 				}
 			} else if (anon_exclusive &&
 				   folio_try_share_anon_rmap_pte(folio, subpage)) {
-				set_pte_at(mm, address, pvmw.pte, pteval);
+				set_ptes(mm, address, pvmw.pte, pteval, nr_pages);
 				ret = false;
 				page_vma_mapped_walk_done(&pvmw);
 				break;
@@ -2740,7 +2767,19 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 				set_huge_pte_at(mm, address, pvmw.pte, swp_pte,
 						hsz);
 			else
-				set_pte_at(mm, address, pvmw.pte, swp_pte);
+				/*
+				 * Migration entries are non-present swap
+				 * PTEs; no PFN-stride semantic so set_ptes
+				 * cannot batch.  Loop one set_pte_at per
+				 * sub-page PTE — same migration entry for
+				 * every PTE within the kernel page (all
+				 * encode the same destination subpage under
+				 * PGCL since pte_pfn drops sub-page bits).
+				 */
+				for (i = 0; i < nr_pages; i++)
+					set_pte_at(mm,
+						address + (unsigned long)i * MMUPAGE_SIZE,
+						pvmw.pte + i, swp_pte);
 			trace_set_migration_pte(address, pte_val(swp_pte),
 						folio_order(folio));
 			/*
@@ -2752,10 +2791,16 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 		if (unlikely(folio_test_hugetlb(folio)))
 			hugetlb_remove_rmap(folio);
 		else
+			/*
+			 * One walker yield = one kernel page = one struct
+			 * page = one rmap event.  Refcount uses MMUPAGE
+			 * units (folio_put_refs nr_pages), _mapcount is
+			 * decremented exactly once per yield.
+			 */
 			folio_remove_rmap_pte(folio, subpage, vma);
 		if (vma->vm_flags & VM_LOCKED)
 			mlock_drain_local();
-		folio_put(folio);
+		folio_put_refs(folio, nr_pages);
 	}
 
 	mmu_notifier_invalidate_range_end(&range);
