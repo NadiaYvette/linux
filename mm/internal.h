@@ -306,6 +306,37 @@ static inline pte_t __pte_batch_clear_ignored(pte_t pte, fpb_t flags)
 }
 
 /**
+ * enum folio_pte_batch_kind - classification of a detected PTE batch.
+ *
+ * @BATCH_KIND_SINGLE: nr == 1; no batching benefit available.  Callers
+ *	may take a per-PTE fast path.
+ * @BATCH_KIND_PGCL_CLUSTER: batch is a PGCL clustering: nr consecutive
+ *	hardware PTEs covering one kernel page (sub-PAGE_SIZE granularity).
+ *	Used by callers that need to choose PGCL-aware locking/contract
+ *	behavior.  (Phase 2 expansion: currently produced only by
+ *	pgcl_pte_batch(); folio_pte_batch_flags() does not yet emit this
+ *	kind.)
+ * @BATCH_KIND_MTHP: batch spans multiple kernel pages of one large
+ *	(sub-PMD superpage / mTHP) folio.  Callers should hold folio_lock
+ *	for atomicity if processing rmap or refcount.
+ */
+enum folio_pte_batch_kind {
+	BATCH_KIND_SINGLE,
+	BATCH_KIND_PGCL_CLUSTER,
+	BATCH_KIND_MTHP,
+};
+
+/**
+ * struct folio_pte_batch_result - return value of folio_pte_batch_flags().
+ * @nr: number of table entries in the batch (>= 1).
+ * @kind: classification of the batch.  @BATCH_KIND_SINGLE iff @nr == 1.
+ */
+struct folio_pte_batch_result {
+	unsigned int nr;
+	enum folio_pte_batch_kind kind;
+};
+
+/**
  * folio_pte_batch_flags - detect a PTE batch for a large folio
  * @folio: The large folio to detect a PTE batch for.
  * @vma: The VMA. Only relevant with FPB_MERGE_WRITE, otherwise can be NULL.
@@ -333,9 +364,11 @@ static inline pte_t __pte_batch_clear_ignored(pte_t pte, fpb_t flags)
  * This function will be inlined to optimize based on the input parameters;
  * consider using folio_pte_batch() instead if applicable.
  *
- * Return: the number of table entries in the batch.
+ * Return: a &struct folio_pte_batch_result with @nr (the number of table
+ *	   entries in the batch) and @kind (the batch classification, see
+ *	   &enum folio_pte_batch_kind).
  */
-static inline unsigned int folio_pte_batch_flags(struct folio *folio,
+static inline struct folio_pte_batch_result folio_pte_batch_flags(struct folio *folio,
 		struct vm_area_struct *vma, pte_t *ptep, pte_t *ptentp,
 		unsigned int max_nr, fpb_t flags)
 {
@@ -387,7 +420,11 @@ static inline unsigned int folio_pte_batch_flags(struct folio *folio,
 	if (any_dirty)
 		*ptentp = pte_mkdirty(*ptentp);
 
-	return min(nr, max_nr);
+	nr = min(nr, max_nr);
+	return (struct folio_pte_batch_result){
+		.nr = nr,
+		.kind = (nr == 1) ? BATCH_KIND_SINGLE : BATCH_KIND_MTHP,
+	};
 }
 
 unsigned int folio_pte_batch(struct folio *folio, pte_t *ptep, pte_t pte,
