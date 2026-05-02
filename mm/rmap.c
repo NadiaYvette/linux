@@ -1148,6 +1148,18 @@ static int page_vma_mkclean_one(struct page_vma_mapped_walk *pvmw)
 		if (pvmw->pte) {
 			pte_t *pte = pvmw->pte;
 			pte_t entry = ptep_get(pte);
+			/*
+			 * Under PGCL the walker yields one kernel page worth
+			 * of consecutive same-PFN PTEs at a time
+			 * (pvmw->nr_mmupages, typically PAGE_MMUCOUNT).  Batch
+			 * the cache+TLB flush, clear, and writeback over the
+			 * whole yielded range; one rmap event per yield.  For
+			 * non-PGCL builds nr_mmupages is always 1 and this
+			 * collapses to the per-PTE legacy form.
+			 */
+			unsigned int nr_pages = pvmw->nr_mmupages, i;
+			unsigned long end_addr;
+			bool any_dirty_or_write = false;
 
 			/*
 			 * PFN swap PTEs, such as device-exclusive ones, that
@@ -1157,14 +1169,39 @@ static int page_vma_mkclean_one(struct page_vma_mapped_walk *pvmw)
 			 */
 			if (!pte_present(entry))
 				continue;
-			if (!pte_dirty(entry) && !pte_write(entry))
+
+			/*
+			 * The early-skip (no work needed if no PTE in the
+			 * batch is dirty or writable) must scan ALL sub-PTEs:
+			 * sub-page mprotect can leave a kernel-page mapping
+			 * with mixed write bits, so checking only the first
+			 * PTE could falsely skip a writable sub-PTE and leave
+			 * it modifiable during writeback (data corruption).
+			 * Loop is O(nr_pages) but typically hits cache.
+			 */
+			for (i = 0; i < nr_pages; i++) {
+				pte_t pe = ptep_get(pte + i);
+
+				if (pte_dirty(pe) || pte_write(pe)) {
+					any_dirty_or_write = true;
+					break;
+				}
+			}
+			if (!any_dirty_or_write)
 				continue;
 
-			flush_cache_page(vma, address, pte_pfn(entry));
-			entry = ptep_clear_flush(vma, address, pte);
+			end_addr = address + nr_pages * MMUPAGE_SIZE;
+			flush_cache_range(vma, address, end_addr);
+			entry = get_and_clear_ptes(vma->vm_mm, address, pte, nr_pages);
+			flush_tlb_range(vma, address, end_addr);
 			entry = pte_wrprotect(entry);
 			entry = pte_mkclean(entry);
-			set_pte_at(vma->vm_mm, address, pte, entry);
+			/*
+			 * set_ptes restores N PTEs with PFN-stride: the OR'd
+			 * pteval keeps the FIRST PTE's PFN; consecutive sub-
+			 * page PFNs are reconstructed by pte_advance_pfn.
+			 */
+			set_ptes(vma->vm_mm, address, pte, entry, nr_pages);
 			ret = 1;
 		} else {
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
