@@ -1999,9 +1999,6 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 	unsigned long pfn;
 	unsigned long hsz = 0;
 	int ptes = 0;
-	int pgcl_unmap_count = 0;
-	unsigned long pgcl_addrs[4] = {};
-	unsigned long pgcl_ptevals[4] = {};
 
 	/*
 	 * When racing against e.g. zap_pte_range() on another cpu,
@@ -2358,11 +2355,6 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 			add_mm_counter(mm, mm_counter_file(folio), -nr_pages);
 		}
 discard:
-		if (pgcl_unmap_count < 4) {
-			pgcl_addrs[pgcl_unmap_count] = address;
-			pgcl_ptevals[pgcl_unmap_count] = (unsigned long)pte_val(pteval);
-		}
-		pgcl_unmap_count++;
 		if (unlikely(folio_test_hugetlb(folio))) {
 			hugetlb_remove_rmap(folio);
 		} else {
@@ -2378,41 +2370,34 @@ discard:
 		folio_put_refs(folio, nr_pages);
 
 		/*
-		 * If we are sure that we batched the entire folio and cleared
-		 * all PTEs, we can just optimize and stop right here.  Under
-		 * PGCL nr_pages is in MMUPAGE units while folio_nr_pages is
-		 * in kernel-page units; convert to compare apples-to-apples.
+		 * If we are sure that this single yield covered the entire
+		 * folio (and therefore cleared all of its PTEs in this VMA),
+		 * we can stop right here.  Both sides of the comparison are
+		 * MMUPAGE-granular: nr_pages is the count of PTEs cleared in
+		 * this yield (== pvmw.nr_mmupages, capped at PAGE_MMUCOUNT
+		 * by the walker), and folio_nr_pages * PAGE_MMUCOUNT is the
+		 * MMUPAGE PTE count of a fully-mapped folio.
+		 *
+		 * Do NOT collapse this to the kernel-page form
+		 * (max(1U, nr_pages >> PAGE_MMUSHIFT) == folio_nr_pages):
+		 * for a non-large folio (folio_nr_pages == 1) under PGCL,
+		 * any partial yield (1 <= nr_pages < PAGE_MMUCOUNT, e.g.
+		 * caused by a sub-page gap left by a partial munmap) would
+		 * round up to 1 and falsely trigger the early exit, leaving
+		 * later PTEs of the same folio unmapped — refcount and TLB
+		 * leak, folio appears unmapped to rmap.
+		 *
+		 * For non-PGCL builds (PAGE_MMUCOUNT == 1) this collapses to
+		 * `nr_pages == folio_nr_pages` — the legacy mainline check.
 		 */
-		{
-			unsigned int batch_kpages = max(1U, nr_pages >> PAGE_MMUSHIFT);
-			if (batch_kpages == folio_nr_pages(folio))
-				goto walk_done;
-		}
+		if (nr_pages == folio_nr_pages(folio) * PAGE_MMUCOUNT)
+			goto walk_done;
 		continue;
 walk_abort:
 		ret = false;
 walk_done:
 		page_vma_mapped_walk_done(&pvmw);
 		break;
-	}
-
-	if (PAGE_MMUSHIFT && pgcl_unmap_count > 1 &&
-	    !folio_test_large(folio)) {
-		static int pgcl_multi_unmap_warn;
-		if (pgcl_multi_unmap_warn < 10) {
-			pgcl_multi_unmap_warn++;
-			pr_err("PGCL try_to_unmap: folio=%px pfn=%lx anon=%d unmapped %d PTEs mc=%d rc=%d addrs=%lx/%lx/%lx/%lx ptes=%lx/%lx/%lx/%lx\n",
-			       folio, folio_pfn(folio),
-			       folio_test_anon(folio) ? 1 : 0,
-			       pgcl_unmap_count,
-			       folio_mapcount(folio), folio_ref_count(folio),
-			       pgcl_addrs[0], pgcl_addrs[1],
-			       pgcl_addrs[2], pgcl_addrs[3],
-			       pgcl_ptevals[0], pgcl_ptevals[1],
-			       pgcl_ptevals[2], pgcl_ptevals[3]);
-			if (pgcl_multi_unmap_warn <= 3)
-				dump_stack();
-		}
 	}
 
 	mmu_notifier_invalidate_range_end(&range);
