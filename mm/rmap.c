@@ -967,7 +967,15 @@ static bool folio_referenced_one(struct folio *folio,
 
 		if (pvmw.pte && folio_test_large(folio)) {
 			const unsigned long end_addr = pmd_addr_end(address, vma->vm_end);
-			const unsigned int max_nr = (end_addr - address) >> PAGE_SHIFT;
+			/*
+			 * max_nr is the count of PTEs to PMD/VMA end; PTEs are
+			 * MMUPAGE-granular, so shift by MMUPAGE_SHIFT (under
+			 * non-PGCL MMUPAGE_SHIFT == PAGE_SHIFT and this is the
+			 * legacy form).  folio_pte_batch returns nr in MMUPAGE
+			 * units as well, so the subsequent ptes/address arithmetic
+			 * is consistent.
+			 */
+			const unsigned int max_nr = (end_addr - address) >> MMUPAGE_SHIFT;
 			pte_t pteval = ptep_get(pvmw.pte);
 
 			nr = folio_pte_batch(folio, pvmw.pte, pteval, max_nr);
@@ -993,20 +1001,38 @@ static bool folio_referenced_one(struct folio *folio,
 			WARN_ON_ONCE(1);
 		}
 
+		/*
+		 * ptes accumulates MMUPAGE PTE counts (nr is MMUPAGE-granular
+		 * from folio_pte_batch / from the nr=1 default for the PMD
+		 * and non-large-folio paths).  pra->mapcount is in kernel-
+		 * page-mapping units (each kernel page mapped in a VMA is one
+		 * rmap event); convert nr by ceiling-dividing by PAGE_MMUCOUNT
+		 * so a partial-kernel-page batch (sub-page gap) still counts
+		 * as one observed mapping site.  For non-PGCL builds
+		 * PAGE_MMUCOUNT == 1 and this collapses to `pra->mapcount -= nr`.
+		 */
 		ptes += nr;
-		pra->mapcount -= nr;
+		pra->mapcount -= (nr + PAGE_MMUCOUNT - 1) >> PAGE_MMUSHIFT;
 		/*
 		 * If we are sure that we batched the entire folio,
-		 * we can just optimize and stop right here.
+		 * we can just optimize and stop right here.  Both sides in
+		 * MMUPAGE units: ptes is the cumulative MMUPAGE PTE count,
+		 * pvmw.nr_pages * PAGE_MMUCOUNT is the folio's total MMUPAGE
+		 * PTE footprint when fully mapped.
 		 */
-		if (ptes == pvmw.nr_pages) {
+		if (ptes == pvmw.nr_pages * PAGE_MMUCOUNT) {
 			page_vma_mapped_walk_done(&pvmw);
 			break;
 		}
 
-		/* Skip the batched PTEs */
+		/*
+		 * Skip the batched PTEs.  Both arithmetic in MMUPAGE units:
+		 * pvmw.pte advances by (nr-1) PTE slots, pvmw.address advances
+		 * by (nr-1) * MMUPAGE_SIZE.  The previous PAGE_SIZE stride
+		 * desynced address from pte by PAGE_MMUCOUNT under PGCL.
+		 */
 		pvmw.pte += nr - 1;
-		pvmw.address += (nr - 1) * PAGE_SIZE;
+		pvmw.address += (nr - 1) * MMUPAGE_SIZE;
 	}
 
 	if (referenced)
