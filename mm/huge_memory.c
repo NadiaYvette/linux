@@ -3642,6 +3642,16 @@ static void __split_folio_to_order(struct folio *folio, int old_order,
 		struct folio *new_folio = (struct folio *)new_head;
 
 		VM_BUG_ON_PAGE(atomic_read(&new_folio->_mapcount) != -1, new_head);
+		/*
+		 * PGCL fix: VM_BUG_ON_PAGE above is a no-op without
+		 * CONFIG_DEBUG_VM, allowing phantom _mapcount values from
+		 * folio_add_new_anon_rmap()'s bulk init to slip through.
+		 * Force-reset to -1 so the post-split sub-folio is genuinely
+		 * unmapped; remap_page() will inc it back to 0 if there's a
+		 * migration entry restored to point to this sub-folio.
+		 */
+		if (IS_ENABLED(CONFIG_PAGE_MAPCOUNT))
+			atomic_set(&new_folio->_mapcount, -1);
 
 		/*
 		 * Clone page flags before unfreezing refcount.
