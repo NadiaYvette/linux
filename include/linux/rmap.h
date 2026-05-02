@@ -871,6 +871,19 @@ struct page_vma_mapped_walk {
 	pte_t *pte;
 	spinlock_t *ptl;
 	unsigned int flags;
+	/*
+	 * Number of consecutive MMUPAGE PTEs at @pte that the current yield
+	 * covers.  For non-PGCL builds (PAGE_MMUSHIFT == 0) always 1.  For
+	 * PGCL the walker yields one kernel page at a time and populates
+	 * this with the count of MMUPAGE PTEs (typically PAGE_MMUCOUNT, less
+	 * at VMA edges or for partial sub-page mappings via remap_file_pages).
+	 *
+	 * PTE-level operations (set_ptes, get_and_clear_ptes, TLB flush, RSS
+	 * accounting, refcount) should consume @nr_mmupages.  Struct-page
+	 * operations (rmap, _mapcount) should treat each yield as a single
+	 * kernel page.
+	 */
+	unsigned int nr_mmupages;
 };
 
 #define DEFINE_FOLIO_VMA_WALK(name, _folio, _vma, _address, _flags)	\
@@ -881,6 +894,7 @@ struct page_vma_mapped_walk {
 		.vma = _vma,						\
 		.address = _address,					\
 		.flags = _flags,					\
+		.nr_mmupages = 1,					\
 	}
 
 static inline void page_vma_mapped_walk_done(struct page_vma_mapped_walk *pvmw)
