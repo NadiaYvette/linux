@@ -118,7 +118,7 @@ static int mprotect_folio_pte_batch(struct folio *folio, pte_t *ptep,
 #endif
 	}
 
-	return folio_pte_batch_flags(folio, NULL, ptep, &pte, max_nr_ptes, flags);
+	return folio_pte_batch_flags(folio, NULL, ptep, &pte, max_nr_ptes, flags).nr;
 }
 
 /* Set nr_ptes number of ptes, starting from idx */

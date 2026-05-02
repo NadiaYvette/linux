@@ -1182,7 +1182,7 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 		if (vma_soft_dirty_enabled(src_vma))
 			flags |= FPB_RESPECT_SOFT_DIRTY;
 
-		nr = folio_pte_batch_flags(folio, src_vma, src_pte, &pte, max_nr, flags);
+		nr = folio_pte_batch_flags(folio, src_vma, src_pte, &pte, max_nr, flags).nr;
 		folio_ref_add(folio, nr);
 		if (folio_test_anon(folio)) {
 			if (unlikely(folio_try_dup_anon_rmap_ptes(folio, page,
