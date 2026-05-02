@@ -291,8 +291,42 @@ restart:
 			goto next_pte;
 		}
 this_pte:
-		if (check_pte(pvmw, 1))
+		if (check_pte(pvmw, 1)) {
+			/*
+			 * Under PGCL, scan forward up to PAGE_MMUCOUNT-1 more
+			 * PTEs that map sub-pages of the same kernel page
+			 * (same kernel-PFN).  Caller consumes nr_mmupages PTEs
+			 * as a single rmap event (one struct page, one
+			 * _mapcount).  For non-PGCL or migration/device-
+			 * private entries (handled below in @check_pte) the
+			 * batch always has size 1.
+			 */
+			pvmw->nr_mmupages = 1;
+			if (PAGE_MMUSHIFT > 0) {
+				pte_t first = ptep_get(pvmw->pte);
+				if (pte_present(first)) {
+					unsigned long sub_off =
+						(pvmw->address & (PAGE_SIZE - 1))
+						>> MMUPAGE_SHIFT;
+					unsigned int n = 1;
+					unsigned int max = PAGE_MMUCOUNT - sub_off;
+					unsigned long pfn = pte_pfn(first);
+
+					if (pvmw->address + max * MMUPAGE_SIZE > end)
+						max = (end - pvmw->address)
+						      >> MMUPAGE_SHIFT;
+					while (n < max) {
+						pte_t pe = ptep_get(pvmw->pte + n);
+						if (!pte_present(pe) ||
+						    pte_pfn(pe) != pfn)
+							break;
+						n++;
+					}
+					pvmw->nr_mmupages = n;
+				}
+			}
 			return true;
+		}
 next_pte:
 		do {
 			pvmw->address += MMUPAGE_SIZE;
@@ -347,6 +381,7 @@ unsigned long page_mapped_in_vma(const struct page *page,
 		.nr_pages = 1,
 		.vma = vma,
 		.flags = PVMW_SYNC,
+		.nr_mmupages = 1,
 	};
 
 	pvmw.address = vma_address(vma, page_pgoff(folio, page), 1);

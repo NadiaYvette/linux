@@ -199,6 +199,7 @@ static int migrate_vma_collect_huge_pmd(pmd_t *pmdp, unsigned long start,
 			.address = start,
 			.pmd = pmdp,
 			.vma = walk->vma,
+			.nr_mmupages = 1,
 		};
 
 		unsigned long pfn = page_to_pfn(folio_page(folio, 0));
