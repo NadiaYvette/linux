@@ -927,8 +927,16 @@ static bool folio_referenced_one(struct folio *folio,
 		nr = 1;
 
 		if (vma->vm_flags & VM_LOCKED) {
+			/*
+			 * ptes counts PVMW yields (= kernel-page mapping
+			 * sites visited).  pvmw.nr_pages is folio_nr_pages
+			 * (kernel pages), so this checks "have we seen all
+			 * kernel-page sites of the folio".  pra->mapcount
+			 * under PGCL Option A is in PTE units, so decrement
+			 * by pvmw.nr_mmupages per yield.
+			 */
 			ptes++;
-			pra->mapcount--;
+			pra->mapcount -= pvmw.pte ? pvmw.nr_mmupages : 1;
 
 			/* Only mlock fully mapped pages */
 			if (pvmw.pte && ptes != pvmw.nr_pages)
@@ -1002,17 +1010,14 @@ static bool folio_referenced_one(struct folio *folio,
 		}
 
 		/*
-		 * ptes accumulates MMUPAGE PTE counts (nr is MMUPAGE-granular
-		 * from folio_pte_batch / from the nr=1 default for the PMD
-		 * and non-large-folio paths).  pra->mapcount is in kernel-
-		 * page-mapping units (each kernel page mapped in a VMA is one
-		 * rmap event); convert nr by ceiling-dividing by PAGE_MMUCOUNT
-		 * so a partial-kernel-page batch (sub-page gap) still counts
-		 * as one observed mapping site.  For non-PGCL builds
-		 * PAGE_MMUCOUNT == 1 and this collapses to `pra->mapcount -= nr`.
+		 * PGCL Option A: pra->mapcount is in PTE units (one rmap event
+		 * per PTE).  ptes is the cumulative MMUPAGE PTE count from
+		 * folio_pte_batch (large folio) or 1 (non-large/PMD path).
+		 * Decrement pra->mapcount by the same nr.  For non-PGCL
+		 * (PAGE_MMUCOUNT == 1) this is the legacy form.
 		 */
 		ptes += nr;
-		pra->mapcount -= (nr + PAGE_MMUCOUNT - 1) >> PAGE_MMUSHIFT;
+		pra->mapcount -= nr;
 		/*
 		 * If we are sure that we batched the entire folio,
 		 * we can just optimize and stop right here.  Both sides in
@@ -2283,7 +2288,8 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 				set_huge_pte_at(mm, address, pvmw.pte, pteval,
 						hsz);
 			} else {
-				dec_mm_counter(mm, mm_counter(folio));
+				/* PGCL Option A: per-PTE rss accounting */
+				add_mm_counter(mm, mm_counter(folio), -nr_pages);
 				set_pte_at(mm, address, pvmw.pte, pteval);
 			}
 		} else if (likely(pte_present(pteval)) && pte_unused(pteval) &&
@@ -2298,7 +2304,8 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 			 * migration) will not expect userfaults on already
 			 * copied pages.
 			 */
-			dec_mm_counter(mm, mm_counter(folio));
+			/* PGCL Option A: per-PTE rss accounting */
+			add_mm_counter(mm, mm_counter(folio), -nr_pages);
 		} else if (folio_test_anon(folio)) {
 			swp_entry_t entry = page_swap_entry(subpage);
 			pte_t swp_pte;
@@ -2386,7 +2393,17 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 					list_add(&mm->mmlist, &init_mm.mmlist);
 				spin_unlock(&mmlist_lock);
 			}
-			dec_mm_counter(mm, MM_ANONPAGES);
+			/*
+			 * PGCL Option A: nr_pages sub-PTEs were cleared by
+			 * get_and_clear_ptes above, but the swap path below
+			 * only writes ONE swap entry (set_pte_at).  Pending
+			 * proper PGCL swap-entry batching, account that
+			 * asymmetry directly: nr_pages anon pages "removed",
+			 * 1 swap entry installed.  The remaining nr_pages-1
+			 * sub-PTEs will fault as zero pages on next access
+			 * (pre-existing PGCL swap quirk).
+			 */
+			add_mm_counter(mm, MM_ANONPAGES, -nr_pages);
 			inc_mm_counter(mm, MM_SWAPENTS);
 			swp_pte = swp_entry_to_pte(entry);
 			if (anon_exclusive)
@@ -2422,11 +2439,16 @@ discard:
 			hugetlb_remove_rmap(folio);
 		} else {
 			/*
-			 * One walker yield = one kernel page = one struct
-			 * page = one rmap event.  rmap APIs take kernel-page
-			 * count.  Refcount and RSS use MMUPAGE units (above).
+			 * PGCL Option A: one rmap event per PTE.  This yield
+			 * cleared nr_pages MMUPAGE PTEs, so drop nr_pages
+			 * mapcounts.  __folio_remove_rmap on a non-large folio
+			 * always decrements by 1 regardless of nr_pages, so
+			 * loop.  For non-PGCL (nr_pages always 1) this is the
+			 * legacy single call.
 			 */
-			folio_remove_rmap_pte(folio, subpage, vma);
+			unsigned int i;
+			for (i = 0; i < nr_pages; i++)
+				folio_remove_rmap_pte(folio, subpage, vma);
 		}
 		if (vma->vm_flags & VM_LOCKED)
 			mlock_drain_local();
@@ -2440,18 +2462,6 @@ discard:
 		 * this yield (== pvmw.nr_mmupages, capped at PAGE_MMUCOUNT
 		 * by the walker), and folio_nr_pages * PAGE_MMUCOUNT is the
 		 * MMUPAGE PTE count of a fully-mapped folio.
-		 *
-		 * Do NOT collapse this to the kernel-page form
-		 * (max(1U, nr_pages >> PAGE_MMUSHIFT) == folio_nr_pages):
-		 * for a non-large folio (folio_nr_pages == 1) under PGCL,
-		 * any partial yield (1 <= nr_pages < PAGE_MMUCOUNT, e.g.
-		 * caused by a sub-page gap left by a partial munmap) would
-		 * round up to 1 and falsely trigger the early exit, leaving
-		 * later PTEs of the same folio unmapped — refcount and TLB
-		 * leak, folio appears unmapped to rmap.
-		 *
-		 * For non-PGCL builds (PAGE_MMUCOUNT == 1) this collapses to
-		 * `nr_pages == folio_nr_pages` — the legacy mainline check.
 		 */
 		if (nr_pages == folio_nr_pages(folio) * PAGE_MMUCOUNT)
 			goto walk_done;
@@ -2851,16 +2861,18 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 			 */
 		}
 
-		if (unlikely(folio_test_hugetlb(folio)))
+		if (unlikely(folio_test_hugetlb(folio))) {
 			hugetlb_remove_rmap(folio);
-		else
+		} else {
 			/*
-			 * One walker yield = one kernel page = one struct
-			 * page = one rmap event.  Refcount uses MMUPAGE
-			 * units (folio_put_refs nr_pages), _mapcount is
-			 * decremented exactly once per yield.
+			 * PGCL Option A: one rmap event per PTE.  This yield
+			 * cleared nr_pages MMUPAGE PTEs; loop the rmap drop
+			 * (non-large folios decrement only by 1 per call).
 			 */
-			folio_remove_rmap_pte(folio, subpage, vma);
+			unsigned int i;
+			for (i = 0; i < nr_pages; i++)
+				folio_remove_rmap_pte(folio, subpage, vma);
+		}
 		if (vma->vm_flags & VM_LOCKED)
 			mlock_drain_local();
 		folio_put_refs(folio, nr_pages);
