@@ -5907,22 +5907,20 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 			rss++;
 		}
 		/*
-		 * Adjust refcount for the extra PTEs created by fault-around.
-		 * folio_add_new_anon_rmap already set _mapcount = 0 (= 1
-		 * mapping = 1 kernel page) which is correct under PGCL: even
-		 * though we just installed PAGE_MMUCOUNT sub-page PTEs, they
-		 * collectively represent ONE mapping of this kernel page from
-		 * this VMA.  The walker (page_vma_mapped_walk) yields once
-		 * per kernel page, and try_to_unmap_one decrements _mapcount
-		 * once per yield; the previous +(rss-1) compensation that
-		 * matched a per-PTE walker is no longer needed.
-		 *
-		 * Refcount remains MMUPAGE-granular (one per PTE) since each
-		 * PTE-level operation in the unmap path takes one reference.
-		 * RSS counter is also MMUPAGE-granular.
+		 * PGCL convention (Option A): one rmap event per PTE.
+		 * folio_add_new_anon_rmap above set _mapcount = 0 (= 1 mapping)
+		 * for the first sub-PTE.  Add (rss - 1) more so mapcount equals
+		 * the number of sub-PTEs actually installed.  Per-PTE unmap paths
+		 * (zap_present_ptes anon-batch loop, do_wp_page COW clustering,
+		 * PVMW callbacks consuming nr_mmupages) decrement once per PTE,
+		 * so this keeps mapcount accounting balanced across fault → fork
+		 * → unmap.  Refcount and MM_ANONPAGES are also MMUPAGE-granular.
 		 */
-		if (rss > 1)
+		if (rss > 1) {
 			folio_ref_add(folio, rss - 1);
+			atomic_add(rss - 1, &folio->_mapcount);
+			lruvec_stat_mod_folio(folio, NR_ANON_MAPPED, rss - 1);
+		}
 		/* Fix RSS: we added 1 above (nr_pages), need rss total */
 		add_mm_counter(vma->vm_mm, MM_ANONPAGES, rss - 1);
 		update_mmu_cache_range(vmf, vma, addr, vmf->pte, 1);

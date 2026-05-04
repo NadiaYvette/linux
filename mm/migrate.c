@@ -450,11 +450,21 @@ static bool remove_migration_pte(struct folio *folio,
 		} else
 #endif
 		{
-			if (folio_test_anon(folio))
-				folio_add_anon_rmap_pte(folio, new, vma,
-							pvmw.address, rmap_flags);
-			else
-				folio_add_file_rmap_pte(folio, new, vma);
+			/*
+			 * PGCL Option A: one rmap event per PTE.  Loop the
+			 * add nr_pages times to match the nr_pages PTEs about
+			 * to be installed (set_ptes / set_pte_at loop below).
+			 * For non-PGCL nr_pages == 1.
+			 */
+			if (folio_test_anon(folio)) {
+				for (i = 0; i < nr_pages; i++)
+					folio_add_anon_rmap_pte(folio, new, vma,
+								pvmw.address + (unsigned long)i * MMUPAGE_SIZE,
+								rmap_flags);
+			} else {
+				for (i = 0; i < nr_pages; i++)
+					folio_add_file_rmap_pte(folio, new, vma);
+			}
 			if (unlikely(is_device_private_page(new))) {
 				/*
 				 * Device-private entries are non-present swap
