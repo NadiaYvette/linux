@@ -435,7 +435,15 @@ static int modify_pagetable(unsigned long start, unsigned long end, bool add,
 	pgd_t *pgd;
 	p4d_t *p4d;
 
-	if (WARN_ON_ONCE(!PAGE_ALIGNED(start | end)))
+	/*
+	 * vmemmap chunk size = PAGES_PER_SECTION * sizeof(struct page).
+	 * Under page-clustering with high MMUSHIFT (PAGE_SIZE up to 1MB at
+	 * PGCL=6) PAGES_PER_SECTION shrinks faster than struct page grows,
+	 * making the chunk smaller than PAGE_SIZE and not PAGE_ALIGNED at
+	 * its end.  modify_pagetable iterates at MMUPAGE granularity, so
+	 * MMUPAGE alignment is sufficient.
+	 */
+	if (WARN_ON_ONCE(!IS_ALIGNED(start | end, MMUPAGE_SIZE)))
 		return -EINVAL;
 	/* Don't mess with any tables not fully in 1:1 mapping, vmemmap & kasan area */
 #ifdef CONFIG_KASAN
