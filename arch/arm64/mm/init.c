@@ -411,8 +411,12 @@ void free_initmem(void)
 	void *lm_init_begin = lm_alias(__init_begin);
 	void *lm_init_end = lm_alias(__init_end);
 
-	WARN_ON(!IS_ALIGNED((unsigned long)lm_init_begin, PAGE_SIZE));
-	WARN_ON(!IS_ALIGNED((unsigned long)lm_init_end, PAGE_SIZE));
+	/* Kernel sections are SEGMENT_ALIGN-aligned (64K) per linker script;
+	 * vmap/page-tables walk at MMUPAGE granularity.  PAGE_SIZE alignment
+	 * is over-strict under page-clustering (PAGE_SIZE up to 1MB).
+	 */
+	WARN_ON(!IS_ALIGNED((unsigned long)lm_init_begin, MMUPAGE_SIZE));
+	WARN_ON(!IS_ALIGNED((unsigned long)lm_init_end, MMUPAGE_SIZE));
 
 	free_reserved_area(lm_init_begin, lm_init_end,
 			   POISON_FREE_INITMEM, "unused kernel");
