@@ -414,9 +414,15 @@ static unsigned long __init get_mpc_size(unsigned long physptr)
 	struct mpc_table *mpc;
 	unsigned long size;
 
-	mpc = early_memremap(physptr, PAGE_SIZE);
+	/*
+	 * Map only one MMUPAGE: we read mpc->length (offset 4) which fits
+	 * in a single hardware page.  Using PAGE_SIZE under page-clustering
+	 * (PAGE_SIZE up to 1MB on PGCL=6) overflows NR_FIX_BTMAPS in the
+	 * early_ioremap fixmap pool.
+	 */
+	mpc = early_memremap(physptr, MMUPAGE_SIZE);
 	size = mpc->length;
-	early_memunmap(mpc, PAGE_SIZE);
+	early_memunmap(mpc, MMUPAGE_SIZE);
 	apic_pr_verbose("  mpc: %lx-%lx\n", physptr, physptr + size);
 
 	return size;

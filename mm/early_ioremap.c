@@ -251,7 +251,14 @@ early_memremap_prot(resource_size_t phys_addr, unsigned long size,
 }
 #endif
 
-#define MAX_MAP_CHUNK	(NR_FIX_BTMAPS << PAGE_SHIFT)
+/*
+ * The fixmap pool maps MMUPAGE-sized hardware pages; each NR_FIX_BTMAPS slot
+ * is one MMUPAGE.  Under page-clustering, MMUPAGE_SHIFT < PAGE_SHIFT, so
+ * computing the chunk size with PAGE_SHIFT (and aligning with PAGE_MASK)
+ * overstates capacity by PAGE_MMUCOUNT and overflows __early_ioremap's
+ * NR_FIX_BTMAPS check, returning NULL and panicing initramfs copy.
+ */
+#define MAX_MAP_CHUNK	(NR_FIX_BTMAPS << MMUPAGE_SHIFT)
 
 /*
  * If no empty slot, handle that and return -ENOMEM.
@@ -262,11 +269,11 @@ int __init copy_from_early_mem(void *dest, phys_addr_t src, unsigned long size)
 	char *p;
 
 	while (size) {
-		slop = offset_in_page(src);
+		slop = src & ~MMUPAGE_MASK;
 		clen = size;
 		if (clen > MAX_MAP_CHUNK - slop)
 			clen = MAX_MAP_CHUNK - slop;
-		p = early_memremap(src & PAGE_MASK, clen + slop);
+		p = early_memremap(src & MMUPAGE_MASK, clen + slop);
 		if (!p)
 			return -ENOMEM;
 		memcpy(dest, p + slop, clen);
