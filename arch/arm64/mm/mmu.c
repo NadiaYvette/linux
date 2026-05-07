@@ -1225,11 +1225,18 @@ static void __init declare_vma(struct vm_struct *vma,
 	phys_addr_t pa_start = __pa_symbol(va_start);
 	unsigned long size = va_end - va_start;
 
-	BUG_ON(!PAGE_ALIGNED(pa_start));
-	BUG_ON(!PAGE_ALIGNED(size));
+	/*
+	 * Kernel segments are SEGMENT_ALIGN-aligned (64K), which equals
+	 * PAGE_SIZE when MMUPAGE_SHIFT == PAGE_SHIFT but is smaller under
+	 * page-clustering (PAGE_SIZE up to 1MB on PGCL=6 with 16K MMU).
+	 * vmap area is MMUPAGE-granular regardless, so MMUPAGE alignment
+	 * is sufficient here.
+	 */
+	BUG_ON(!IS_ALIGNED(pa_start, MMUPAGE_SIZE));
+	BUG_ON(!IS_ALIGNED(size, MMUPAGE_SIZE));
 
 	if (!(vm_flags & VM_NO_GUARD))
-		size += PAGE_SIZE;
+		size += MMUPAGE_SIZE;
 
 	vma->addr	= va_start;
 	vma->phys_addr	= pa_start;
