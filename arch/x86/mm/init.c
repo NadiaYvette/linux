@@ -135,22 +135,29 @@ __ref void *alloc_low_pages(unsigned int num)
 		return (void *)__get_free_pages(GFP_ATOMIC | __GFP_ZERO, order);
 	}
 
+	/*
+	 * num is the number of hardware (MMUPAGE-sized) page-table pages to
+	 * allocate.  Under page-clustering, kernel-page granularity (PAGE_SIZE)
+	 * is PAGE_MMUCOUNT× larger and would waste pool space; use MMUPAGE_SIZE
+	 * consistently with the brk pool sized by INIT_PGD_PAGE_COUNT *
+	 * MMUPAGE_SIZE.  pgt_buf_end/top are in MMUPAGE PFN units.
+	 */
 	if ((pgt_buf_end + num) > pgt_buf_top || !can_use_brk_pgt) {
 		unsigned long ret = 0;
 
 		if (min_pfn_mapped < max_pfn_mapped) {
 			ret = memblock_phys_alloc_range(
-					PAGE_SIZE * num, PAGE_SIZE,
+					MMUPAGE_SIZE * num, MMUPAGE_SIZE,
 					min_pfn_mapped << PAGE_SHIFT,
 					max_pfn_mapped << PAGE_SHIFT);
 		}
 		if (!ret && can_use_brk_pgt)
-			ret = __pa(extend_brk(PAGE_SIZE * num, PAGE_SIZE));
+			ret = __pa(extend_brk(MMUPAGE_SIZE * num, MMUPAGE_SIZE));
 
 		if (!ret)
 			panic("alloc_low_pages: can not alloc memory");
 
-		pfn = ret >> PAGE_SHIFT;
+		pfn = ret >> MMUPAGE_SHIFT;
 	} else {
 		pfn = pgt_buf_end;
 		pgt_buf_end += num;
@@ -159,11 +166,11 @@ __ref void *alloc_low_pages(unsigned int num)
 	for (i = 0; i < num; i++) {
 		void *adr;
 
-		adr = __va((pfn + i) << PAGE_SHIFT);
-		clear_page(adr);
+		adr = __va((unsigned long)(pfn + i) << MMUPAGE_SHIFT);
+		memset(adr, 0, MMUPAGE_SIZE);
 	}
 
-	return __va(pfn << PAGE_SHIFT);
+	return __va((unsigned long)pfn << MMUPAGE_SHIFT);
 }
 
 /*
@@ -182,18 +189,26 @@ __ref void *alloc_low_pages(unsigned int num)
 #define INIT_PGD_PAGE_COUNT      (4 * INIT_PGD_PAGE_TABLES)
 #endif
 
-#define INIT_PGT_BUF_SIZE	(INIT_PGD_PAGE_COUNT * PAGE_SIZE)
+/*
+ * Page tables are MMUPAGE-sized (hardware page size); under page-clustering
+ * PAGE_SIZE may exceed MMUPAGE_SIZE by PAGE_MMUCOUNT.  Sizing the early
+ * page-table pool by PAGE_SIZE wastes brk space (each 4KB page table would
+ * consume a 256KB kernel page at PGCL=6) and overflows the linker-reserved
+ * .bss..brk allocation once dmi_alloc has pre-claimed its 64KB.  Use
+ * MMUPAGE_SIZE consistently — alloc_low_pages also speaks MMUPAGE PFNs.
+ */
+#define INIT_PGT_BUF_SIZE	(INIT_PGD_PAGE_COUNT * MMUPAGE_SIZE)
 RESERVE_BRK(early_pgt_alloc, INIT_PGT_BUF_SIZE);
 void  __init early_alloc_pgt_buf(void)
 {
 	unsigned long tables = INIT_PGT_BUF_SIZE;
 	phys_addr_t base;
 
-	base = __pa(extend_brk(tables, PAGE_SIZE));
+	base = __pa(extend_brk(tables, MMUPAGE_SIZE));
 
-	pgt_buf_start = base >> PAGE_SHIFT;
+	pgt_buf_start = base >> MMUPAGE_SHIFT;
 	pgt_buf_end = pgt_buf_start;
-	pgt_buf_top = pgt_buf_start + (tables >> PAGE_SHIFT);
+	pgt_buf_top = pgt_buf_start + (tables >> MMUPAGE_SHIFT);
 }
 
 int after_bootmem;
