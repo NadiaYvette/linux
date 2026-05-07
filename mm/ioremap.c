@@ -28,10 +28,17 @@ void __iomem *generic_ioremap_prot(phys_addr_t phys_addr, size_t size,
 	if (!size || last_addr < phys_addr)
 		return NULL;
 
-	/* Page-align mappings */
-	offset = phys_addr & (~PAGE_MASK);
+	/*
+	 * MMUPAGE-align mappings.  Page tables walk at MMUPAGE granularity
+	 * regardless of page-clustering; aligning by PAGE_SIZE inflates the
+	 * vmap area by PAGE_MMUCOUNT× (e.g. 256KB at PGCL=6) for tiny MMIO
+	 * regions like a 0x200-byte virtio-mmio device, and rounds the
+	 * mapping out into adjacent unrelated physical addresses that a
+	 * later access can stray into.
+	 */
+	offset = phys_addr & (~MMUPAGE_MASK);
 	phys_addr -= offset;
-	size = PAGE_ALIGN(size + offset);
+	size = ALIGN(size + offset, MMUPAGE_SIZE);
 
 	area = __get_vm_area_caller(size, VM_IOREMAP, IOREMAP_START,
 				    IOREMAP_END, __builtin_return_address(0));
@@ -59,7 +66,7 @@ EXPORT_SYMBOL(ioremap_prot);
 
 void generic_iounmap(volatile void __iomem *addr)
 {
-	void *vaddr = (void *)((unsigned long)addr & PAGE_MASK);
+	void *vaddr = (void *)((unsigned long)addr & MMUPAGE_MASK);
 
 	if (is_ioremap_addr(vaddr))
 		vunmap(vaddr);
