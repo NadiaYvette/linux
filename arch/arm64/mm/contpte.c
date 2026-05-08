@@ -77,11 +77,15 @@ static void contpte_convert(struct mm_struct *mm, unsigned long addr,
 	start_ptep = ptep = contpte_align_down(ptep);
 	start_addr = addr = ALIGN_DOWN(addr, CONT_PTE_SIZE);
 	/*
-	 * With PGCL, pte_pfn() already returns PAGE-granular PFNs (sub-page
-	 * bits dropped), and one kernel page = one contpte block. So pfn_pte
-	 * with the raw pte_pfn gives sub-page 0 of the kernel page.
+	 * Reset the PTE to point at the FIRST sub-page of this CONT range
+	 * (which may not be sub-page 0 of the enclosing kernel page).  With
+	 * PGCL, a kernel page contains PAGE_MMUCOUNT sub-pages and several
+	 * CONT_PTE-sized cont ranges; using pfn_pte(pte_pfn(pte), ...) would
+	 * always reset to sub-page 0 of the kernel page, miscoloring the
+	 * second/third/fourth cont range to point back at sub-page 0.
 	 */
-	pte = pfn_pte(pte_pfn(pte), pte_pgprot(pte));
+	pte = __pte(__phys_to_pte_val(ALIGN_DOWN(__pte_to_phys(pte),
+				CONT_PTE_SIZE)) | pgprot_val(pte_pgprot(pte)));
 
 	for (i = 0; i < CONT_PTES; i++, ptep++, addr += MMUPAGE_SIZE) {
 		pte_t ptent = __ptep_get_and_clear(mm, addr, ptep);
