@@ -560,6 +560,16 @@
 
 
 /*
+ * Place .text.hot at a TLB-page boundary for the locality benefit.  The
+ * alignment is what's needed by the MMU, not what the kernel uses for its
+ * page allocator, so MMUPAGE_SIZE is the right granularity: under page
+ * clustering (PAGE_MMUSHIFT > 0) PAGE_SIZE can be many MMU-pages, and
+ * aligning on it wastes up to PAGE_SIZE - 1 bytes here -- enough on
+ * parisc/PGCL=6 to push the trap-vector branch to intr_extint past the
+ * 19-bit displacement field.
+ */
+
+/*
  * Non-instrumentable text section
  */
 #define NOINSTR_TEXT							\
@@ -603,7 +613,7 @@
 		*(.text.unknown .text.unknown.*)			\
 		TEXT_SPLIT						\
 		TEXT_UNLIKELY						\
-		. = ALIGN(PAGE_SIZE);					\
+		. = ALIGN(MMUPAGE_SIZE);				\
 		TEXT_HOT						\
 		*(TEXT_MAIN .text.fixup)				\
 		NOINSTR_TEXT						\
