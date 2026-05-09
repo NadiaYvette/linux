@@ -10,6 +10,7 @@
  * padding and misaligns PE/COFF sections relative to PECOFF_SEGMENT_ALIGN.
  */
 #define PAGE_SIZE _MMUPAGE_SIZE
+#define MMUPAGE_SIZE _MMUPAGE_SIZE
 #define RO_EXCEPTION_TABLE_ALIGN	4
 
 #ifdef CONFIG_32BIT
