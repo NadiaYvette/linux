@@ -264,9 +264,12 @@ static int ioc_count;
 *   match the I/O TLB replacement policy.
 *
 ***************************************************************/
-#define IOVP_SIZE PAGE_SIZE
-#define IOVP_SHIFT PAGE_SHIFT
-#define IOVP_MASK PAGE_MASK
+/* IOMMU hardware page granularity: matches the MMU page (4K on parisc).
+ * Under PGCL the kernel PAGE_SIZE may exceed what the IOMMU TLB can program,
+ * so use MMUPAGE_SIZE explicitly. */
+#define IOVP_SIZE MMUPAGE_SIZE
+#define IOVP_SHIFT MMUPAGE_SHIFT
+#define IOVP_MASK MMUPAGE_MASK
 
 /* Convert from IOVP to IOVA and vice versa. */
 #define CCIO_IOVA(iovp,offset) ((iovp) | (offset))
