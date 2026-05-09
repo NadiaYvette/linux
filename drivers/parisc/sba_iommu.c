@@ -1342,15 +1342,15 @@ sba_ioc_init_pluto(struct parisc_device *sba, struct ioc *ioc, int ioc_num)
 	ioc->imask |= 0xFFFFFFFF00000000UL;
 #endif
 
-	/* Set I/O PDIR Page size to system page size */
-	switch (PAGE_SHIFT) {
+	/* Set I/O PDIR Page size to MMU page size — IOMMU TLB programs HW page granularity, not the (possibly larger) kernel PAGE_SIZE under PGCL. */
+	switch (MMUPAGE_SHIFT) {
 		case 12: tcnfg = 0; break;	/*  4K */
 		case 13: tcnfg = 1; break;	/*  8K */
 		case 14: tcnfg = 2; break;	/* 16K */
 		case 16: tcnfg = 3; break;	/* 64K */
 		default:
 			panic(__FILE__ "Unsupported system page size %d",
-				1 << PAGE_SHIFT);
+				1 << MMUPAGE_SHIFT);
 			break;
 	}
 	WRITE_REG(tcnfg, ioc->ioc_hpa + IOC_TCNFG);
@@ -1484,15 +1484,15 @@ sba_ioc_init(struct parisc_device *sba, struct ioc *ioc, int ioc_num)
 	WRITE_REG(ioc->ibase | 1, ioc->ioc_hpa+IOC_IBASE);
 	WRITE_REG(ioc->imask, ioc->ioc_hpa+IOC_IMASK);
 
-	/* Set I/O PDIR Page size to system page size */
-	switch (PAGE_SHIFT) {
+	/* Set I/O PDIR Page size to MMU page size — IOMMU TLB programs HW page granularity, not the (possibly larger) kernel PAGE_SIZE under PGCL. */
+	switch (MMUPAGE_SHIFT) {
 		case 12: tcnfg = 0; break;	/*  4K */
 		case 13: tcnfg = 1; break;	/*  8K */
 		case 14: tcnfg = 2; break;	/* 16K */
 		case 16: tcnfg = 3; break;	/* 64K */
 		default:
 			panic(__FILE__ "Unsupported system page size %d",
-				1 << PAGE_SHIFT);
+				1 << MMUPAGE_SHIFT);
 			break;
 	}
 	/* Set I/O PDIR Page size to PAGE_SIZE (4k/16k/...) */
