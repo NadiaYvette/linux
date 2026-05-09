@@ -187,10 +187,15 @@ static inline int IS_PLUTO(struct parisc_device *d) {
 ** and updated for each page.
 **
 ** PAGE_SIZE could be greater than IOVP_SIZE. But not the inverse.
+**
+** IOVP is the I/O virtual page granularity programmed into the SBA IOMMU
+** hardware.  The hardware supports 4K/8K/16K/64K only; with PGCL the kernel
+** PAGE_SIZE may be larger than any of those, so we use MMUPAGE_SIZE which
+** matches the underlying MMU page (and is what the IOMMU TLB programs).
 */
-#define IOVP_SIZE	PAGE_SIZE
-#define IOVP_SHIFT	PAGE_SHIFT
-#define IOVP_MASK	PAGE_MASK
+#define IOVP_SIZE	MMUPAGE_SIZE
+#define IOVP_SHIFT	MMUPAGE_SHIFT
+#define IOVP_MASK	MMUPAGE_MASK
 
 #define SBA_PERF_CFG	0x708	/* Performance Counter stuff */
 #define SBA_PERF_MASK1	0x718
