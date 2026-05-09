@@ -728,8 +728,12 @@ ENTRY(fault_vector_11)
 END(fault_vector_11)
 
 #endif
-	/* Fault vector is separately protected and *must* be on its own page */
-	.align		PAGE_SIZE
+	/* Fault vector is separately protected and *must* be on its own page.
+	 * Protection isolation works at the hardware MMU page (MMUPAGE_SIZE);
+	 * with PGCL, PAGE_SIZE may be many MMU-pages large and aligning here
+	 * pushes the rest of .text.hot beyond the trap branch immediate range.
+	 */
+	.align		MMUPAGE_SIZE
 
 	.import		handle_interruption,code
 	.import		do_cpu_irq_mask,code
@@ -803,7 +807,9 @@ ENDPROC_CFI(_switch_to)
 	 *
 	 */
 
-	.align	PAGE_SIZE
+	/* MMU-page alignment is sufficient for protection isolation; using
+	 * PAGE_SIZE wastes up to PAGE_SIZE-1 bytes under PGCL. */
+	.align	MMUPAGE_SIZE
 
 ENTRY_CFI(syscall_exit_rfi)
 	mfctl	%cr30,%r16		/* task_struct */
