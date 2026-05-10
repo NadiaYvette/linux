@@ -532,6 +532,17 @@ entSys:
 	stq	$17, SP_OFF+32($sp)
 	s8addq	$0, $5, $5
 	stq	$18, SP_OFF+40($sp)
+	/* Save the syscall number into regs->r1 (mutable) and regs->r2
+	 * (preserved for restart).  Without this the strace path sets
+	 * regs->r1 itself but the non-strace fast path leaves both slots
+	 * holding whatever PAL entry put in $1/$2 -- garbage from the
+	 * caller's perspective.  $syscall_error then loads $18 from
+	 * regs->r2 to drive ERESTART restart, and the garbage value
+	 * (often zero) suppresses do_signal()'s `if (r0)` ERESTART
+	 * conversion, leaking ERESTARTSYS=512 into userspace errno.
+	 */
+	stq	$0, 8($sp)		/* regs->r1 = current syscall nr */
+	stq	$0, 16($sp)		/* regs->r2 = original syscall nr */
 	.cfi_rel_offset	$16, SP_OFF+24
 	.cfi_rel_offset	$17, SP_OFF+32
 	.cfi_rel_offset	$18, SP_OFF+40
