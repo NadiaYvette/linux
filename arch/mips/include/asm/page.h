@@ -116,7 +116,15 @@ typedef struct { unsigned long pte; } pte_t;
 #define pte_val(x)	((x).pte)
 #define __pte(x)	((pte_t) { (x) } )
 #endif
-typedef struct page *pgtable_t;
+/*
+ * pgtable_t is the type passed to pmd_populate() / pte_free() and stored in
+ * the deposited-pgtable list for THP.  Use pte_t * directly (the address of
+ * the actual hardware PTE table) rather than struct page * so that PGCL can
+ * pack multiple MMUPAGE-sized PTE tables into one kernel PAGE_SIZE chunk:
+ * each sub-table has its own pte_t * but maps to the same struct page.
+ * Modeled after sparc64 / m68k-coldfire.
+ */
+typedef pte_t *pgtable_t;
 
 /*
  * Right now we don't support 4-level pagetables, so all pud-related
