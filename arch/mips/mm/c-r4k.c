@@ -1724,11 +1724,11 @@ void r4k_cache_init(void)
 	 * unnecessarily inefficient on physically indexed processors.
 	 */
 	if (c->dcache.linesz && cpu_has_dc_aliases)
-		shm_align_mask = max_t( unsigned long,
-					c->dcache.sets * c->dcache.linesz - 1,
-					PAGE_SIZE - 1);
+		shm_align_mask = max_t(unsigned long,
+				       c->dcache.sets * c->dcache.linesz - 1,
+				       MMUPAGE_SIZE - 1);
 	else
-		shm_align_mask = PAGE_SIZE-1;
+		shm_align_mask = MMUPAGE_SIZE - 1;
 
 	__flush_cache_vmap	= r4k__flush_cache_vmap;
 	__flush_cache_vunmap	= r4k__flush_cache_vunmap;
