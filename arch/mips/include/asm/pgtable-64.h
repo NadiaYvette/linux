@@ -196,7 +196,8 @@ static inline int p4d_none(p4d_t p4d)
 
 static inline int p4d_bad(p4d_t p4d)
 {
-	if (unlikely(p4d_val(p4d) & ~PAGE_MASK))
+	/* See pmd_bad() comment: page tables are MMUPAGE-aligned. */
+	if (unlikely(p4d_val(p4d) & ~MMUPAGE_MASK))
 		return 1;
 
 	return 0;
@@ -258,7 +259,13 @@ static inline int pmd_bad(pmd_t pmd)
 		return 0;
 #endif
 
-	if (unlikely(pmd_val(pmd) & ~PAGE_MASK))
+	/*
+	 * Page tables are MMUPAGE-sized.  Under PGCL the kernel page can
+	 * host multiple MMUPAGE-aligned PTE sub-tables (see arch/mips/mm/
+	 * pgtable_pte.c), so checking against ~PAGE_MASK would falsely
+	 * reject every sub-table at non-zero sub-page offset.
+	 */
+	if (unlikely(pmd_val(pmd) & ~MMUPAGE_MASK))
 		return 1;
 
 	return 0;
@@ -290,7 +297,8 @@ static inline int pud_none(pud_t pud)
 
 static inline int pud_bad(pud_t pud)
 {
-	return pud_val(pud) & ~PAGE_MASK;
+	/* See pmd_bad() comment: page tables are MMUPAGE-aligned. */
+	return pud_val(pud) & ~MMUPAGE_MASK;
 }
 
 static inline int pud_present(pud_t pud)
