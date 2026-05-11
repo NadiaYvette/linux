@@ -36,6 +36,7 @@
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
+#include <asm/cacheflush.h>
 
 #define PTE_TABLE_SIZE	MMUPAGE_SIZE
 /*
@@ -58,15 +59,21 @@
  *     called on regular PMDs in any hot path -- ruled out.
  *
  * Suspects to test next session:
- *   1. dcache aliasing when sub-tables are accessed via xkphys but
- *      were written via the original kernel-page virtual mapping (mips
- *      sets shm_align_mask precisely because of this).  Try a flush_
- *      cache_range across the sub-table address before returning it.
+ *   1. [RULED OUT] dcache aliasing -- adding flush_kernel_vmap_range()
+ *      across the sub-table on alloc did not unblock init.  mips xkphys
+ *      access of the sub-table would alias with the kernel-page-base
+ *      virtual mapping, but the cache flush has no effect on the hang.
  *   2. Per-sub-table side-allocated ptl_locks instead of one shared
- *      ptl per kernel page.  Some generic mm path may assume the
- *      ptl-vs-table relationship is 1:1.
- *   3. set_ptes / pte_clear-batched paths assuming PTE table starts at
- *      page boundary -- audit arch/mips/mm/pgtable*.c.
+ *      ptl per kernel page.  Generic pte_offset_map_lock resolves to
+ *      the SHARED ptdesc->ptl via virt_to_ptdesc(pte), which is
+ *      currently a single spinlock for up to 64 sub-tables; mm/
+ *      generic code may rely on per-table locking.
+ *   3. set_ptes / pte_clear-batched paths writing past the 16 KB
+ *      sub-table boundary into the next sub-table.  In particular
+ *      copy_pmd_range / mremap can issue large nr; audit and clamp.
+ *   4. Generic pmd_install() path with a packed pte: *pte is set to
+ *      NULL by mm/memory.c on successful install, but the caller saw
+ *      it as a pgtable_t (pte_t *) -- check no caller derefs after.
  */
 #define PTE_PER_PAGE	1
 #define PTE_MARK_FREE	(PTE_PER_PAGE == BITS_PER_LONG ? ~0UL :		\
@@ -112,6 +119,13 @@ static pte_t *pte_alloc_packed(struct mm_struct *mm,
 		addr = (unsigned long)ptdesc_address(ptdesc) +
 		       slot * PTE_TABLE_SIZE;
 		memset((void *)addr, 0, PTE_TABLE_SIZE);
+		/*
+		 * Phase-2 dcache aliasing test: flush before returning.  mips
+		 * dcache is virtually-indexed; sub-tables accessed via the
+		 * sub-table virtual address vs. the kernel page base virtual
+		 * address may sit in different cache lines.
+		 */
+		flush_kernel_vmap_range((void *)addr, PTE_TABLE_SIZE);
 		return (pte_t *)addr;
 	}
 	spin_unlock(&pte_pack_lock);
