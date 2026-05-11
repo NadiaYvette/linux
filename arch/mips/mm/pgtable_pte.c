@@ -40,12 +40,33 @@
 #define PTE_TABLE_SIZE	MMUPAGE_SIZE
 /*
  * Packing is disabled (PTE_PER_PAGE=1) until the reuse-path bug that
- * silently hangs init under PAGE_MMUSHIFT=6 is diagnosed.  With this
- * disabled, every pte_alloc_one() takes a fresh kernel page and returns
- * sub-table 0 (i.e. behaves like the generic allocator on top of the
- * pgtable_t = pte_t * typedef change).  Switching back to PAGE_MMUCOUNT
- * (or any value > 1) re-enables the memory savings but currently breaks
- * boot — see TODO in commit log.
+ * silently hangs init under PAGE_MMUSHIFT=6 is diagnosed.
+ *
+ * Phase 2 TODO -- what is known so far:
+ *   - Typedef change (pgtable_t = pte_t *) is sound: with PTE_PER_PAGE
+ *     set to PAGE_MMUCOUNT but the free-list reuse path skipped (every
+ *     allocation takes a fresh kernel page, returns slot 0), boot
+ *     completes and LTP runs (51p/20f/30s on PAGE_MMUSHIFT=6 malta -m2G).
+ *   - As soon as ANY sub-table at offset != 0 is returned (verified
+ *     with PTE_PER_PAGE=2: only slot 1 reusable per page), init
+ *     silently hangs at "/bin/busybox started with executable stack".
+ *     No oops, no panic, no further kernel output.  Removed the
+ *     mid-gather tlb_flush_mmu_tlbonly from __pte_free_tlb -- no help.
+ *   - pte_lockptr / ptep_lockptr correctly resolve sub-tables to the
+ *     shared ptdesc via virt_to_ptdesc -- ruled out as the cause.
+ *   - pmd_pfn would mis-compute on regular (non-huge) PMDs but isn't
+ *     called on regular PMDs in any hot path -- ruled out.
+ *
+ * Suspects to test next session:
+ *   1. dcache aliasing when sub-tables are accessed via xkphys but
+ *      were written via the original kernel-page virtual mapping (mips
+ *      sets shm_align_mask precisely because of this).  Try a flush_
+ *      cache_range across the sub-table address before returning it.
+ *   2. Per-sub-table side-allocated ptl_locks instead of one shared
+ *      ptl per kernel page.  Some generic mm path may assume the
+ *      ptl-vs-table relationship is 1:1.
+ *   3. set_ptes / pte_clear-batched paths assuming PTE table starts at
+ *      page boundary -- audit arch/mips/mm/pgtable*.c.
  */
 #define PTE_PER_PAGE	1
 #define PTE_MARK_FREE	(PTE_PER_PAGE == BITS_PER_LONG ? ~0UL :		\
