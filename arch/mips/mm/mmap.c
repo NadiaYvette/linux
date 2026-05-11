@@ -17,12 +17,18 @@
 #include <linux/sched/signal.h>
 #include <linux/sched/mm.h>
 
-unsigned long shm_align_mask = PAGE_SIZE - 1;	/* Sane caches */
+/*
+ * Cache-aliasing constraint mask.  Reflects hardware dcache way size, not
+ * the kernel PAGE_SIZE (which under PGCL may be many times larger than the
+ * MMU page).  Initialised to MMUPAGE_SIZE-1 ("sane caches"); c-r4k.c and
+ * c-octeon.c bump it to max(dcache.waybit, MMUPAGE_SIZE-1) on init.
+ */
+unsigned long shm_align_mask = MMUPAGE_SIZE - 1;	/* Sane caches */
 EXPORT_SYMBOL(shm_align_mask);
 
 #define COLOUR_ALIGN(addr, pgoff)				\
 	((((addr) + shm_align_mask) & ~shm_align_mask) +	\
-	 (((pgoff) << PAGE_SHIFT) & shm_align_mask))
+	 (((pgoff) << MMUPAGE_SHIFT) & shm_align_mask))
 
 enum mmap_allocation_direction {UP, DOWN};
 
@@ -49,7 +55,7 @@ static unsigned long arch_get_unmapped_area_common(struct file *filp,
 		 * cache aliasing constraints.
 		 */
 		if ((flags & MAP_SHARED) &&
-		    ((addr - (pgoff << PAGE_SHIFT)) & shm_align_mask))
+		    ((addr - (pgoff << MMUPAGE_SHIFT)) & shm_align_mask))
 			return -EINVAL;
 		return addr;
 	}
@@ -72,16 +78,16 @@ static unsigned long arch_get_unmapped_area_common(struct file *filp,
 	}
 
 	info.length = len;
-	info.align_mask = do_color_align ? (PAGE_MASK & shm_align_mask) : 0;
-	info.align_offset = pgoff << PAGE_SHIFT;
+	info.align_mask = do_color_align ? (MMUPAGE_MASK & shm_align_mask) : 0;
+	info.align_offset = pgoff << MMUPAGE_SHIFT;
 
 	if (dir == DOWN) {
 		info.flags = VM_UNMAPPED_AREA_TOPDOWN;
-		info.low_limit = PAGE_SIZE;
+		info.low_limit = MMUPAGE_SIZE;
 		info.high_limit = mm->mmap_base;
 		addr = vm_unmapped_area(&info);
 
-		if (!(addr & ~PAGE_MASK))
+		if (!(addr & ~MMUPAGE_MASK))
 			return addr;
 
 		/*
