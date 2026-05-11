@@ -11,14 +11,18 @@
 pgd_t *pgd_alloc(struct mm_struct *mm)
 {
 	pgd_t *init, *ret;
+	struct ptdesc *ptdesc;
 
-	ret = __pgd_alloc(mm, PGD_TABLE_ORDER);
-	if (ret) {
-		init = pgd_offset(&init_mm, 0UL);
-		pgd_init(ret);
-		memcpy(ret + USER_PTRS_PER_PGD, init + USER_PTRS_PER_PGD,
-		       (PTRS_PER_PGD - USER_PTRS_PER_PGD) * sizeof(pgd_t));
-	}
+	ptdesc = pagetable_alloc(GFP_PGTABLE_USER, PGD_TABLE_ORDER);
+	if (!ptdesc)
+		return NULL;
+	pagetable_pgd_ctor(ptdesc);
+
+	ret = ptdesc_address(ptdesc);
+	init = pgd_offset(&init_mm, 0UL);
+	pgd_init(ret);
+	memcpy(ret + USER_PTRS_PER_PGD, init + USER_PTRS_PER_PGD,
+	       (PTRS_PER_PGD - USER_PTRS_PER_PGD) * sizeof(pgd_t));
 
 	return ret;
 }
