@@ -138,7 +138,8 @@ static inline int pmd_bad(pmd_t pmd)
 		return 0;
 #endif
 
-	if (unlikely(pmd_val(pmd) & ~PAGE_MASK))
+	/* See pgtable-64.h pmd_bad() comment: PTE sub-tables are MMUPAGE-aligned. */
+	if (unlikely(pmd_val(pmd) & ~MMUPAGE_MASK))
 		return 1;
 
 	return 0;
