@@ -82,11 +82,21 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	unsigned long gic_size, size, base, data_addr, vdso_addr, gic_pfn, gic_base;
 	struct vm_area_struct *vma;
 	int ret;
+#define PGCL_DBG_SP() do { \
+	if (current->pid == 1) { \
+		unsigned char buf[16]; \
+		long rc = copy_from_user(buf, (void __user *)bprm->p, 16); \
+		pr_emerg("PGCL-DBG vdso@%d cfu=%ld bytes=%02x%02x%02x%02x%02x%02x%02x%02x str=%.16s\n", \
+			__LINE__, rc, \
+			buf[0],buf[1],buf[2],buf[3],buf[4],buf[5],buf[6],buf[7], buf); \
+	} \
+} while (0)
 
 	if (mmap_write_lock_killable(mm))
 		return -EINTR;
 
-	if (IS_ENABLED(CONFIG_MIPS_FP_SUPPORT)) {
+	PGCL_DBG_SP();
+	if (0 && IS_ENABLED(CONFIG_MIPS_FP_SUPPORT)) {
 		unsigned long unused;
 
 		/* Map delay slot emulation page */
@@ -98,6 +108,7 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 			goto out;
 		}
 	}
+	PGCL_DBG_SP();
 
 	/*
 	 * Determine total area size. This includes the VDSO data itself, the
@@ -137,11 +148,13 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	data_addr = base + gic_size;
 	vdso_addr = data_addr + VDSO_NR_PAGES * MMUPAGE_SIZE;
 
+	PGCL_DBG_SP();
 	vma = vdso_install_vvar_mapping(mm, data_addr);
 	if (IS_ERR(vma)) {
 		ret = PTR_ERR(vma);
 		goto out;
 	}
+	PGCL_DBG_SP();
 
 	/* Map GIC user page. */
 	if (gic_size) {
@@ -165,6 +178,7 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 			goto out;
 	}
 
+	PGCL_DBG_SP();
 	/* Map VDSO image. */
 	vma = _install_special_mapping(mm, vdso_addr, image->size,
 				       VM_READ | VM_EXEC |
@@ -174,6 +188,7 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 		ret = PTR_ERR(vma);
 		goto out;
 	}
+	PGCL_DBG_SP();
 
 	mm->context.vdso = (void *)vdso_addr;
 	ret = 0;

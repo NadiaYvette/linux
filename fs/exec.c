@@ -679,6 +679,8 @@ int setup_arg_pages(struct linux_binprm *bprm,
 		pr_warn_once("process '%pD4' started with executable stack\n",
 			     bprm->file);
 	}
+	if (current->pid == 1)
+		pr_emerg("PGCL-DBG setup_arg_pages: pid=1 stack_shift=0x%lx\n", stack_shift);
 
 	/* Move stack pages down in memory. */
 	if (stack_shift) {
@@ -687,9 +689,29 @@ int setup_arg_pages(struct linux_binprm *bprm,
 		 * the binfmt code determines where the new stack should reside, we shift it to
 		 * its final location.
 		 */
+		/* bprm->p has already been adjusted to the FINAL location by
+		 * the setup_arg_pages prologue, but the source strings are
+		 * still at the OLD position (vma->vm_end-stacksize area).
+		 * Read from there instead so we capture the pre-relocation
+		 * argv[0]. */
+		if (current->pid == 1) {
+			unsigned char buf[16];
+			unsigned long src_p = bprm->p + stack_shift;
+			long rc = copy_from_user(buf, (void __user *)src_p, 16);
+			pr_emerg("PGCL-DBG before reloc: src_p=0x%lx (bprm->p+shift) shift=0x%lx cfu=%ld bytes=%02x%02x%02x%02x%02x%02x%02x%02x str=%.16s\n",
+				 src_p, stack_shift, rc,
+				 buf[0],buf[1],buf[2],buf[3],buf[4],buf[5],buf[6],buf[7], buf);
+		}
 		ret = relocate_vma_down(vma, stack_shift);
 		if (ret)
 			goto out_unlock;
+		if (current->pid == 1) {
+			unsigned char buf[16];
+			long rc = copy_from_user(buf, (void __user *)bprm->p, 16);
+			pr_emerg("PGCL-DBG after  reloc: dst_p=0x%lx cfu=%ld bytes=%02x%02x%02x%02x%02x%02x%02x%02x str=%.16s\n",
+				 bprm->p, rc,
+				 buf[0],buf[1],buf[2],buf[3],buf[4],buf[5],buf[6],buf[7], buf);
+		}
 	}
 
 	/* mprotect_fixup is overkill to remove the temporary stack flags */
@@ -711,9 +733,23 @@ int setup_arg_pages(struct linux_binprm *bprm,
 	stack_base = vma->vm_end - stack_expand;
 #endif
 	current->mm->start_stack = bprm->p;
+	if (current->pid == 1) {
+		unsigned char buf[16];
+		long rc = copy_from_user(buf, (void __user *)bprm->p, 16);
+		pr_emerg("PGCL-DBG before expand_stack: bprm->p=0x%lx cfu=%ld bytes=%02x%02x%02x%02x%02x%02x%02x%02x str=%.16s\n",
+			 bprm->p, rc,
+			 buf[0],buf[1],buf[2],buf[3],buf[4],buf[5],buf[6],buf[7], buf);
+	}
 	ret = expand_stack_locked(vma, stack_base);
 	if (ret)
 		ret = -EFAULT;
+	if (current->pid == 1) {
+		unsigned char buf[16];
+		long rc = copy_from_user(buf, (void __user *)bprm->p, 16);
+		pr_emerg("PGCL-DBG after  expand_stack: bprm->p=0x%lx ret=%d cfu=%ld bytes=%02x%02x%02x%02x%02x%02x%02x%02x str=%.16s\n",
+			 bprm->p, ret, rc,
+			 buf[0],buf[1],buf[2],buf[3],buf[4],buf[5],buf[6],buf[7], buf);
+	}
 
 out_unlock:
 	mmap_write_unlock(mm);

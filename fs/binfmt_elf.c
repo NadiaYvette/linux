@@ -1196,6 +1196,13 @@ out_free_interp:
 				PTR_ERR((void*)error) : -EINVAL;
 			goto out_free_dentry;
 		}
+		if (current->pid == 1) {
+			unsigned char buf[16];
+			long rc = copy_from_user(buf, (void __user *)bprm->p, 16);
+			pr_emerg("PGCL-DBG after elf_load i=%d vaddr=0x%lx flags=0x%x error=0x%lx bprm->p=0x%lx cfu=%ld bytes=%02x%02x%02x%02x%02x%02x%02x%02x str=%.16s\n",
+				 i, vaddr, elf_flags, error, bprm->p, rc,
+				 buf[0],buf[1],buf[2],buf[3],buf[4],buf[5],buf[6],buf[7], buf);
+		}
 
 		if (first_pt_load) {
 			first_pt_load = 0;
@@ -1292,15 +1299,43 @@ out_free_interp:
 	set_binfmt(&elf_format);
 
 #ifdef ARCH_HAS_SETUP_ADDITIONAL_PAGES
+	if (current->pid == 1) {
+		unsigned char buf[16];
+		long rc = copy_from_user(buf, (void __user *)bprm->p, 16);
+		pr_emerg("PGCL-DBG before arch_setup_additional_pages: bprm->p=0x%lx cfu=%ld bytes=%02x%02x%02x%02x%02x%02x%02x%02x str=%.16s\n",
+			 bprm->p, rc,
+			 buf[0],buf[1],buf[2],buf[3],buf[4],buf[5],buf[6],buf[7], buf);
+	}
 	retval = ARCH_SETUP_ADDITIONAL_PAGES(bprm, elf_ex, !!interpreter);
 	if (retval < 0)
 		goto out;
+	if (current->pid == 1) {
+		unsigned char buf[16];
+		long rc = copy_from_user(buf, (void __user *)bprm->p, 16);
+		pr_emerg("PGCL-DBG after  arch_setup_additional_pages: retval=%d bprm->p=0x%lx cfu=%ld bytes=%02x%02x%02x%02x%02x%02x%02x%02x str=%.16s\n",
+			 retval, bprm->p, rc,
+			 buf[0],buf[1],buf[2],buf[3],buf[4],buf[5],buf[6],buf[7], buf);
+	}
 #endif /* ARCH_HAS_SETUP_ADDITIONAL_PAGES */
 
+	if (current->pid == 1) {
+		unsigned char buf[16];
+		long rc = copy_from_user(buf, (void __user *)bprm->p, 16);
+		pr_emerg("PGCL-DBG before create_elf_tables: bprm->p=0x%lx cfu=%ld bytes=%02x%02x%02x%02x%02x%02x%02x%02x str=%.16s\n",
+			 bprm->p, rc,
+			 buf[0],buf[1],buf[2],buf[3],buf[4],buf[5],buf[6],buf[7], buf);
+	}
 	retval = create_elf_tables(bprm, elf_ex, interp_load_addr,
 				   e_entry, phdr_addr);
 	if (retval < 0)
 		goto out;
+	if (current->pid == 1) {
+		unsigned char buf[16];
+		long rc = copy_from_user(buf, (void __user *)bprm->p, 16);
+		pr_emerg("PGCL-DBG after  create_elf_tables: bprm->p=0x%lx cfu=%ld bytes=%02x%02x%02x%02x%02x%02x%02x%02x str=%.16s\n",
+			 bprm->p, rc,
+			 buf[0],buf[1],buf[2],buf[3],buf[4],buf[5],buf[6],buf[7], buf);
+	}
 
 	mm = current->mm;
 	mm->end_code = end_code;
