@@ -66,6 +66,27 @@ void start_thread(struct pt_regs * regs, unsigned long pc, unsigned long sp)
 	init_dsp();
 	regs->cp0_epc = pc;
 	regs->regs[29] = sp;
+
+	/* PGCL-DBG: dump start of user stack at start_thread for pid 1 — this
+	 * is what userspace sees as argc/argv/env at entry. */
+	if (current->pid == 1) {
+		unsigned char sb[64];
+		unsigned char ab[64];
+		unsigned long argv_p;
+		long rc = copy_from_user(sb, (void __user *)sp, 64);
+		pr_emerg("PGCL-DBG start_thread pid=1 pc=0x%lx sp=0x%lx cfu=%ld\n",
+			 pc, sp, rc);
+		pr_emerg("PGCL-DBG sp[0..15]=%02x%02x%02x%02x%02x%02x%02x%02x %02x%02x%02x%02x%02x%02x%02x%02x\n",
+			 sb[0],sb[1],sb[2],sb[3],sb[4],sb[5],sb[6],sb[7],
+			 sb[8],sb[9],sb[10],sb[11],sb[12],sb[13],sb[14],sb[15]);
+		argv_p = *(unsigned long *)(sb + 8); /* argv[0] pointer */
+		rc = copy_from_user(ab, (void __user *)argv_p, 64);
+		pr_emerg("PGCL-DBG argv[0]@0x%lx cfu=%ld bytes=%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x str=%.32s\n",
+			 argv_p, rc,
+			 ab[0],ab[1],ab[2],ab[3],ab[4],ab[5],ab[6],ab[7],
+			 ab[8],ab[9],ab[10],ab[11],ab[12],ab[13],ab[14],ab[15],
+			 ab);
+	}
 }
 
 void exit_thread(struct task_struct *tsk)

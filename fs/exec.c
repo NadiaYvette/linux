@@ -1278,9 +1278,17 @@ int begin_new_exec(struct linux_binprm * bprm)
 		bprm->executable = NULL;
 		bprm->execfd = retval;
 	}
-	if (me->pid == 1)
-		pr_emerg("PGCL-DBG begin_new_exec OK pid=1 new_comm=%s file=%s\n",
-			 me->comm, bprm->filename);
+	if (me->pid == 1) {
+		unsigned long p = bprm->p;
+		unsigned char buf[128];
+		long rc;
+		pr_emerg("PGCL-DBG begin_new_exec OK pid=1 new_comm=%s file=%s bprm.p=0x%lx\n",
+			 me->comm, bprm->filename, p);
+		rc = copy_from_user(buf, (void __user *)p, 128);
+		pr_emerg("PGCL-DBG cfu rc=%ld first16=%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x str=%.32s\n",
+			 rc, buf[0],buf[1],buf[2],buf[3],buf[4],buf[5],buf[6],buf[7],
+			 buf[8],buf[9],buf[10],buf[11],buf[12],buf[13],buf[14],buf[15], buf);
+	}
 	return 0;
 
 out_unlock:
