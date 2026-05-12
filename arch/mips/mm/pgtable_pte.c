@@ -36,46 +36,9 @@
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
-#include <asm/cacheflush.h>
 
 #define PTE_TABLE_SIZE	MMUPAGE_SIZE
-/*
- * Packing is disabled (PTE_PER_PAGE=1) until the reuse-path bug that
- * silently hangs init under PAGE_MMUSHIFT=6 is diagnosed.
- *
- * Phase 2 TODO -- what is known so far:
- *   - Typedef change (pgtable_t = pte_t *) is sound: with PTE_PER_PAGE
- *     set to PAGE_MMUCOUNT but the free-list reuse path skipped (every
- *     allocation takes a fresh kernel page, returns slot 0), boot
- *     completes and LTP runs (51p/20f/30s on PAGE_MMUSHIFT=6 malta -m2G).
- *   - As soon as ANY sub-table at offset != 0 is returned (verified
- *     with PTE_PER_PAGE=2: only slot 1 reusable per page), init
- *     silently hangs at "/bin/busybox started with executable stack".
- *     No oops, no panic, no further kernel output.  Removed the
- *     mid-gather tlb_flush_mmu_tlbonly from __pte_free_tlb -- no help.
- *   - pte_lockptr / ptep_lockptr correctly resolve sub-tables to the
- *     shared ptdesc via virt_to_ptdesc -- ruled out as the cause.
- *   - pmd_pfn would mis-compute on regular (non-huge) PMDs but isn't
- *     called on regular PMDs in any hot path -- ruled out.
- *
- * Suspects to test next session:
- *   1. [RULED OUT] dcache aliasing -- adding flush_kernel_vmap_range()
- *      across the sub-table on alloc did not unblock init.  mips xkphys
- *      access of the sub-table would alias with the kernel-page-base
- *      virtual mapping, but the cache flush has no effect on the hang.
- *   2. Per-sub-table side-allocated ptl_locks instead of one shared
- *      ptl per kernel page.  Generic pte_offset_map_lock resolves to
- *      the SHARED ptdesc->ptl via virt_to_ptdesc(pte), which is
- *      currently a single spinlock for up to 64 sub-tables; mm/
- *      generic code may rely on per-table locking.
- *   3. set_ptes / pte_clear-batched paths writing past the 16 KB
- *      sub-table boundary into the next sub-table.  In particular
- *      copy_pmd_range / mremap can issue large nr; audit and clamp.
- *   4. Generic pmd_install() path with a packed pte: *pte is set to
- *      NULL by mm/memory.c on successful install, but the caller saw
- *      it as a pgtable_t (pte_t *) -- check no caller derefs after.
- */
-#define PTE_PER_PAGE	1
+#define PTE_PER_PAGE	PAGE_MMUCOUNT
 #define PTE_MARK_FREE	(PTE_PER_PAGE == BITS_PER_LONG ? ~0UL :		\
 			 (1UL << PTE_PER_PAGE) - 1UL)
 
@@ -119,13 +82,6 @@ static pte_t *pte_alloc_packed(struct mm_struct *mm,
 		addr = (unsigned long)ptdesc_address(ptdesc) +
 		       slot * PTE_TABLE_SIZE;
 		memset((void *)addr, 0, PTE_TABLE_SIZE);
-		/*
-		 * Phase-2 dcache aliasing test: flush before returning.  mips
-		 * dcache is virtually-indexed; sub-tables accessed via the
-		 * sub-table virtual address vs. the kernel page base virtual
-		 * address may sit in different cache lines.
-		 */
-		flush_kernel_vmap_range((void *)addr, PTE_TABLE_SIZE);
 		return (pte_t *)addr;
 	}
 	spin_unlock(&pte_pack_lock);
@@ -144,12 +100,7 @@ static pte_t *pte_alloc_packed(struct mm_struct *mm,
 	}
 
 	spin_lock(&pte_pack_lock);
-	/*
-	 * Mark sub-table 0 as in use (returned to caller) and the rest as
-	 * free.  At PTE_PER_PAGE=1 there is exactly one sub-table per
-	 * ptdesc, so PTE_MARK_FREE & ~1UL == 0 and we skip the free list
-	 * entirely (degenerates to the generic allocator).
-	 */
+	/* Slot 0 returned to caller; remaining slots go on the free list. */
 	mask = PTE_MARK_FREE & ~1UL;
 	ptdesc->pt_index = mask;
 	if (mask)
@@ -157,9 +108,6 @@ static pte_t *pte_alloc_packed(struct mm_struct *mm,
 	spin_unlock(&pte_pack_lock);
 
 	addr = (unsigned long)ptdesc_address(ptdesc);
-	/* pagetable_alloc() does not zero; ptdesc->pt_index union shared
-	 * with raw pages would be cleared too.  But we just set pt_index
-	 * above, so zero only the user-visible PTE area. */
 	memset((void *)addr, 0, PTE_TABLE_SIZE);
 	return (pte_t *)addr;
 }

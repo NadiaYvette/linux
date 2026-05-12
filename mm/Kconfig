@@ -570,6 +570,11 @@ config SPLIT_PTE_PTLOCKS
 	depends on !ARM || CPU_CACHE_VIPT
 	depends on !PARISC || PA20
 	depends on !S390 || PAGE_MMUSHIFT = 0
+	# MIPS packs MMUPAGE-sized PTE tables into PAGE_SIZE chunks
+	# under PGCL (see arch/mips/mm/pgtable_pte.c) so multiple PTE
+	# tables share a kernel page; per-page split ptlocks deadlock
+	# in copy_page_range() exactly as on SPARC32.
+	depends on !MIPS || PAGE_MMUSHIFT = 0
 	depends on !SPARC32
 	depends on !UML
 
