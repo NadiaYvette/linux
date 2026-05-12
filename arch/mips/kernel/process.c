@@ -704,7 +704,17 @@ unsigned long mips_stack_top(void)
 	if (cpu_has_dc_aliases)
 		top -= shm_align_mask + 1;
 
-	return top;
+	/*
+	 * Under PGCL the intermediate subtractions above are MMUPAGE-sized
+	 * (e.g. 16 KB at PAGE_MMUSHIFT=6), so `top` may end up MMUPAGE-aligned
+	 * but not PAGE-aligned.  arch_setup_additional_pages later does
+	 * do_mmap(STACK_TOP, PAGE_SIZE, MAP_FIXED) for the FP-emu delay-slot
+	 * page; with a non-PAGE-aligned start that mapping clobbers the
+	 * kernel-page that holds the upper end of the user stack — exactly
+	 * where copy_strings just placed argv/env.  Round down so STACK_TOP
+	 * is always PAGE-aligned.
+	 */
+	return top & PAGE_MASK;
 }
 
 /*
