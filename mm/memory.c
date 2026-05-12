@@ -454,8 +454,12 @@ void pmd_install(struct mm_struct *mm, pmd_t *pmd, pgtable_t *pte)
 int __pte_alloc(struct mm_struct *mm, pmd_t *pmd)
 {
 	pgtable_t new = pte_alloc_one(mm);
-	if (!new)
+	if (!new) {
+		if (current->pid <= 8)
+			pr_emerg("PGCL-DBG __pte_alloc fail pid=%d comm=%s\n",
+				 current->pid, current->comm);
 		return -ENOMEM;
+	}
 
 	pmd_install(mm, pmd, &new);
 	if (new)
@@ -8103,8 +8107,14 @@ static struct kmem_cache *page_ptl_cachep;
 
 void __init ptlock_cache_init(void)
 {
-	page_ptl_cachep = kmem_cache_create("page->ptl", sizeof(spinlock_t), 0,
-			SLAB_PANIC, NULL);
+	/*
+	 * Each ptdesc may host PTE_PACK_NR sub-tables (PACK_PTE_PTLOCKS);
+	 * size the cache to hold one spinlock per sub-table.  At PTE_PACK_NR
+	 * = 1 (the default for non-packing arches) this is the historical
+	 * single-spinlock allocation, unchanged.
+	 */
+	page_ptl_cachep = kmem_cache_create("page->ptl",
+			PTE_PACK_NR * sizeof(spinlock_t), 0, SLAB_PANIC, NULL);
 }
 
 bool ptlock_alloc(struct ptdesc *ptdesc)

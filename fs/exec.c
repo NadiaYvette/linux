@@ -1278,6 +1278,9 @@ int begin_new_exec(struct linux_binprm * bprm)
 		bprm->executable = NULL;
 		bprm->execfd = retval;
 	}
+	if (me->pid == 1)
+		pr_emerg("PGCL-DBG begin_new_exec OK pid=1 new_comm=%s file=%s\n",
+			 me->comm, bprm->filename);
 	return 0;
 
 out_unlock:
@@ -1286,6 +1289,9 @@ out_unlock:
 		mutex_unlock(&me->signal->cred_guard_mutex);
 
 out:
+	if (current->pid == 1)
+		pr_emerg("PGCL-DBG begin_new_exec FAIL pid=1 retval=%d file=%s\n",
+			 retval, bprm->filename);
 	return retval;
 }
 EXPORT_SYMBOL(begin_new_exec);
@@ -1843,7 +1849,13 @@ static int do_execveat_common(int fd, struct filename *filename,
 			     current->comm, bprm->filename);
 	}
 
-	return bprm_execve(bprm);
+	{
+		int rv = bprm_execve(bprm);
+		if (rv < 0 && current->pid <= 8)
+			pr_emerg("PGCL-DBG execve fail rv=%d pid=%d comm=%s file=%s\n",
+				 rv, current->pid, current->comm, bprm->filename);
+		return rv;
+	}
 }
 
 int kernel_execve(const char *kernel_filename,

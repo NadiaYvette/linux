@@ -3034,6 +3034,9 @@ relock:
 		/*
 		 * Death signals, no core dump.
 		 */
+		if (current->pid == 1)
+			pr_emerg("PGCL-DBG init signal-killed: signr=%d comm=%s\n",
+				 signr, current->comm);
 		do_group_exit(signr);
 		/* NOTREACHED */
 	}

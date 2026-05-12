@@ -12,6 +12,7 @@
 #include <linux/sched/stat.h>
 #include <linux/sched/task.h>
 #include <linux/sched/task_stack.h>
+#include <linux/sched/debug.h>
 #include <linux/sched/cputime.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
@@ -925,9 +926,19 @@ void __noreturn do_exit(long code)
 		 * If the last thread of global init has exited, panic
 		 * immediately to get a useable coredump.
 		 */
-		if (unlikely(is_global_init(tsk)))
+		if (unlikely(is_global_init(tsk))) {
+			struct pt_regs *uregs = task_pt_regs(tsk);
+			pr_emerg("PGCL-DBG init dying: code=0x%08lx group=0x%08x signaled=%d\n",
+				 code, tsk->signal->group_exit_code,
+				 !!(tsk->flags & PF_SIGNALED));
+			pr_emerg("PGCL-DBG comm=%s flags=0x%x exit_signal=%d\n",
+				 tsk->comm, tsk->flags, tsk->exit_signal);
+			if (uregs)
+				show_regs(uregs);
+			dump_stack();
 			panic("Attempted to kill init! exitcode=0x%08x\n",
 				tsk->signal->group_exit_code ?: (int)code);
+		}
 
 #ifdef CONFIG_POSIX_TIMERS
 		hrtimer_cancel(&tsk->signal->real_timer);
@@ -1081,6 +1092,9 @@ void __noreturn make_task_dead(int signr)
 
 SYSCALL_DEFINE1(exit, int, error_code)
 {
+	if (current->pid == 1)
+		pr_emerg("PGCL-DBG sys_exit called by init: code=%d comm=%s\n",
+			 error_code, current->comm);
 	do_exit((error_code&0xff)<<8);
 }
 
@@ -1125,6 +1139,9 @@ do_group_exit(int exit_code)
  */
 SYSCALL_DEFINE1(exit_group, int, error_code)
 {
+	if (current->pid == 1)
+		pr_emerg("PGCL-DBG sys_exit_group called by init: code=%d comm=%s\n",
+			 error_code, current->comm);
 	do_group_exit((error_code & 0xff) << 8);
 	/* NOTREACHED */
 	return 0;

@@ -570,13 +570,22 @@ config SPLIT_PTE_PTLOCKS
 	depends on !ARM || CPU_CACHE_VIPT
 	depends on !PARISC || PA20
 	depends on !S390 || PAGE_MMUSHIFT = 0
-	# MIPS packs MMUPAGE-sized PTE tables into PAGE_SIZE chunks
-	# under PGCL (see arch/mips/mm/pgtable_pte.c) so multiple PTE
-	# tables share a kernel page; per-page split ptlocks deadlock
-	# in copy_page_range() exactly as on SPARC32.
-	depends on !MIPS || PAGE_MMUSHIFT = 0
 	depends on !SPARC32
 	depends on !UML
+
+#
+# When an architecture packs N > 1 MMUPAGE-sized PTE tables into a single
+# PAGE_SIZE ptdesc (mips PGCL today, generalisable to sparc32 / s390 PGCL /
+# powerpc pte_fragment), naive per-ptdesc ptlocks deadlock in
+# copy_page_range() because two sub-tables sharing a ptdesc share a lock.
+# Selecting PACK_PTE_PTLOCKS allocates one spinlock per sub-table in an
+# array hung off ptdesc->ptl, indexed by the sub-table offset within the
+# kernel page; SPLIT_PTE_PTLOCKS continues to apply.
+#
+config PACK_PTE_PTLOCKS
+	bool
+	depends on SPLIT_PTE_PTLOCKS
+	depends on PAGE_MMUSHIFT > 0
 
 config ARCH_ENABLE_SPLIT_PMD_PTLOCK
 	bool
