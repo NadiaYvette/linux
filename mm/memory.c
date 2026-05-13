@@ -8119,8 +8119,14 @@ static struct kmem_cache *page_ptl_cachep;
 
 void __init ptlock_cache_init(void)
 {
-	page_ptl_cachep = kmem_cache_create("page->ptl", sizeof(spinlock_t), 0,
-			SLAB_PANIC, NULL);
+	/*
+	 * Each ptdesc may host PTE_PACK_NR sub-tables (PACK_PTE_PTLOCKS);
+	 * size the cache to hold one spinlock per sub-table.  At PTE_PACK_NR
+	 * = 1 (the default for non-packing arches) this is the historical
+	 * single-spinlock allocation, unchanged.
+	 */
+	page_ptl_cachep = kmem_cache_create("page->ptl",
+			PTE_PACK_NR * sizeof(spinlock_t), 0, SLAB_PANIC, NULL);
 }
 
 bool ptlock_alloc(struct ptdesc *ptdesc)

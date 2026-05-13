@@ -3752,6 +3752,24 @@ static inline void pagetable_free(struct ptdesc *pt)
 }
 
 #if defined(CONFIG_SPLIT_PTE_PTLOCKS)
+/*
+ * PTE_PACK_ORDER: log2 of how many MMUPAGE-sized PTE tables share one
+ * PAGE_SIZE ptdesc.  Default 0 (no packing).  Architectures that opt
+ * into PTE table packing (CONFIG_PACK_PTE_PTLOCKS) override this in
+ * <asm/page.h>.  At order 0, pte_pack_index() is constant 0 and the
+ * spinlock array degenerates to a single lock — the historical
+ * behaviour, preserved bit-for-bit for non-packing arches.
+ */
+#ifndef PTE_PACK_ORDER
+#define PTE_PACK_ORDER 0
+#endif
+#define PTE_PACK_NR (1U << PTE_PACK_ORDER)
+
+static inline unsigned int pte_pack_index(unsigned long addr)
+{
+	return (addr >> MMUPAGE_SHIFT) & (PTE_PACK_NR - 1);
+}
+
 #if ALLOC_SPLIT_PTLOCKS
 void __init ptlock_cache_init(void);
 bool ptlock_alloc(struct ptdesc *ptdesc);
@@ -3783,18 +3801,23 @@ static inline spinlock_t *ptlock_ptr(struct ptdesc *ptdesc)
 
 static inline spinlock_t *pte_lockptr(struct mm_struct *mm, pmd_t *pmd)
 {
-	return ptlock_ptr(page_ptdesc(pmd_page(*pmd)));
+	struct ptdesc *pt = page_ptdesc(pmd_page(*pmd));
+	unsigned long pmdv = (unsigned long)pmd_page_vaddr(*pmd);
+
+	return &ptlock_ptr(pt)[pte_pack_index(pmdv)];
 }
 
 static inline spinlock_t *ptep_lockptr(struct mm_struct *mm, pte_t *pte)
 {
 	BUILD_BUG_ON(IS_ENABLED(CONFIG_HIGHPTE));
 	BUILD_BUG_ON(MAX_PTRS_PER_PTE * sizeof(pte_t) > PAGE_SIZE);
-	return ptlock_ptr(virt_to_ptdesc(pte));
+	return &ptlock_ptr(virt_to_ptdesc(pte))[pte_pack_index((unsigned long)pte)];
 }
 
 static inline bool ptlock_init(struct ptdesc *ptdesc)
 {
+	unsigned int i;
+
 	/*
 	 * prep_new_page() initialize page->private (and therefore page->ptl)
 	 * with 0. Make sure nobody took it in use in between.
@@ -3805,7 +3828,8 @@ static inline bool ptlock_init(struct ptdesc *ptdesc)
 	VM_BUG_ON_PAGE(*(unsigned long *)&ptdesc->ptl, ptdesc_page(ptdesc));
 	if (!ptlock_alloc(ptdesc))
 		return false;
-	spin_lock_init(ptlock_ptr(ptdesc));
+	for (i = 0; i < PTE_PACK_NR; i++)
+		spin_lock_init(&ptlock_ptr(ptdesc)[i]);
 	return true;
 }
 
