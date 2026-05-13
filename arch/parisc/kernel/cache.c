@@ -493,7 +493,17 @@ void flush_dcache_folio(struct folio *folio)
 	if (!mapping)
 		return;
 
-	pgoff = folio->index;
+	/*
+	 * vma->vm_pgoff is in MMUPAGE units under PGCL but folio->index is
+	 * in PAGE units; convert folio->index to MMUPAGE units so the
+	 * interval-tree query and the per-vma `offset` arithmetic both
+	 * speak the same units as vma->vm_pgoff.  Without this conversion
+	 * the foreach can return vmas that don't actually overlap the
+	 * folio's file range, sending the inner addr arithmetic past
+	 * vma->vm_end and underflowing the unsigned `nr` clamp into a
+	 * 2^48-sized for-loop that hangs the system.  See LTP mremap01.
+	 */
+	pgoff = (pgoff_t)folio->index << PAGE_MMUSHIFT;
 
 	/*
 	 * We have carefully arranged in arch_get_unmapped_area() that
@@ -503,20 +513,31 @@ void flush_dcache_folio(struct folio *folio)
 	 * on machines that support equivalent aliasing
 	 */
 	flush_dcache_mmap_lock_irqsave(mapping, flags);
-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff + nr - 1) {
-		unsigned long offset = pgoff - vma->vm_pgoff;
+	vma_interval_tree_foreach(vma, &mapping->i_mmap,
+				  pgoff,
+				  pgoff + ((pgoff_t)nr << PAGE_MMUSHIFT) - 1) {
+		/* Both pgoff and vma->vm_pgoff are MMUPAGE units. */
+		long offset_mmu = (long)(pgoff - vma->vm_pgoff);
+		long offset_pages = offset_mmu >> PAGE_MMUSHIFT;
 		unsigned long pfn = folio_pfn(folio);
 
 		addr = vma->vm_start;
 		nr = folio_nr_pages(folio);
-		if (offset > -nr) {
-			pfn -= offset;
-			nr += offset;
+		if (offset_pages < 0) {
+			/* folio extends before vma — drop front pages */
+			pfn -= offset_pages;	/* offset is negative ⇒ +|offset| */
+			nr += offset_pages;	/* drop |offset| pages */
+			if ((long)nr <= 0)
+				continue;
 		} else {
-			addr += offset * PAGE_SIZE;
+			addr += offset_pages * PAGE_SIZE;
 		}
+		if (addr >= vma->vm_end)
+			continue;
 		if (addr + nr * PAGE_SIZE > vma->vm_end)
 			nr = (vma->vm_end - addr) / PAGE_SIZE;
+		if (nr == 0)
+			continue;
 
 		if (old_addr == 0 || (old_addr & (SHM_COLOUR - 1))
 					!= (addr & (SHM_COLOUR - 1))) {
