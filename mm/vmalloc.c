@@ -124,7 +124,17 @@ static int vmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 			size = arch_vmap_pte_range_map_size(addr, end, pfn,
 							    max_page_shift);
 			if (size != PAGE_SIZE && size != MMUPAGE_SIZE) {
-				pte_t entry = pfn_pte(pfn, prot);
+				/*
+				 * pfn_pte(pfn, prot) at PGCL>0 with
+				 * paddr >> PAGE_SHIFT discards sub-PAGE
+				 * bits.  For MMIO ioremap whose paddr
+				 * may be MMUPAGE-aligned but not
+				 * PAGE-aligned (e.g. GICC at 0x8010000
+				 * under PAGE_SIZE=256KB), construct the
+				 * PTE directly from paddr.
+				 */
+				pte_t entry = __pte(__phys_to_pte_val(paddr) |
+						    pgprot_val(prot));
 
 				entry = arch_make_huge_pte(entry, ilog2(size),
 							   0);
