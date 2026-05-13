@@ -25,6 +25,10 @@ config MIPS
 	select ARCH_USE_MEMTEST
 	select ARCH_USE_QUEUED_RWLOCKS
 	select ARCH_USE_QUEUED_SPINLOCKS
+	# PGCL packs PAGE_MMUCOUNT MMUPAGE-sized PTE tables into one
+	# PAGE_SIZE ptdesc; ask for one ptlock per sub-table so that
+	# SPLIT_PTE_PTLOCKS keeps working under PGCL.
+	select PACK_PTE_PTLOCKS if PAGE_MMUSHIFT > 0
 	select ARCH_SUPPORTS_HUGETLBFS if CPU_SUPPORTS_HUGEPAGES
 	select ARCH_WANT_DEFAULT_TOPDOWN_MMAP_LAYOUT if MMU
 	select ARCH_WANT_IPC_PARSE_VERSION
