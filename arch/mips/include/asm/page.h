@@ -16,6 +16,17 @@
 
 #include <vdso/page.h>
 
+#ifdef CONFIG_PACK_PTE_PTLOCKS
+/*
+ * mips packs PAGE_MMUCOUNT MMUPAGE-sized PTE tables into one PAGE_SIZE
+ * ptdesc; tell the generic ptlock allocator to size the per-ptdesc lock
+ * array accordingly so each sub-table has its own spinlock and
+ * copy_page_range() doesn't deadlock when src and dst share a ptdesc.
+ * See arch/mips/mm/pgtable_pte.c.
+ */
+#define PTE_PACK_ORDER	PAGE_MMUSHIFT
+#endif
+
 /*
  * This is used for calculating the real page sizes
  * for FTLB or VTLB + FTLB configurations.
