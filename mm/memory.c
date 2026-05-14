@@ -4603,13 +4603,25 @@ static inline void unmap_mapping_range_tree(struct rb_root_cached *root,
 	struct vm_area_struct *vma;
 	unsigned long start, size;
 	struct mmu_gather tlb;
+	/*
+	 * Callers pass first/last_index in PAGE-cache units.  Under PGCL
+	 * the i_mmap interval tree is keyed on vma->vm_pgoff which is in
+	 * MMUPAGE units.  Convert before querying the tree and use
+	 * MMUPAGE_SHIFT for the byte-offset arithmetic so the resulting
+	 * (start, size) lies within [vma->vm_start, vma->vm_end).
+	 * At PAGE_MMUSHIFT==0 these helpers are identity.
+	 */
+	pgoff_t mmu_first = pgoff_page_to_mmu(first_index);
+	pgoff_t mmu_last = (last_index == ULONG_MAX) ?
+		ULONG_MAX : (pgoff_page_to_mmu(last_index + 1) - 1);
 
-	vma_interval_tree_foreach(vma, root, first_index, last_index) {
-		const pgoff_t start_idx = max(first_index, vma->vm_pgoff);
-		const pgoff_t end_idx = min(last_index, vma_last_pgoff(vma)) + 1;
+	vma_interval_tree_foreach(vma, root, mmu_first, mmu_last) {
+		const pgoff_t start_idx = max(mmu_first, vma->vm_pgoff);
+		const pgoff_t end_idx = min(mmu_last, vma_last_pgoff(vma)) + 1;
 
-		start = vma->vm_start + ((start_idx - vma->vm_pgoff) << PAGE_SHIFT);
-		size = (end_idx - start_idx) << PAGE_SHIFT;
+		start = vma->vm_start +
+			((start_idx - vma->vm_pgoff) << MMUPAGE_SHIFT);
+		size = (end_idx - start_idx) << MMUPAGE_SHIFT;
 
 		tlb_gather_mmu(&tlb, vma->vm_mm);
 		zap_vma_range_batched(&tlb, vma, start, size, details);
