@@ -434,7 +434,7 @@ static int mfill_copy_folio_locked(struct folio *folio, unsigned long src_addr)
 	 */
 	pagefault_disable();
 	ret = copy_from_user(kaddr, (const void __user *) src_addr,
-			     PAGE_SIZE);
+			     MMUPAGE_SIZE);
 	pagefault_enable();
 	kunmap_local(kaddr);
 
@@ -521,7 +521,7 @@ static int mfill_copy_folio_retry(struct mfill_state *mfill_state,
 	mfill_put_vma(mfill_state);
 
 	kaddr = kmap_local_folio(folio, 0);
-	err = copy_from_user(kaddr, (const void __user *) src_addr, PAGE_SIZE);
+	err = copy_from_user(kaddr, (const void __user *) src_addr, MMUPAGE_SIZE);
 	kunmap_local(kaddr);
 	if (unlikely(err))
 		return -EFAULT;
@@ -999,9 +999,9 @@ static __always_inline ssize_t mfill_atomic(struct userfaultfd_ctx *ctx,
 		cond_resched();
 
 		if (!err) {
-			state.dst_addr += PAGE_SIZE;
-			state.src_addr += PAGE_SIZE;
-			copied += PAGE_SIZE;
+			state.dst_addr += MMUPAGE_SIZE;
+			state.src_addr += MMUPAGE_SIZE;
+			copied += MMUPAGE_SIZE;
 
 			if (fatal_signal_pending(current))
 				err = -EINTR;
