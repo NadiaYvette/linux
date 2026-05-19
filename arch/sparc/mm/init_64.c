@@ -330,11 +330,34 @@ static void __update_mmu_tsb_insert(struct mm_struct *mm, unsigned long tsb_inde
 #ifdef CONFIG_HUGETLB_PAGE
 static int __init hugetlbpage_init(void)
 {
-	if (HPAGE_64K_SHIFT > PAGE_SHIFT)
-		hugetlb_add_hstate(HPAGE_64K_SHIFT - PAGE_SHIFT);
-	hugetlb_add_hstate(HPAGE_SHIFT - PAGE_SHIFT);
-	hugetlb_add_hstate(HPAGE_256MB_SHIFT - PAGE_SHIFT);
-	hugetlb_add_hstate(HPAGE_2GB_SHIFT - PAGE_SHIFT);
+	/*
+	 * mm/hugetlb.c BUG_ONs hugetlb_add_hstate with order <
+	 * order_base_2(__NR_USED_SUBPAGE) (== 2): a hstate must have
+	 * at least __NR_USED_SUBPAGE sub-pages for tail-page bookkeeping.
+	 * Under PGCL (PAGE_SHIFT = MMUPAGE_SHIFT + CONFIG_PAGE_MMUSHIFT)
+	 * the kernel PAGE can grow past a given HPAGE_*_SHIFT, in which
+	 * case the corresponding hstate has too few (or zero) sub-pages.
+	 *
+	 * Concretely on sparc64 (MMUPAGE_SHIFT == 13):
+	 *   PGCL=2 (PAGE_SHIFT=15) HPAGE_64K_SHIFT - PAGE_SHIFT = 1 → BUG
+	 *   PGCL=4 (PAGE_SHIFT=17) HPAGE_64K_SHIFT - PAGE_SHIFT < 0 (handled
+	 *     by the existing > PAGE_SHIFT gate)
+	 * The larger sizes are safe up to PGCL=6 today, but apply the
+	 * same guard uniformly so future PGCL bumps are not load-bearing
+	 * for these arithmetic margins.
+	 */
+#define ADD_HSTATE_IF_FITS(shift) do {					\
+	int __order = (int)(shift) - PAGE_SHIFT;			\
+	if (__order >= order_base_2(__NR_USED_SUBPAGE))			\
+		hugetlb_add_hstate(__order);				\
+} while (0)
+
+	ADD_HSTATE_IF_FITS(HPAGE_64K_SHIFT);
+	ADD_HSTATE_IF_FITS(HPAGE_SHIFT);
+	ADD_HSTATE_IF_FITS(HPAGE_256MB_SHIFT);
+	ADD_HSTATE_IF_FITS(HPAGE_2GB_SHIFT);
+
+#undef ADD_HSTATE_IF_FITS
 
 	return 0;
 }
