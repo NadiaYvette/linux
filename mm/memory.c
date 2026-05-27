@@ -1091,15 +1091,15 @@ copy_present_page(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 	/* All done, just insert the new page copy in the child */
 	pte = folio_mk_pte(new_folio, dst_vma->vm_page_prot);
 	/*
-	 * With PAGE_MMUSHIFT > 0, adjust PTE to the correct MMUPAGE
-	 * within the copied page.
+	 * With PAGE_MMUSHIFT > 0, the new (copied) folio must be
+	 * pointed at the same sub-PAGE as the source PTE pointed to,
+	 * because copy_user_highpage copies sub-PAGE-for-sub-PAGE.
+	 * Read the sub-PAGE offset from the source PTE rather than
+	 * recomputing it from vma->vm_pgoff (which may diverge from
+	 * vm_start>>MMUPAGE_SHIFT after relocate_vma_down or mremap).
 	 */
-	if (PAGE_MMUSHIFT > 0) {
-		pgoff_t pgoff = dst_vma->vm_pgoff +
-			((addr - dst_vma->vm_start) >> MMUPAGE_SHIFT);
-		unsigned int sub = pgoff_sub_page_index(pgoff);
-		pte = __pte(pte_val(pte) + __phys_to_pte_val((phys_addr_t)sub * MMUPAGE_SIZE));
-	}
+	if (PAGE_MMUSHIFT > 0)
+		pte = __pte(pte_val(pte) + __phys_to_pte_val(pte_suboffset(ptep_get(src_pte))));
 	pte = maybe_mkwrite(pte_mkdirty(pte), dst_vma);
 	if (userfaultfd_pte_wp(dst_vma, ptep_get(src_pte)))
 		/* Uffd-wp needs to be delivered to dest pte as well */
@@ -4093,16 +4093,17 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 		flush_cache_page(vma, vmf->address, pte_pfn(vmf->orig_pte));
 		entry = folio_mk_pte(new_folio, vma->vm_page_prot);
 		/*
-		 * With PAGE_MMUSHIFT > 0, adjust PTE to point to the correct
-		 * MMUPAGE within the new page (same sub-page offset as the
-		 * original mapping).
+		 * With PAGE_MMUSHIFT > 0, the new PTE must point to the same
+		 * sub-PAGE of the new folio as the old PTE pointed to of the
+		 * old folio — __wp_page_copy_user copied the whole old folio
+		 * to the new one sub-PAGE-for-sub-PAGE.  Take the sub-PAGE
+		 * offset from the original PTE rather than from vma->vm_pgoff
+		 * (which may diverge from vm_start>>MMUPAGE_SHIFT after
+		 * relocate_vma_down or mremap).
 		 */
-		if (PAGE_MMUSHIFT > 0) {
-			pgoff_t pgoff = vma->vm_pgoff +
-				((vmf->address - vma->vm_start) >> MMUPAGE_SHIFT);
-			unsigned int sub = pgoff_sub_page_index(pgoff);
-			entry = __pte(pte_val(entry) + __phys_to_pte_val((phys_addr_t)sub * MMUPAGE_SIZE));
-		}
+		if (PAGE_MMUSHIFT > 0)
+			entry = __pte(pte_val(entry) +
+				      __phys_to_pte_val(pte_suboffset(vmf->orig_pte)));
 		entry = pte_sw_mkyoung(entry);
 		if (unlikely(unshare)) {
 			if (pte_soft_dirty(vmf->orig_pte))
@@ -4165,9 +4166,21 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 		 * same folio.
 		 */
 		if (old_folio && folio_test_anon(old_folio) && !unshare) {
-			pgoff_t pgoff = vma->vm_pgoff +
-				((vmf->address - vma->vm_start) >> MMUPAGE_SHIFT);
-			unsigned int sub = pgoff_sub_page_index(pgoff);
+			/*
+			 * base_pte / base_addr index the PTE table and the
+			 * address space, so sub must be the ADDRESS-based
+			 * sub-PAGE position within the kernel page.  Using
+			 * vma->vm_pgoff would assume it tracks vm_start mod
+			 * PAGE_MMUCOUNT, but relocate_vma_down() preserves
+			 * the OLD vm_pgoff (so the OLD physical sub-PAGE
+			 * mapping survives move_page_tables), and that
+			 * pgoff-based sub does NOT match the new PTE table
+			 * layout.  Each replaced PTE's *content* sub-PAGE
+			 * (where it points inside the new folio) is preserved
+			 * separately via pte_suboffset(pteval) below.
+			 */
+			unsigned int sub = (vmf->address >> MMUPAGE_SHIFT) &
+					   (PAGE_MMUCOUNT - 1);
 			pte_t *base_pte = vmf->pte - sub;
 			unsigned long base_addr = vmf->address -
 					(unsigned long)sub * MMUPAGE_SIZE;
@@ -4201,12 +4214,18 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 				    old_folio)
 					continue;
 
-				/* Clear+flush old, set new */
+				/*
+				 * Preserve the OLD PTE's sub-PAGE offset:
+				 * __wp_page_copy_user copied the entire old
+				 * folio to the new folio sub-PAGE-for-sub-PAGE,
+				 * so the new PTE must point to the SAME
+				 * sub-PAGE of new_folio as old PTE pointed to
+				 * of old_folio.
+				 */
 				ptep_clear_flush(vma, a, ptep);
 				set_pte_at(mm, a, ptep,
 					   pte_mksub(base_entry,
-						     (unsigned long)j *
-						     MMUPAGE_SIZE));
+						     pte_suboffset(pteval)));
 				folio_remove_rmap_pte(old_folio,
 						      pte_page(pteval), vma);
 				extra++;
@@ -5884,9 +5903,17 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		 * divides PTRS_PER_PTE evenly.
 		 */
 		pte_t entry;
-		unsigned int sub = pgoff_sub_page_index(
-			vma->vm_pgoff +
-			((vmf->address - vma->vm_start) >> MMUPAGE_SHIFT));
+		/*
+		 * Fresh allocation: this is a brand new folio with no prior
+		 * sub-PAGE assignment, so the ADDRESS-based sub-PAGE position
+		 * works for both the PTE table indexing and the folio sub-PAGE
+		 * mapping (we map address-sub-PAGE-j to folio-sub-PAGE-j).
+		 * Using vma->vm_pgoff would silently assume it tracks
+		 * vm_start>>MMUPAGE_SHIFT, which relocate_vma_down does not
+		 * preserve.
+		 */
+		unsigned int sub = (vmf->address >> MMUPAGE_SHIFT) &
+				   (PAGE_MMUCOUNT - 1);
 		pte_t *base_pte = vmf->pte - sub;
 		unsigned long base_addr = addr - (unsigned long)sub * MMUPAGE_SIZE;
 		unsigned long rss = 0;
