@@ -197,6 +197,7 @@ extern struct page *empty_zero_page_struct;
 #define PFN_PTE_SHIFT		32
 #define pte_pfn(pte)		((pte_val(pte) >> PFN_PTE_SHIFT) >> PAGE_MMUSHIFT)
 #define __phys_to_pte_val(phys)	(((phys) >> MMUPAGE_SHIFT) << 32)
+#define __pte_val_to_phys(val)	(((val) & _PFN_MASK) >> (32 - MMUPAGE_SHIFT))
 
 #define pte_page(pte)	pfn_to_page(pte_pfn(pte))
 
