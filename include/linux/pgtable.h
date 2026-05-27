@@ -398,6 +398,16 @@ static inline pte_t pte_advance_pfn(pte_t pte, unsigned long nr)
 #define __phys_to_pte_val(phys)	(phys)
 #endif
 
+/*
+ * Inverse of __phys_to_pte_val.  Identity on archs where the PTE PFN field
+ * is a direct physical address (x86, s390 etc).  Archs where the encoding
+ * differs (mips PFN at bit 6, riscv _PAGE_PFN_SHIFT != MMUPAGE_SHIFT) must
+ * override this together with __phys_to_pte_val.
+ */
+#ifndef __pte_val_to_phys
+#define __pte_val_to_phys(val)	(val)
+#endif
+
 #ifndef set_ptes
 /**
  * set_ptes - Map consecutive pages to a contiguous range of addresses.
@@ -1082,11 +1092,13 @@ static inline pte_t pte_mksub(pte_t pte, unsigned long offset)
 static inline unsigned long pte_suboffset(pte_t pte)
 {
 #if PAGE_MMUSHIFT
-	/* NOTE: assumes __phys_to_pte_val(x) == x (true for x86).
-	 * Arches where PTE PFN encoding differs (e.g. riscv) should
-	 * override this.
+	/*
+	 * Convert the PTE's PFN field back to a physical address (identity
+	 * on most archs; mips/riscv encode PFN at a different bit position
+	 * and override __pte_val_to_phys), then mask out everything except
+	 * the sub-page bits within a kernel page.
 	 */
-	return (pte_val(pte) & (PAGE_SIZE - 1)) & MMUPAGE_MASK;
+	return __pte_val_to_phys(pte_val(pte)) & (PAGE_SIZE - 1) & MMUPAGE_MASK;
 #else
 	return 0;
 #endif
