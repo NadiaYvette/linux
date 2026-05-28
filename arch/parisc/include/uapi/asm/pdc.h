@@ -359,7 +359,7 @@
 #define BOOT_CONSOLE_PATH_OFFSET 0x3a8
 
 /* size of the pdc_result buffer for firmware.c */
-#define NUM_PDC_RESULT	32
+#define NUM_PDC_RESULT	64
 
 #if !defined(__ASSEMBLER__)
 
