@@ -586,8 +586,18 @@ static inline struct kmem_cache_order_objects oo_make(unsigned int order,
 {
 	unsigned int nr = order_objects(order, size);
 
+	/*
+	 * Cap at MAX_OBJS_PER_PAGE rather than OO_MASK so that the value
+	 * fits in the 15-bit slab.objects bitfield even when PAGE_SIZE is
+	 * large enough (e.g. 1 MB with PGCL) that a small-object slab
+	 * would otherwise exceed it.  Without this cap, the bitfield write
+	 * silently truncates (32768 → 0 for kmalloc-32 at PAGE_SIZE=1MB),
+	 * obj_exts is sized 0, and obj_to_index() reads past the metadata
+	 * array — corrupting the obj_cgroup pointer on first kfree from
+	 * the slab.
+	 */
 	struct kmem_cache_order_objects x = {
-		(order << OO_SHIFT) + min_t(unsigned int, nr, OO_MASK)
+		(order << OO_SHIFT) + min_t(unsigned int, nr, MAX_OBJS_PER_PAGE)
 	};
 
 	return x;
