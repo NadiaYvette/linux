@@ -29,10 +29,20 @@ unsigned long efi_get_kimg_kaslr_address(void)
 
 #ifdef CONFIG_RANDOMIZE_BASE
 	if (!efi_nokaslr) {
+		/*
+		 * Align KASLR offset to at least PAGE_SIZE; the percpu
+		 * setup BUGs on offset_in_page(__per_cpu_start), which a
+		 * sub-PAGE relocation would violate. With PGCL the kernel
+		 * PAGE_SIZE can exceed SZ_64K (e.g. 1 MB at PAGE_MMUSHIFT=6
+		 * with 16 KB MMU pages); the old SZ_64K alignment hung the
+		 * boot before the kernel banner.
+		 */
+		unsigned long align = max_t(unsigned long, SZ_64K, PAGE_SIZE);
+
 		efi_get_random_bytes(sizeof(random_offset), (u8 *)&random_offset);
 		random_offset ^= (random_get_entropy() << 16);
 		random_offset &= (CONFIG_RANDOMIZE_BASE_MAX_OFFSET - 1);
-		random_offset = ALIGN(random_offset + SZ_64K, SZ_64K);
+		random_offset = ALIGN(random_offset + align, align);
 	}
 #endif
 
