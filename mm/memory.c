@@ -4226,6 +4226,17 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 				set_pte_at(mm, a, ptep,
 					   pte_mksub(base_entry,
 						     pte_suboffset(pteval)));
+				/*
+				 * Refresh the arch MMU cache for the neighbor
+				 * sub-PTE we just rewrote.  Without this the
+				 * faulting sub-PTE alone gets its entry above
+				 * via update_mmu_cache_range(..., 1) — the rest
+				 * rely on the TLB miss handler walking the page
+				 * tables for the new PTE, which on sparc64
+				 * PGCL=2 loops indefinitely after a COW write
+				 * to the second sub-MMUPAGE of a cluster.
+				 */
+				update_mmu_cache_range(vmf, vma, a, ptep, 1);
 				folio_remove_rmap_pte(old_folio,
 						      pte_page(pteval), vma);
 				extra++;
@@ -5943,6 +5954,20 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 			if (!pte_none(ptep_get(ptep)))
 				continue;
 			set_ptes(vma->vm_mm, a, ptep, pte_mksub(entry, (unsigned long)j * MMUPAGE_SIZE), 1);
+			/*
+			 * Pre-insert the per-sub-PTE arch MMU cache entry now,
+			 * not just for the faulting sub-PTE.  Without this the
+			 * remaining sub-PTEs in the cluster get inserted into
+			 * the arch cache only when the userspace next touches
+			 * them and the TLB miss handler walks the page tables;
+			 * on sparc64 PGCL=2 (4 MMUPAGEs per PAGE) that path
+			 * loops indefinitely instead of completing the TLB
+			 * fill, so the second sub-PAGE write traps forever.
+			 * Inserting eagerly here bypasses the broken slow walk
+			 * and matches how update_mmu_cache_range is normally
+			 * called paired with set_ptes for each installed PTE.
+			 */
+			update_mmu_cache_range(vmf, vma, a, ptep, 1);
 			rss++;
 		}
 		/*
@@ -5962,7 +5987,9 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		}
 		/* Fix RSS: we added 1 above (nr_pages), need rss total */
 		add_mm_counter(vma->vm_mm, MM_ANONPAGES, rss - 1);
-		update_mmu_cache_range(vmf, vma, addr, vmf->pte, 1);
+		/* update_mmu_cache_range is now called per-sub-PTE inside the
+		 * loop above; no trailing call needed.
+		 */
 		goto unlock;
 	}
 #endif
