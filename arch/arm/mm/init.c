@@ -425,14 +425,18 @@ void free_initmem(void)
 	fix_kernmem_perms();
 
 	if (!machine_is_integrator() && !machine_is_cintegrator()) {
-		if (!PAGE_MMUSHIFT) {
-			poison_init_mem(__init_begin,
-					__init_end - __init_begin);
-			free_initmem_default(-1);
-		} else {
+		{
 			/*
-			 * PGCL: scan page table entries to find PTE tables.
-			 * Skip any init page containing a PTE table.
+			 * Scan page table entries to find PTE tables that
+			 * landed in the init section, and skip any init page
+			 * that contains one.  This applies even when
+			 * PAGE_MMUSHIFT == 0: the early memblock allocator
+			 * routinely places PTE tables for kernel mappings
+			 * such as the vectors page (0xffff0000) inside the
+			 * init section, and free_initmem_default() would
+			 * otherwise free them, corrupting later page table
+			 * walks and hanging userspace startup right after
+			 * init_freeable returns.
 			 *
 			 * LPAE: 4 PGD entries × 512 PMD entries (64-bit each).
 			 *   PMD TABLE entry: bits[39:12] = PTE table phys addr.
