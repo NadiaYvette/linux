@@ -78,7 +78,7 @@ static inline void local_flush_tlb_range_asid(unsigned long start,
 /* Flush a range of kernel pages without broadcasting */
 void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
 {
-	local_flush_tlb_range_asid(start, end - start, PAGE_SIZE, FLUSH_TLB_NO_ASID);
+	local_flush_tlb_range_asid(start, end - start, MMUPAGE_SIZE, FLUSH_TLB_NO_ASID);
 }
 
 static void __ipi_flush_tlb_all(void *info)
@@ -151,7 +151,7 @@ static void __flush_tlb_range(struct mm_struct *mm,
 
 void flush_tlb_mm(struct mm_struct *mm)
 {
-	__flush_tlb_range(mm, mm_cpumask(mm), 0, FLUSH_TLB_MAX_SIZE, PAGE_SIZE);
+	__flush_tlb_range(mm, mm_cpumask(mm), 0, FLUSH_TLB_MAX_SIZE, MMUPAGE_SIZE);
 }
 
 void flush_tlb_mm_range(struct mm_struct *mm,
@@ -164,7 +164,7 @@ void flush_tlb_mm_range(struct mm_struct *mm,
 void flush_tlb_page(struct vm_area_struct *vma, unsigned long addr)
 {
 	__flush_tlb_range(vma->vm_mm, mm_cpumask(vma->vm_mm),
-			  addr, PAGE_SIZE, PAGE_SIZE);
+			  addr, MMUPAGE_SIZE, MMUPAGE_SIZE);
 }
 
 void flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
@@ -173,7 +173,7 @@ void flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 	unsigned long stride_size;
 
 	if (!is_vm_hugetlb_page(vma)) {
-		stride_size = PAGE_SIZE;
+		stride_size = MMUPAGE_SIZE;
 	} else {
 		stride_size = huge_page_size(hstate_vma(vma));
 
@@ -192,7 +192,7 @@ void flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 			else if (stride_size >= PMD_SIZE)
 				stride_size = PMD_SIZE;
 			else
-				stride_size = PAGE_SIZE;
+				stride_size = MMUPAGE_SIZE;
 		}
 	}
 
@@ -203,7 +203,7 @@ void flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 void flush_tlb_kernel_range(unsigned long start, unsigned long end)
 {
 	__flush_tlb_range(NULL, cpu_online_mask,
-			  start, end - start, PAGE_SIZE);
+			  start, end - start, MMUPAGE_SIZE);
 }
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
@@ -237,6 +237,6 @@ void arch_tlbbatch_add_pending(struct arch_tlbflush_unmap_batch *batch,
 void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch)
 {
 	__flush_tlb_range(NULL, &batch->cpumask,
-			  0, FLUSH_TLB_MAX_SIZE, PAGE_SIZE);
+			  0, FLUSH_TLB_MAX_SIZE, MMUPAGE_SIZE);
 	cpumask_clear(&batch->cpumask);
 }

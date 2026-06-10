@@ -344,7 +344,7 @@ pgd_t swapper_pg_dir[PTRS_PER_PGD] __page_aligned_bss;
 pgd_t trampoline_pg_dir[PTRS_PER_PGD] __page_aligned_bss;
 static pte_t fixmap_pte[PTRS_PER_PTE] __page_aligned_bss;
 
-pgd_t early_pg_dir[PTRS_PER_PGD] __initdata __aligned(PAGE_SIZE);
+pgd_t early_pg_dir[PTRS_PER_PGD] __initdata __aligned(MMUPAGE_SIZE);
 
 static const pgprot_t protection_map[16] = {
 	[VM_NONE]					= PAGE_NONE,
@@ -376,7 +376,7 @@ void __set_fixmap(enum fixed_addresses idx, phys_addr_t phys, pgprot_t prot)
 	ptep = &fixmap_pte[pte_index(addr)];
 
 	if (pgprot_val(prot))
-		set_pte(ptep, pfn_pte(phys >> PAGE_SHIFT, prot));
+		set_pte(ptep, __pte(__phys_to_pte_val(phys) | pgprot_val(prot)));
 	else
 		pte_clear(&init_mm, addr, ptep);
 	local_flush_tlb_page(addr);
@@ -409,7 +409,7 @@ static inline phys_addr_t __init alloc_pte_early(uintptr_t va)
 
 static inline phys_addr_t __init alloc_pte_fixmap(uintptr_t va)
 {
-	return memblock_phys_alloc(PAGE_SIZE, PAGE_SIZE);
+	return memblock_phys_alloc(MMUPAGE_SIZE, MMUPAGE_SIZE);
 }
 
 static phys_addr_t __meminit alloc_pte_late(uintptr_t va)
@@ -430,25 +430,25 @@ static void __meminit create_pte_mapping(pte_t *ptep, uintptr_t va, phys_addr_t 
 {
 	uintptr_t pte_idx = pte_index(va);
 
-	BUG_ON(sz != PAGE_SIZE);
+	BUG_ON(sz != MMUPAGE_SIZE);
 
 	if (pte_none(ptep[pte_idx]))
-		ptep[pte_idx] = pfn_pte(PFN_DOWN(pa), prot);
+		ptep[pte_idx] = __pte(__phys_to_pte_val(pa) | pgprot_val(prot));
 }
 
 #ifndef __PAGETABLE_PMD_FOLDED
 
 static pmd_t trampoline_pmd[PTRS_PER_PMD] __page_aligned_bss;
 static pmd_t fixmap_pmd[PTRS_PER_PMD] __page_aligned_bss;
-static pmd_t early_pmd[PTRS_PER_PMD] __initdata __aligned(PAGE_SIZE);
+static pmd_t early_pmd[PTRS_PER_PMD] __initdata __aligned(MMUPAGE_SIZE);
 
 static p4d_t trampoline_p4d[PTRS_PER_P4D] __page_aligned_bss;
 static p4d_t fixmap_p4d[PTRS_PER_P4D] __page_aligned_bss;
-static p4d_t early_p4d[PTRS_PER_P4D] __initdata __aligned(PAGE_SIZE);
+static p4d_t early_p4d[PTRS_PER_P4D] __initdata __aligned(MMUPAGE_SIZE);
 
 static pud_t trampoline_pud[PTRS_PER_PUD] __page_aligned_bss;
 static pud_t fixmap_pud[PTRS_PER_PUD] __page_aligned_bss;
-static pud_t early_pud[PTRS_PER_PUD] __initdata __aligned(PAGE_SIZE);
+static pud_t early_pud[PTRS_PER_PUD] __initdata __aligned(MMUPAGE_SIZE);
 
 static pmd_t *__init get_pmd_virt_early(phys_addr_t pa)
 {
@@ -476,7 +476,7 @@ static phys_addr_t __init alloc_pmd_early(uintptr_t va)
 
 static phys_addr_t __init alloc_pmd_fixmap(uintptr_t va)
 {
-	return memblock_phys_alloc(PAGE_SIZE, PAGE_SIZE);
+	return memblock_phys_alloc(MMUPAGE_SIZE, MMUPAGE_SIZE);
 }
 
 static phys_addr_t __meminit alloc_pmd_late(uintptr_t va)
@@ -498,17 +498,17 @@ static void __meminit create_pmd_mapping(pmd_t *pmdp,
 
 	if (sz == PMD_SIZE) {
 		if (pmd_none(pmdp[pmd_idx]))
-			pmdp[pmd_idx] = pfn_pmd(PFN_DOWN(pa), prot);
+			pmdp[pmd_idx] = __pmd(__phys_to_pte_val(pa) | pgprot_val(prot));
 		return;
 	}
 
 	if (pmd_none(pmdp[pmd_idx])) {
 		pte_phys = pt_ops.alloc_pte(va);
-		pmdp[pmd_idx] = pfn_pmd(PFN_DOWN(pte_phys), PAGE_TABLE);
+		pmdp[pmd_idx] = __pmd(__phys_to_pte_val(pte_phys) | pgprot_val(PAGE_TABLE));
 		ptep = pt_ops.get_pte_virt(pte_phys);
-		memset(ptep, 0, PAGE_SIZE);
+		memset(ptep, 0, MMUPAGE_SIZE);
 	} else {
-		pte_phys = PFN_PHYS(_pmd_pfn(pmdp[pmd_idx]));
+		pte_phys = __pte_val_to_phys(pmd_val(pmdp[pmd_idx]));
 		ptep = pt_ops.get_pte_virt(pte_phys);
 	}
 
@@ -541,7 +541,7 @@ static phys_addr_t __init alloc_pud_early(uintptr_t va)
 
 static phys_addr_t __init alloc_pud_fixmap(uintptr_t va)
 {
-	return memblock_phys_alloc(PAGE_SIZE, PAGE_SIZE);
+	return memblock_phys_alloc(MMUPAGE_SIZE, MMUPAGE_SIZE);
 }
 
 static phys_addr_t __meminit alloc_pud_late(uintptr_t va)
@@ -579,7 +579,7 @@ static phys_addr_t __init alloc_p4d_early(uintptr_t va)
 
 static phys_addr_t __init alloc_p4d_fixmap(uintptr_t va)
 {
-	return memblock_phys_alloc(PAGE_SIZE, PAGE_SIZE);
+	return memblock_phys_alloc(MMUPAGE_SIZE, MMUPAGE_SIZE);
 }
 
 static phys_addr_t __meminit alloc_p4d_late(uintptr_t va)
@@ -600,17 +600,17 @@ static void __meminit create_pud_mapping(pud_t *pudp, uintptr_t va, phys_addr_t 
 
 	if (sz == PUD_SIZE) {
 		if (pud_val(pudp[pud_index]) == 0)
-			pudp[pud_index] = pfn_pud(PFN_DOWN(pa), prot);
+			pudp[pud_index] = __pud(__phys_to_pte_val(pa) | pgprot_val(prot));
 		return;
 	}
 
 	if (pud_val(pudp[pud_index]) == 0) {
 		next_phys = pt_ops.alloc_pmd(va);
-		pudp[pud_index] = pfn_pud(PFN_DOWN(next_phys), PAGE_TABLE);
+		pudp[pud_index] = __pud(__phys_to_pte_val(next_phys) | pgprot_val(PAGE_TABLE));
 		nextp = pt_ops.get_pmd_virt(next_phys);
-		memset(nextp, 0, PAGE_SIZE);
+		memset(nextp, 0, MMUPAGE_SIZE);
 	} else {
-		next_phys = PFN_PHYS(_pud_pfn(pudp[pud_index]));
+		next_phys = __pte_val_to_phys(pud_val(pudp[pud_index]));
 		nextp = pt_ops.get_pmd_virt(next_phys);
 	}
 
@@ -626,17 +626,17 @@ static void __meminit create_p4d_mapping(p4d_t *p4dp, uintptr_t va, phys_addr_t 
 
 	if (sz == P4D_SIZE) {
 		if (p4d_val(p4dp[p4d_index]) == 0)
-			p4dp[p4d_index] = pfn_p4d(PFN_DOWN(pa), prot);
+			p4dp[p4d_index] = __p4d(__phys_to_pte_val(pa) | pgprot_val(prot));
 		return;
 	}
 
 	if (p4d_val(p4dp[p4d_index]) == 0) {
 		next_phys = pt_ops.alloc_pud(va);
-		p4dp[p4d_index] = pfn_p4d(PFN_DOWN(next_phys), PAGE_TABLE);
+		p4dp[p4d_index] = __p4d(__phys_to_pte_val(next_phys) | pgprot_val(PAGE_TABLE));
 		nextp = pt_ops.get_pud_virt(next_phys);
-		memset(nextp, 0, PAGE_SIZE);
+		memset(nextp, 0, MMUPAGE_SIZE);
 	} else {
-		next_phys = PFN_PHYS(_p4d_pfn(p4dp[p4d_index]));
+		next_phys = __pte_val_to_phys(p4d_val(p4dp[p4d_index]));
 		nextp = pt_ops.get_pud_virt(next_phys);
 	}
 
@@ -683,17 +683,17 @@ void __meminit create_pgd_mapping(pgd_t *pgdp, uintptr_t va, phys_addr_t pa, phy
 
 	if (sz == PGDIR_SIZE) {
 		if (pgd_val(pgdp[pgd_idx]) == 0)
-			pgdp[pgd_idx] = pfn_pgd(PFN_DOWN(pa), prot);
+			pgdp[pgd_idx] = __pgd(__phys_to_pte_val(pa) | pgprot_val(prot));
 		return;
 	}
 
 	if (pgd_val(pgdp[pgd_idx]) == 0) {
 		next_phys = alloc_pgd_next(va);
-		pgdp[pgd_idx] = pfn_pgd(PFN_DOWN(next_phys), PAGE_TABLE);
+		pgdp[pgd_idx] = __pgd(__phys_to_pte_val(next_phys) | pgprot_val(PAGE_TABLE));
 		nextp = get_pgd_next_virt(next_phys);
-		memset(nextp, 0, PAGE_SIZE);
+		memset(nextp, 0, MMUPAGE_SIZE);
 	} else {
-		next_phys = PFN_PHYS(_pgd_pfn(pgdp[pgd_idx]));
+		next_phys = __pte_val_to_phys(pgd_val(pgdp[pgd_idx]));
 		nextp = get_pgd_next_virt(next_phys);
 	}
 
@@ -703,7 +703,7 @@ void __meminit create_pgd_mapping(pgd_t *pgdp, uintptr_t va, phys_addr_t pa, phy
 static uintptr_t __meminit best_map_size(phys_addr_t pa, uintptr_t va, phys_addr_t size)
 {
 	if (debug_pagealloc_enabled())
-		return PAGE_SIZE;
+		return MMUPAGE_SIZE;
 
 	if (pgtable_l5_enabled &&
 	    !(pa & (P4D_SIZE - 1)) && !(va & (P4D_SIZE - 1)) && size >= P4D_SIZE)
@@ -717,7 +717,7 @@ static uintptr_t __meminit best_map_size(phys_addr_t pa, uintptr_t va, phys_addr
 	    !(pa & (PMD_SIZE - 1)) && !(va & (PMD_SIZE - 1)) && size >= PMD_SIZE)
 		return PMD_SIZE;
 
-	return PAGE_SIZE;
+	return MMUPAGE_SIZE;
 }
 
 #ifdef CONFIG_STRICT_KERNEL_RWX
@@ -863,7 +863,7 @@ retry:
 				(uintptr_t)early_p4d : (uintptr_t)early_pud,
 			   PGDIR_SIZE, PAGE_TABLE);
 
-	identity_satp = PFN_DOWN((uintptr_t)&early_pg_dir) | satp_mode;
+	identity_satp = ((uintptr_t)&early_pg_dir >> MMUPAGE_SHIFT) | satp_mode;
 
 	local_flush_tlb_all();
 	csr_write(CSR_SATP, identity_satp);
@@ -873,17 +873,17 @@ retry:
 	if (hw_satp != identity_satp) {
 		if (pgtable_l5_enabled) {
 			disable_pgtable_l5();
-			memset(early_pg_dir, 0, PAGE_SIZE);
+			memset(early_pg_dir, 0, MMUPAGE_SIZE);
 			goto retry;
 		}
 		disable_pgtable_l4();
 	}
 
 out:
-	memset(early_pg_dir, 0, PAGE_SIZE);
-	memset(early_p4d, 0, PAGE_SIZE);
-	memset(early_pud, 0, PAGE_SIZE);
-	memset(early_pmd, 0, PAGE_SIZE);
+	memset(early_pg_dir, 0, MMUPAGE_SIZE);
+	memset(early_p4d, 0, MMUPAGE_SIZE);
+	memset(early_pud, 0, MMUPAGE_SIZE);
+	memset(early_pmd, 0, MMUPAGE_SIZE);
 }
 #endif
 
@@ -930,7 +930,7 @@ static void __init create_fdt_early_page_table(uintptr_t fix_fdt_va,
 	uintptr_t pa = dtb_pa & ~(PMD_SIZE - 1);
 
 	/* Make sure the fdt fixmap address is always aligned on PMD size */
-	BUILD_BUG_ON(FIX_FDT % (PMD_SIZE / PAGE_SIZE));
+	BUILD_BUG_ON(FIX_FDT % (PMD_SIZE / MMUPAGE_SIZE));
 
 	/* In 32-bit only, the fdt lies in its own PGD */
 	if (!IS_ENABLED(CONFIG_64BIT)) {
@@ -1247,7 +1247,7 @@ static void __init create_linear_mapping_page_table(void)
 #endif
 
 #ifdef CONFIG_KFENCE
-	create_linear_mapping_range(kfence_pool, kfence_pool + KFENCE_POOL_SIZE, PAGE_SIZE, NULL);
+	create_linear_mapping_range(kfence_pool, kfence_pool + KFENCE_POOL_SIZE, MMUPAGE_SIZE, NULL);
 
 	memblock_clear_nomap(kfence_pool, KFENCE_POOL_SIZE);
 #endif
@@ -1288,7 +1288,7 @@ static void __init setup_vm_final(void)
 	clear_fixmap(FIX_P4D);
 
 	/* Move to swapper page table */
-	csr_write(CSR_SATP, PFN_DOWN(__pa_symbol(swapper_pg_dir)) | satp_mode);
+	csr_write(CSR_SATP, (__pa_symbol(swapper_pg_dir) >> MMUPAGE_SHIFT) | satp_mode);
 	local_flush_tlb_all();
 
 	pt_ops_set_late();
