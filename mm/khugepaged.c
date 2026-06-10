@@ -1264,6 +1264,20 @@ static enum scan_result collapse_scan_pmd(struct mm_struct *mm,
 
 	VM_BUG_ON(start_addr & ~HPAGE_PMD_MASK);
 
+#if PAGE_MMUSHIFT
+	/*
+	 * khugepaged PTE collapse assumes PAGE_SIZE == MMUPAGE_SIZE throughout:
+	 * iteration counts (HPAGE_PMD_NR), address strides (PAGE_SIZE),
+	 * and copy helpers (clear_user_highpage/copy_mc_user_highpage) all
+	 * operate at PAGE_SIZE granularity. With PAGE_MMUSHIFT > 0, a PMD's
+	 * PTE entries number HPAGE_PMD_NR * PAGE_MMUCOUNT and each maps
+	 * MMUPAGE_SIZE, not PAGE_SIZE. Disable collapse until sub-page
+	 * copy/clear helpers are implemented.
+	 */
+	result = SCAN_FAIL;
+	goto out;
+#endif
+
 	result = find_pmd_or_thp_or_none(mm, start_addr, &pmd);
 	if (result != SCAN_SUCCEED) {
 		cc->progress++;
@@ -1512,6 +1526,11 @@ static enum scan_result try_collapse_pte_mapped_thp(struct mm_struct *mm, unsign
 
 	mmap_assert_locked(mm);
 
+#if PAGE_MMUSHIFT
+	/* See comment in hpage_collapse_scan_pmd() */
+	return SCAN_FAIL;
+#endif
+
 	/* First check VMA found, in case page tables are being torn down */
 	if (!vma || !vma->vm_file ||
 	    !range_in_vma(vma, haddr, haddr + HPAGE_PMD_SIZE))
@@ -1537,7 +1556,7 @@ static enum scan_result try_collapse_pte_mapped_thp(struct mm_struct *mm, unsign
 		return SCAN_PTE_UFFD_WP;
 
 	folio = filemap_lock_folio(vma->vm_file->f_mapping,
-			       linear_page_index(vma, haddr));
+			       pgoff_mmu_to_page(linear_page_index(vma, haddr)));
 	if (IS_ERR(folio))
 		return SCAN_PAGE_NULL;
 
@@ -1785,7 +1804,7 @@ static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
 		spinlock_t *ptl;
 		bool success = false;
 
-		addr = vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
+		addr = pgoff_to_vma_addr(vma, pgoff);
 		if (addr & ~HPAGE_PMD_MASK ||
 		    vma->vm_end < addr + HPAGE_PMD_SIZE)
 			continue;
