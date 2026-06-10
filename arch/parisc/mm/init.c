@@ -35,7 +35,6 @@
 #include <asm/sparsemem.h>
 #include <asm/asm-offsets.h>
 #include <asm/shmbuf.h>
-
 extern int  data_start;
 extern void parisc_kernel_start(void);	/* Kernel entry point in head.S */
 
@@ -366,7 +365,7 @@ static void __ref map_pages(unsigned long start_vaddr,
 
 	/* for 2-level configuration PTRS_PER_PMD is 0 so start_pmd will be 0 */
 	start_pmd = ((start_vaddr >> PMD_SHIFT) & (PTRS_PER_PMD - 1));
-	start_pte = ((start_vaddr >> PAGE_SHIFT) & (PTRS_PER_PTE - 1));
+	start_pte = ((start_vaddr >> MMUPAGE_SHIFT) & (PTRS_PER_PTE - 1));
 
 	address = start_paddr;
 	vaddr = start_vaddr;
@@ -423,8 +422,8 @@ static void __ref map_pages(unsigned long start_vaddr,
 
 				set_pte(pg_table, pte);
 
-				address += PAGE_SIZE;
-				vaddr += PAGE_SIZE;
+				address += MMUPAGE_SIZE;
+				vaddr += MMUPAGE_SIZE;
 			}
 			start_pte = 0;
 
@@ -548,7 +547,7 @@ void __init mem_init(void)
 	BUILD_BUG_ON(PTE_ENTRY_SIZE != sizeof(pte_t));
 	BUILD_BUG_ON(PMD_ENTRY_SIZE != sizeof(pmd_t));
 	BUILD_BUG_ON(PGD_ENTRY_SIZE != sizeof(pgd_t));
-	BUILD_BUG_ON(PAGE_SHIFT + BITS_PER_PTE + BITS_PER_PMD + BITS_PER_PGD
+	BUILD_BUG_ON(PLD_SHIFT + BITS_PER_PTE + BITS_PER_PMD + BITS_PER_PGD
 			> BITS_PER_LONG);
 #if CONFIG_PGTABLE_LEVELS == 3
 	BUILD_BUG_ON(PT_INITIAL > PTRS_PER_PMD);
@@ -645,17 +644,19 @@ static void __init gateway_init(void)
 	   into not treating it as DP-relative data. */
 	extern void * const linux_gateway_page;
 
-	linux_gateway_page_addr = LINUX_GATEWAY_ADDR & PAGE_MASK;
+	linux_gateway_page_addr = LINUX_GATEWAY_ADDR & MMUPAGE_MASK;
 
 	/*
 	 * Setup Linux Gateway page.
 	 *
 	 * The Linux gateway page will reside in kernel space (on virtual
 	 * page 0), so it doesn't need to be aliased into user space.
+	 * Map only one hardware page — using PAGE_SIZE with PGCL would
+	 * overlap into the vmalloc range (KERNEL_MAP_START).
 	 */
 
 	map_pages(linux_gateway_page_addr, __pa(&linux_gateway_page),
-		  PAGE_SIZE, PAGE_GATEWAY, 1);
+		  MMUPAGE_SIZE, PAGE_GATEWAY, 1);
 }
 
 static void __init fixmap_init(void)
