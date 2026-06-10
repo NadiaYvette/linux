@@ -96,14 +96,10 @@ static int vmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 			unsigned int max_page_shift, pgtbl_mod_mask *mask)
 {
 	pte_t *pte;
-	u64 pfn;
 	struct page *page;
-	unsigned long size = PAGE_SIZE;
+	unsigned long size = MMUPAGE_SIZE;
+	phys_addr_t paddr = phys_addr;
 
-	if (WARN_ON_ONCE(!PAGE_ALIGNED(end - addr)))
-		return -EINVAL;
-
-	pfn = phys_addr >> PAGE_SHIFT;
 	pte = pte_alloc_kernel_track(pmd, addr, mask);
 	if (!pte)
 		return -ENOMEM;
@@ -112,6 +108,8 @@ static int vmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 
 	do {
 		if (unlikely(!pte_none(ptep_get(pte)))) {
+			u64 pfn = paddr >> PAGE_SHIFT;
+
 			if (pfn_valid(pfn)) {
 				page = pfn_to_page(pfn);
 				dump_page(page, "remapping already mapped page");
@@ -120,19 +118,44 @@ static int vmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 		}
 
 #ifdef CONFIG_HUGETLB_PAGE
-		size = arch_vmap_pte_range_map_size(addr, end, pfn, max_page_shift);
-		if (size != PAGE_SIZE) {
-			pte_t entry = pfn_pte(pfn, prot);
+		{
+			u64 pfn = paddr >> PAGE_SHIFT;
 
-			entry = arch_make_huge_pte(entry, ilog2(size), 0);
-			set_huge_pte_at(&init_mm, addr, pte, entry, size);
-			pfn += PFN_DOWN(size);
-			continue;
+			size = arch_vmap_pte_range_map_size(addr, end, pfn,
+							    max_page_shift);
+			if (size != PAGE_SIZE && size != MMUPAGE_SIZE) {
+				/*
+				 * pfn_pte(pfn, prot) at PGCL>0 with
+				 * paddr >> PAGE_SHIFT discards sub-PAGE
+				 * bits.  For MMIO ioremap whose paddr
+				 * may be MMUPAGE-aligned but not
+				 * PAGE-aligned (e.g. GICC at 0x8010000
+				 * under PAGE_SIZE=256KB), construct the
+				 * PTE directly from paddr.
+				 */
+				pte_t entry = __pte(__phys_to_pte_val(paddr) |
+						    pgprot_val(prot));
+
+				entry = arch_make_huge_pte(entry, ilog2(size),
+							   0);
+				set_huge_pte_at(&init_mm, addr, pte, entry,
+						size);
+				paddr += size;
+				continue;
+			}
+			size = MMUPAGE_SIZE;
 		}
 #endif
-		set_pte_at(&init_mm, addr, pte, pfn_pte(pfn, prot));
-		pfn++;
-	} while (pte += PFN_DOWN(size), addr += size, addr != end);
+		/*
+		 * With PAGE_MMUSHIFT > 0, paddr may be MMUPAGE-aligned
+		 * but not PAGE-aligned.  Use __phys_to_pte_val() to
+		 * correctly encode the sub-page physical address on all
+		 * architectures.
+		 */
+		set_pte_at(&init_mm, addr, pte,
+			   __pte(__phys_to_pte_val(paddr) | pgprot_val(prot)));
+		paddr += MMUPAGE_SIZE;
+	} while (pte += (size >> MMUPAGE_SHIFT), addr += size, addr != end);
 
 	lazy_mmu_mode_disable();
 	*mask |= PGTBL_PTE_MODIFIED;
@@ -354,7 +377,7 @@ int ioremap_page_range(unsigned long addr, unsigned long end,
 		return -EINVAL;
 	}
 	if (addr != (unsigned long)area->addr ||
-	    (void *)end != area->addr + get_vm_area_size(area)) {
+	    end > (unsigned long)area->addr + get_vm_area_size(area)) {
 		WARN_ONCE(1, "ioremap request [%lx,%lx) doesn't match vm_area [%lx, %lx)\n",
 			  addr, end, (long)area->addr,
 			  (long)area->addr + get_vm_area_size(area));
@@ -368,7 +391,7 @@ static void vunmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 {
 	pte_t *pte;
 	pte_t ptent;
-	unsigned long size = PAGE_SIZE;
+	unsigned long size = MMUPAGE_SIZE;
 
 	pte = pte_offset_kernel(pmd, addr);
 	lazy_mmu_mode_enable();
@@ -376,19 +399,22 @@ static void vunmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 	do {
 #ifdef CONFIG_HUGETLB_PAGE
 		size = arch_vmap_pte_range_unmap_size(addr, pte);
-		if (size != PAGE_SIZE) {
+		if (size != PAGE_SIZE && size != MMUPAGE_SIZE) {
 			if (WARN_ON(!IS_ALIGNED(addr, size))) {
 				addr = ALIGN_DOWN(addr, size);
-				pte = PTR_ALIGN_DOWN(pte, sizeof(*pte) * (size >> PAGE_SHIFT));
+				pte = PTR_ALIGN_DOWN(pte, sizeof(*pte) * (size >> MMUPAGE_SHIFT));
 			}
 			ptent = huge_ptep_get_and_clear(&init_mm, addr, pte, size);
 			if (WARN_ON(end - addr < size))
 				size = end - addr;
 		} else
 #endif
+		{
+			size = MMUPAGE_SIZE;
 			ptent = ptep_get_and_clear(&init_mm, addr, pte);
+		}
 		WARN_ON(!pte_none(ptent) && !pte_present(ptent));
-	} while (pte += (size >> PAGE_SHIFT), addr += size, addr != end);
+	} while (pte += (size >> MMUPAGE_SHIFT), addr += size, addr != end);
 
 	lazy_mmu_mode_disable();
 	*mask |= PGTBL_PTE_MODIFIED;
@@ -542,6 +568,7 @@ static int vmap_pages_pte_range(pmd_t *pmd, unsigned long addr,
 
 	do {
 		struct page *page = pages[*nr];
+		int sub;
 
 		if (WARN_ON(!pte_none(ptep_get(pte)))) {
 			err = -EBUSY;
@@ -556,9 +583,18 @@ static int vmap_pages_pte_range(pmd_t *pmd, unsigned long addr,
 			break;
 		}
 
-		set_pte_at(&init_mm, addr, pte, mk_pte(page, prot));
+		for (sub = 0; sub < PAGE_MMUCOUNT; sub++) {
+			phys_addr_t pa = page_to_phys(page) + sub * MMUPAGE_SIZE;
+
+			set_pte_at(&init_mm, addr, pte,
+				   __pte(__phys_to_pte_val(pa) | pgprot_val(prot)));
+			pte++;
+			addr += MMUPAGE_SIZE;
+			if (addr == end)
+				break;
+		}
 		(*nr)++;
-	} while (pte++, addr += PAGE_SIZE, addr != end);
+	} while (addr != end);
 
 	lazy_mmu_mode_disable();
 	*mask |= PGTBL_PTE_MODIFIED;
@@ -3599,18 +3635,18 @@ void *vmap_pfn(unsigned long *pfns, unsigned int count, pgprot_t prot)
 	struct vmap_pfn_data data = { .pfns = pfns, .prot = pgprot_nx(prot) };
 	struct vm_struct *area;
 
-	area = get_vm_area_caller(count * PAGE_SIZE, VM_IOREMAP,
+	area = get_vm_area_caller(count * MMUPAGE_SIZE, VM_IOREMAP,
 			__builtin_return_address(0));
 	if (!area)
 		return NULL;
 	if (apply_to_page_range(&init_mm, (unsigned long)area->addr,
-			count * PAGE_SIZE, vmap_pfn_apply, &data)) {
+			count * MMUPAGE_SIZE, vmap_pfn_apply, &data)) {
 		free_vm_area(area);
 		return NULL;
 	}
 
 	flush_cache_vmap((unsigned long)area->addr,
-			 (unsigned long)area->addr + count * PAGE_SIZE);
+			 (unsigned long)area->addr + count * MMUPAGE_SIZE);
 
 	return area->addr;
 }
@@ -3839,6 +3875,9 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 	unsigned int page_order;
 	unsigned int flags;
 	int ret;
+#ifdef CONFIG_HIGHMEM
+	bool highmem_zero;
+#endif
 
 	array_size = (unsigned long)nr_small_pages * sizeof(struct page *);
 
@@ -3848,6 +3887,18 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 
 	if (!(gfp_mask & (GFP_DMA | GFP_DMA32)))
 		gfp_mask |= __GFP_HIGHMEM;
+
+	/*
+	 * With PGCL, clear_highpage() maps MMUPAGE_SIZE via kmap but
+	 * clear_page() writes PAGE_SIZE bytes, overrunning the mapping.
+	 * Strip __GFP_ZERO from page allocation and zero after vmap.
+	 */
+#ifdef CONFIG_HIGHMEM
+	highmem_zero = (gfp_mask & __GFP_HIGHMEM) &&
+		       (gfp_mask & __GFP_ZERO);
+	if (highmem_zero)
+		gfp_mask &= ~__GFP_ZERO;
+#endif
 
 	/* Please note that the recursion is strictly bounded. */
 	if (array_size > PAGE_SIZE) {
@@ -3920,6 +3971,11 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 			area->nr_pages * PAGE_SIZE);
 		goto fail;
 	}
+
+#ifdef CONFIG_HIGHMEM
+	if (highmem_zero)
+		memset(area->addr, 0, size);
+#endif
 
 	return area->addr;
 
