@@ -346,8 +346,8 @@ cia_prepare_tbia_workaround(int window)
 static void __init
 verify_tb_operation(void)
 {
-	static int page[PAGE_SIZE/4]
-		__attribute__((aligned(PAGE_SIZE)))
+	static int page[MMUPAGE_SIZE/4]
+		__attribute__((aligned(MMUPAGE_SIZE)))
 		__initdata = { 0 };
 
 	struct pci_iommu_arena *arena = pci_isa_hose->sg_isa;
