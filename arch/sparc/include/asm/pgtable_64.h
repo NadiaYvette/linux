@@ -45,13 +45,16 @@
 #define VMALLOC_START		_AC(0x0000000100000000,UL)
 #define VMEMMAP_BASE		VMALLOC_END
 
-/* PMD_SHIFT determines the size of the area a second-level page
- * table can map
+/* Page table pages are MMUPAGE_SIZE (hardware page), each entry is 8 bytes.
+ * With PGCL, PAGE_SHIFT > MMUPAGE_SHIFT, but page table geometry must use
+ * MMUPAGE_SHIFT since PT pages are hardware-page-sized.
+ *
+ * PMD_SHIFT determines the size of the area a second-level page table can map.
  */
-#define PMD_SHIFT	(PAGE_SHIFT + (PAGE_SHIFT-3))
+#define PMD_SHIFT	(MMUPAGE_SHIFT + (MMUPAGE_SHIFT-3))
 #define PMD_SIZE	(_AC(1,UL) << PMD_SHIFT)
 #define PMD_MASK	(~(PMD_SIZE-1))
-#define PMD_BITS	(PAGE_SHIFT - 3)
+#define PMD_BITS	(MMUPAGE_SHIFT - 3)
 
 /* PUD_SHIFT determines the size of the area a third-level page
  * table can map
@@ -59,13 +62,13 @@
 #define PUD_SHIFT	(PMD_SHIFT + PMD_BITS)
 #define PUD_SIZE	(_AC(1,UL) << PUD_SHIFT)
 #define PUD_MASK	(~(PUD_SIZE-1))
-#define PUD_BITS	(PAGE_SHIFT - 3)
+#define PUD_BITS	(MMUPAGE_SHIFT - 3)
 
 /* PGDIR_SHIFT determines what a fourth-level page table entry can map */
 #define PGDIR_SHIFT	(PUD_SHIFT + PUD_BITS)
 #define PGDIR_SIZE	(_AC(1,UL) << PGDIR_SHIFT)
 #define PGDIR_MASK	(~(PGDIR_SIZE-1))
-#define PGDIR_BITS	(PAGE_SHIFT - 3)
+#define PGDIR_BITS	(MMUPAGE_SHIFT - 3)
 
 #if (MAX_PHYS_ADDRESS_BITS > PGDIR_SHIFT + PGDIR_BITS)
 #error MAX_PHYS_ADDRESS_BITS exceeds what kernel page tables can support
@@ -91,7 +94,7 @@ extern unsigned long VMALLOC_END;
 bool kern_addr_valid(unsigned long addr);
 
 /* Entries per page directory level. */
-#define PTRS_PER_PTE	(1UL << (PAGE_SHIFT-3))
+#define PTRS_PER_PTE	(1UL << (MMUPAGE_SHIFT-3))
 #define PTRS_PER_PMD	(1UL << PMD_BITS)
 #define PTRS_PER_PUD	(1UL << PUD_BITS)
 #define PTRS_PER_PGD	(1UL << PGDIR_BITS)
@@ -923,7 +926,7 @@ static inline void __set_pte_at(struct mm_struct *mm, unsigned long addr,
 	pte_t orig = *ptep;
 
 	*ptep = pte;
-	maybe_tlb_batch_add(mm, addr, ptep, orig, fullmm, PAGE_SHIFT);
+	maybe_tlb_batch_add(mm, addr, ptep, orig, fullmm, MMUPAGE_SHIFT);
 }
 
 #define PFN_PTE_SHIFT		PAGE_SHIFT
@@ -931,6 +934,26 @@ static inline void __set_pte_at(struct mm_struct *mm, unsigned long addr,
 static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 		pte_t *ptep, pte_t pte, unsigned int nr)
 {
+#if PAGE_MMUSHIFT > 0
+	if (nr == 1) {
+		/* Single PTE: caller already set up sub-page offset */
+		__set_pte_at(mm, addr, ptep, pte, 0);
+	} else {
+		unsigned int i;
+
+		/*
+		 * With page clustering, nr is the number of PTEs
+		 * (MMUPAGE-granular) to write.  Advance by MMUPAGE_SIZE
+		 * per PTE.
+		 */
+		for (i = 0; i < nr; i++) {
+			__set_pte_at(mm, addr, ptep, pte, 0);
+			ptep++;
+			addr += MMUPAGE_SIZE;
+			pte_val(pte) += MMUPAGE_SIZE;
+		}
+	}
+#else
 	for (;;) {
 		__set_pte_at(mm, addr, ptep, pte, 0);
 		if (--nr == 0)
@@ -939,6 +962,7 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 		pte_val(pte) += PAGE_SIZE;
 		addr += PAGE_SIZE;
 	}
+#endif
 }
 #define set_ptes set_ptes
 
@@ -1009,13 +1033,13 @@ pgtable_t pgtable_trans_huge_withdraw(struct mm_struct *mm, pmd_t *pmdp);
  *   1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
  *   --------------------> E <-- type ---> <------- zeroes -------->
  */
-#define __swp_type(entry)	(((entry).val >> PAGE_SHIFT) & 0x7fUL)
-#define __swp_offset(entry)	((entry).val >> (PAGE_SHIFT + 8UL))
+#define __swp_type(entry)	(((entry).val >> MMUPAGE_SHIFT) & 0x7fUL)
+#define __swp_offset(entry)	((entry).val >> (MMUPAGE_SHIFT + 8UL))
 #define __swp_entry(type, offset)	\
 	( (swp_entry_t) \
 	  { \
-		((((long)(type) & 0x7fUL) << PAGE_SHIFT) | \
-                 ((long)(offset) << (PAGE_SHIFT + 8UL))) \
+		((((long)(type) & 0x7fUL) << MMUPAGE_SHIFT) | \
+                 ((long)(offset) << (MMUPAGE_SHIFT + 8UL))) \
 	  } )
 #define __pte_to_swp_entry(pte)		((swp_entry_t) { pte_val(pte) })
 #define __swp_entry_to_pte(x)		((pte_t) { (x).val })

@@ -47,15 +47,21 @@ static int __init init_vdso_image(const struct vdso_image *image,
 				  struct vm_special_mapping *vdso_mapping,
 				  bool elf64)
 {
-	int cnpages = (image->size) / PAGE_SIZE;
+	/*
+	 * With PGCL, PAGE_SIZE > MMUPAGE_SIZE.  The vDSO image is sized in
+	 * MMUPAGE units (hardware pages), so use MMUPAGE_SIZE throughout.
+	 * Multiple MMUPAGE slots may share the same kernel page.
+	 */
+	int cnpages = (image->size) / MMUPAGE_SIZE;
+	int knpages = DIV_ROUND_UP(image->size, PAGE_SIZE);
 	struct page *cp, **cpp = NULL;
 	int i;
 
 	/*
 	 * First, the vdso text.  This is initialied data, an integral number of
-	 * pages long.
+	 * MMU pages long.
 	 */
-	if (WARN_ON(image->size % PAGE_SIZE != 0))
+	if (WARN_ON(image->size % MMUPAGE_SIZE != 0))
 		goto oom;
 
 	cpp = kzalloc_objs(struct page *, cnpages);
@@ -64,19 +70,35 @@ static int __init init_vdso_image(const struct vdso_image *image,
 	if (!cpp)
 		goto oom;
 
-	for (i = 0; i < cnpages; i++) {
+	/*
+	 * Allocate kernel pages and copy vDSO data.  Each kernel page holds
+	 * PAGE_MMUCOUNT MMUPAGEs.  Fill the pages[] array so that each
+	 * MMUPAGE slot points to the kernel page containing it.
+	 */
+	for (i = 0; i < knpages; i++) {
+		unsigned long off = (unsigned long)i * PAGE_SIZE;
+		unsigned long len = min_t(unsigned long, PAGE_SIZE,
+					  image->size - off);
+		int j;
+
 		cp = alloc_page(GFP_KERNEL);
 		if (!cp)
 			goto oom;
-		cpp[i] = cp;
-		copy_page(page_address(cp), image->data + i * PAGE_SIZE);
+		memcpy(page_address(cp), image->data + off, len);
+		if (len < PAGE_SIZE)
+			memset(page_address(cp) + len, 0, PAGE_SIZE - len);
+
+		/* Point all MMUPAGE slots within this kernel page */
+		for (j = 0; j < PAGE_MMUCOUNT && (i * PAGE_MMUCOUNT + j) < cnpages; j++)
+			cpp[i * PAGE_MMUCOUNT + j] = cp;
 	}
 
 	return 0;
  oom:
 	if (cpp != NULL) {
 		for (i = 0; i < cnpages; i++) {
-			if (cpp[i] != NULL)
+			/* Only free each kernel page once (first slot) */
+			if (cpp[i] != NULL && (i % PAGE_MMUCOUNT == 0))
 				__free_page(cpp[i]);
 		}
 		kfree(cpp);
@@ -114,7 +136,7 @@ static unsigned long vdso_addr(unsigned long start, unsigned int len)
 
 	/* This loses some more bits than a modulo, but is cheaper */
 	offset = get_random_u32_below(PTRS_PER_PTE);
-	return start + (offset << PAGE_SHIFT);
+	return start + (offset << MMUPAGE_SHIFT);
 }
 
 static_assert(VDSO_NR_PAGES == __VDSO_PAGES);
@@ -122,7 +144,7 @@ static_assert(VDSO_NR_PAGES == __VDSO_PAGES);
 static int map_vdso(const struct vdso_image *image,
 		struct vm_special_mapping *vdso_mapping)
 {
-	const size_t area_size = image->size + VDSO_NR_PAGES * PAGE_SIZE;
+	const size_t area_size = image->size + VDSO_NR_PAGES * MMUPAGE_SIZE;
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
 	unsigned long text_start, addr = 0;
@@ -148,7 +170,7 @@ static int map_vdso(const struct vdso_image *image,
 		goto up_fail;
 	}
 
-	text_start = addr + VDSO_NR_PAGES * PAGE_SIZE;
+	text_start = addr + VDSO_NR_PAGES * MMUPAGE_SIZE;
 	current->mm->context.vdso = (void __user *)text_start;
 
 	/*

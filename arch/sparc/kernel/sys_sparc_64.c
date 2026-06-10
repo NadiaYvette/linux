@@ -83,7 +83,7 @@ static inline unsigned long COLOR_ALIGN(unsigned long addr,
 					 unsigned long pgoff)
 {
 	unsigned long base = (addr+SHMLBA-1)&~(SHMLBA-1);
-	unsigned long off = (pgoff<<PAGE_SHIFT) & (SHMLBA-1);
+	unsigned long off = (pgoff<<MMUPAGE_SHIFT) & (SHMLBA-1);
 
 	return base + off;
 }
@@ -93,7 +93,17 @@ static unsigned long get_align_mask(struct file *filp, unsigned long flags)
 	if (filp && is_file_hugepages(filp))
 		return huge_page_mask_align(filp);
 	if (filp || (flags & MAP_SHARED))
-		return PAGE_MASK & (SHMLBA - 1);
+		/*
+		 * Cache-colour alignment.  The colour bits live between the
+		 * userspace base-page boundary (MMUPAGE_SHIFT) and SHMLBA.
+		 * Use MMUPAGE_MASK, not PAGE_MASK: under page clustering
+		 * (PAGE_MMUSHIFT>0) PAGE_SIZE can exceed SHMLBA (e.g. 512K
+		 * vs 16K), so PAGE_MASK & (SHMLBA-1) collapses to 0 and the
+		 * shared/file mapping is returned only MMUPAGE-aligned, not
+		 * SHMLBA-coloured -- which then trips the MAP_FIXED colour
+		 * sanity check on any later MREMAP_FIXED of that mapping.
+		 */
+		return MMUPAGE_MASK & (SHMLBA - 1);
 
 	return 0;
 }
@@ -115,7 +125,7 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr, unsi
 		 * cache aliasing constraints.
 		 */
 		if (!file_hugepage && (flags & MAP_SHARED) &&
-		    ((addr - (pgoff << PAGE_SHIFT)) & (SHMLBA - 1)))
+		    ((addr - (pgoff << MMUPAGE_SHIFT)) & (SHMLBA - 1)))
 			return -EINVAL;
 		return addr;
 	}
@@ -146,10 +156,10 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr, unsi
 	info.high_limit = min(task_size, VA_EXCLUDE_START);
 	info.align_mask = get_align_mask(filp, flags);
 	if (!file_hugepage)
-		info.align_offset = pgoff << PAGE_SHIFT;
+		info.align_offset = pgoff << MMUPAGE_SHIFT;
 	addr = vm_unmapped_area(&info);
 
-	if ((addr & ~PAGE_MASK) && task_size > VA_EXCLUDE_END) {
+	if ((addr & ~MMUPAGE_MASK) && task_size > VA_EXCLUDE_END) {
 		VM_BUG_ON(addr != -ENOMEM);
 		info.low_limit = VA_EXCLUDE_END;
 		info.high_limit = task_size;
@@ -183,7 +193,7 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 		 * cache aliasing constraints.
 		 */
 		if (!file_hugepage && (flags & MAP_SHARED) &&
-		    ((addr - (pgoff << PAGE_SHIFT)) & (SHMLBA - 1)))
+		    ((addr - (pgoff << MMUPAGE_SHIFT)) & (SHMLBA - 1)))
 			return -EINVAL;
 		return addr;
 	}
@@ -214,7 +224,7 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 	info.high_limit = mm->mmap_base;
 	info.align_mask = get_align_mask(filp, flags);
 	if (!file_hugepage)
-		info.align_offset = pgoff << PAGE_SHIFT;
+		info.align_offset = pgoff << MMUPAGE_SHIFT;
 	addr = vm_unmapped_area(&info);
 
 	/*
@@ -223,7 +233,7 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 	 * can happen with large stack limits and large mmap()
 	 * allocations.
 	 */
-	if (addr & ~PAGE_MASK) {
+	if (addr & ~MMUPAGE_MASK) {
 		VM_BUG_ON(addr != -ENOMEM);
 		info.flags = 0;
 		info.low_limit = TASK_UNMAPPED_BASE;
@@ -475,11 +485,11 @@ SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
 {
 	unsigned long retval = -EINVAL;
 
-	if ((off + PAGE_ALIGN(len)) < off)
+	if ((off + MMUPAGE_ALIGN(len)) < off)
 		goto out;
-	if (off & ~PAGE_MASK)
+	if (off & ~MMUPAGE_MASK)
 		goto out;
-	retval = ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> PAGE_SHIFT);
+	retval = ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> MMUPAGE_SHIFT);
 out:
 	return retval;
 }

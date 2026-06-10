@@ -330,10 +330,34 @@ static void __update_mmu_tsb_insert(struct mm_struct *mm, unsigned long tsb_inde
 #ifdef CONFIG_HUGETLB_PAGE
 static int __init hugetlbpage_init(void)
 {
-	hugetlb_add_hstate(HPAGE_64K_SHIFT - PAGE_SHIFT);
-	hugetlb_add_hstate(HPAGE_SHIFT - PAGE_SHIFT);
-	hugetlb_add_hstate(HPAGE_256MB_SHIFT - PAGE_SHIFT);
-	hugetlb_add_hstate(HPAGE_2GB_SHIFT - PAGE_SHIFT);
+	/*
+	 * mm/hugetlb.c BUG_ONs hugetlb_add_hstate with order <
+	 * order_base_2(__NR_USED_SUBPAGE) (== 2): a hstate must have
+	 * at least __NR_USED_SUBPAGE sub-pages for tail-page bookkeeping.
+	 * Under PGCL (PAGE_SHIFT = MMUPAGE_SHIFT + CONFIG_PAGE_MMUSHIFT)
+	 * the kernel PAGE can grow past a given HPAGE_*_SHIFT, in which
+	 * case the corresponding hstate has too few (or zero) sub-pages.
+	 *
+	 * Concretely on sparc64 (MMUPAGE_SHIFT == 13):
+	 *   PGCL=2 (PAGE_SHIFT=15) HPAGE_64K_SHIFT - PAGE_SHIFT = 1 → BUG
+	 *   PGCL=4 (PAGE_SHIFT=17) HPAGE_64K_SHIFT - PAGE_SHIFT < 0 (handled
+	 *     by the existing > PAGE_SHIFT gate)
+	 * The larger sizes are safe up to PGCL=6 today, but apply the
+	 * same guard uniformly so future PGCL bumps are not load-bearing
+	 * for these arithmetic margins.
+	 */
+#define ADD_HSTATE_IF_FITS(shift) do {					\
+	int __order = (int)(shift) - PAGE_SHIFT;			\
+	if (__order >= order_base_2(__NR_USED_SUBPAGE))			\
+		hugetlb_add_hstate(__order);				\
+} while (0)
+
+	ADD_HSTATE_IF_FITS(HPAGE_64K_SHIFT);
+	ADD_HSTATE_IF_FITS(HPAGE_SHIFT);
+	ADD_HSTATE_IF_FITS(HPAGE_256MB_SHIFT);
+	ADD_HSTATE_IF_FITS(HPAGE_2GB_SHIFT);
+
+#undef ADD_HSTATE_IF_FITS
 
 	return 0;
 }
@@ -412,7 +436,7 @@ void update_mmu_cache_range(struct vm_fault *vmf, struct vm_area_struct *vma,
 	is_huge_tsb = false;
 #if defined(CONFIG_HUGETLB_PAGE) || defined(CONFIG_TRANSPARENT_HUGEPAGE)
 	if (mm->context.hugetlb_pte_count || mm->context.thp_pte_count) {
-		unsigned long hugepage_size = PAGE_SIZE;
+		unsigned long hugepage_size = MMUPAGE_SIZE;
 
 		if (is_vm_hugetlb_page(vma))
 			hugepage_size = huge_page_size(hstate_vma(vma));
@@ -440,11 +464,24 @@ void update_mmu_cache_range(struct vm_fault *vmf, struct vm_area_struct *vma,
 	}
 #endif
 	if (!is_huge_tsb) {
-		for (i = 0; i < nr; i++) {
-			__update_mmu_tsb_insert(mm, MM_TSB_BASE, PAGE_SHIFT,
+		if (nr == 1) {
+			/* Single PTE: only one MMUPAGE has a page table entry */
+			__update_mmu_tsb_insert(mm, MM_TSB_BASE, MMUPAGE_SHIFT,
 						address, pte_val(pte));
-			address += PAGE_SIZE;
-			pte_val(pte) += PAGE_SIZE;
+		} else {
+			/*
+			 * nr is the number of PTEs (MMUPAGE-granular) that
+			 * exist in the page table.  Insert one TSB entry per
+			 * PTE.  Do NOT multiply by PAGE_MMUCOUNT — callers
+			 * already pass the MMUPAGE count.
+			 */
+			for (i = 0; i < nr; i++) {
+				__update_mmu_tsb_insert(mm, MM_TSB_BASE,
+							MMUPAGE_SHIFT,
+							address, pte_val(pte));
+				address += MMUPAGE_SIZE;
+				pte_val(pte) += MMUPAGE_SIZE;
+			}
 		}
 	}
 
@@ -2490,10 +2527,26 @@ static void __init register_page_bootmem_info(void)
 
 void __init arch_setup_zero_pages(void)
 {
+#if PAGE_MMUSHIFT > 0
+	/*
+	 * PGCL: the static empty_zero_page buffer is only MMUPAGE_SIZE
+	 * aligned (assembler limit on some arches forced relaxation in
+	 * mm_init.c).  Using its symbol address would yield a struct
+	 * page covering a kernel page that also contains adjacent BSS
+	 * data, leaking it through the zero-page mapping.  Allocate a
+	 * fresh PAGE_SIZE-aligned zero page from memblock instead.
+	 */
+	void *z = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
+
+	if (!z)
+		panic("Failed to allocate zero page");
+	__zero_page = virt_to_page(z);
+#else
 	phys_addr_t zero_page_pa = kern_base +
 		((unsigned long)&empty_zero_page[0] - KERNBASE);
 
 	__zero_page = phys_to_page(zero_page_pa);
+#endif
 }
 
 void __init mem_init(void)
@@ -3105,7 +3158,14 @@ void copy_user_highpage(struct page *to, struct page *from,
 
 	vfrom = kmap_atomic(from);
 	vto = kmap_atomic(to);
+#if PAGE_MMUSHIFT > 0
+	/* TLBTEMP TLB entry maps MMUPAGE_SIZE, can't cover full PAGE_SIZE.
+	 * Use regular copy_page; D-cache flush handled by set_pte_at.
+	 */
+	copy_page(vto, vfrom);
+#else
 	copy_user_page(vto, vfrom, vaddr, to);
+#endif
 	kunmap_atomic(vto);
 	kunmap_atomic(vfrom);
 
