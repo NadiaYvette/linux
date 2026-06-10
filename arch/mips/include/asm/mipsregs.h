@@ -322,34 +322,38 @@
 #define PM_1G		0x7fffe000
 
 /*
- * Default page size for a given kernel configuration
+ * Default page size for a given kernel configuration.
+ * With PGCL (PAGE_MMUSHIFT > 0), CONFIG_PAGE_SIZE_* reflects the kernel
+ * allocation granularity, not the hardware MMU page size.  PM_DEFAULT_MASK
+ * must match the hardware page size (MMUPAGE_SIZE = 1 << CONFIG_PAGE_SHIFT).
  */
-#ifdef CONFIG_PAGE_SIZE_4KB
+#if CONFIG_PAGE_SHIFT == 12
 #define PM_DEFAULT_MASK PM_4K
-#elif defined(CONFIG_PAGE_SIZE_8KB)
+#elif CONFIG_PAGE_SHIFT == 13
 #define PM_DEFAULT_MASK PM_8K
-#elif defined(CONFIG_PAGE_SIZE_16KB)
+#elif CONFIG_PAGE_SHIFT == 14
 #define PM_DEFAULT_MASK PM_16K
-#elif defined(CONFIG_PAGE_SIZE_32KB)
+#elif CONFIG_PAGE_SHIFT == 15
 #define PM_DEFAULT_MASK PM_32K
-#elif defined(CONFIG_PAGE_SIZE_64KB)
+#elif CONFIG_PAGE_SHIFT == 16
 #define PM_DEFAULT_MASK PM_64K
 #else
 #error Bad page size configuration!
 #endif
 
 /*
- * Default huge tlb size for a given kernel configuration
+ * Default huge tlb size for a given kernel configuration.
+ * Must match hardware page size (CONFIG_PAGE_SHIFT), not kernel page size.
  */
-#ifdef CONFIG_PAGE_SIZE_4KB
+#if CONFIG_PAGE_SHIFT == 12
 #define PM_HUGE_MASK	PM_1M
-#elif defined(CONFIG_PAGE_SIZE_8KB)
+#elif CONFIG_PAGE_SHIFT == 13
 #define PM_HUGE_MASK	PM_4M
-#elif defined(CONFIG_PAGE_SIZE_16KB)
+#elif CONFIG_PAGE_SHIFT == 14
 #define PM_HUGE_MASK	PM_16M
-#elif defined(CONFIG_PAGE_SIZE_32KB)
+#elif CONFIG_PAGE_SHIFT == 15
 #define PM_HUGE_MASK	PM_64M
-#elif defined(CONFIG_PAGE_SIZE_64KB)
+#elif CONFIG_PAGE_SHIFT == 16
 #define PM_HUGE_MASK	PM_256M
 #elif defined(CONFIG_MIPS_HUGE_TLB_SUPPORT)
 #error Bad page size configuration for hugetlbfs!

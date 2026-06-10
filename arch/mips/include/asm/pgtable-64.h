@@ -40,26 +40,30 @@
  */
 
 
-/* PGDIR_SHIFT determines what a third-level page table entry can map */
+/*
+ * PGDIR_SHIFT determines what a third-level page table entry can map.
+ * Page table pages are MMUPAGE-sized (hardware page), so all shift
+ * calculations use MMUPAGE_SHIFT for entries-per-table-page (log2(MMUPAGE_SIZE/8)).
+ */
 #ifdef __PAGETABLE_PMD_FOLDED
-#define PGDIR_SHIFT	(PAGE_SHIFT + PAGE_SHIFT - 3)
+#define PGDIR_SHIFT	(2 * MMUPAGE_SHIFT - 3)
 #else
 
 /* PMD_SHIFT determines the size of the area a second-level page table can map */
-#define PMD_SHIFT	(PAGE_SHIFT + (PAGE_SHIFT - 3))
+#define PMD_SHIFT	(2 * MMUPAGE_SHIFT - 3)
 #define PMD_SIZE	(1UL << PMD_SHIFT)
 #define PMD_MASK	(~(PMD_SIZE-1))
 
 # ifdef __PAGETABLE_PUD_FOLDED
-# define PGDIR_SHIFT	(PMD_SHIFT + (PAGE_SHIFT + PMD_TABLE_ORDER - 3))
+# define PGDIR_SHIFT	(PMD_SHIFT + (MMUPAGE_SHIFT + PMD_TABLE_ORDER - 3))
 # endif
 #endif
 
 #ifndef __PAGETABLE_PUD_FOLDED
-#define PUD_SHIFT	(PMD_SHIFT + (PAGE_SHIFT + PMD_TABLE_ORDER - 3))
+#define PUD_SHIFT	(PMD_SHIFT + (MMUPAGE_SHIFT + PMD_TABLE_ORDER - 3))
 #define PUD_SIZE	(1UL << PUD_SHIFT)
 #define PUD_MASK	(~(PUD_SIZE-1))
-#define PGDIR_SHIFT	(PUD_SHIFT + (PAGE_SHIFT + PUD_TABLE_ORDER - 3))
+#define PGDIR_SHIFT	(PUD_SHIFT + (MMUPAGE_SHIFT + PUD_TABLE_ORDER - 3))
 #endif
 
 #define PGDIR_SIZE	(1UL << PGDIR_SHIFT)
@@ -122,14 +126,18 @@
 #endif
 #endif
 
-#define PTRS_PER_PGD	((PAGE_SIZE << PGD_TABLE_ORDER) / sizeof(pgd_t))
+/*
+ * Page table pages are MMUPAGE-sized.  Use MMUPAGE_SIZE for entry counts
+ * so TLB refill andi masks fit in 16-bit immediates.
+ */
+#define PTRS_PER_PGD	((MMUPAGE_SIZE << PGD_TABLE_ORDER) / sizeof(pgd_t))
 #ifndef __PAGETABLE_PUD_FOLDED
-#define PTRS_PER_PUD	((PAGE_SIZE << PUD_TABLE_ORDER) / sizeof(pud_t))
+#define PTRS_PER_PUD	((MMUPAGE_SIZE << PUD_TABLE_ORDER) / sizeof(pud_t))
 #endif
 #ifndef __PAGETABLE_PMD_FOLDED
-#define PTRS_PER_PMD	((PAGE_SIZE << PMD_TABLE_ORDER) / sizeof(pmd_t))
+#define PTRS_PER_PMD	((MMUPAGE_SIZE << PMD_TABLE_ORDER) / sizeof(pmd_t))
 #endif
-#define PTRS_PER_PTE	(PAGE_SIZE / sizeof(pte_t))
+#define PTRS_PER_PTE	(MMUPAGE_SIZE / sizeof(pte_t))
 
 #define USER_PTRS_PER_PGD       ((TASK_SIZE64 / PGDIR_SIZE)?(TASK_SIZE64 / PGDIR_SIZE):1)
 
@@ -141,7 +149,7 @@
 #define VMALLOC_START		(MAP_BASE + (2 * PAGE_SIZE))
 #define VMALLOC_END	\
 	(MAP_BASE + \
-	 min(PTRS_PER_PGD * PTRS_PER_PUD * PTRS_PER_PMD * PTRS_PER_PTE * PAGE_SIZE, \
+	 min(PTRS_PER_PGD * PTRS_PER_PUD * PTRS_PER_PMD * PTRS_PER_PTE * MMUPAGE_SIZE, \
 	     (1UL << cpu_vmbits)) - (1UL << 32))
 
 #if defined(CONFIG_MODULES) && defined(KBUILD_64BIT_SYM32) && \
@@ -188,7 +196,8 @@ static inline int p4d_none(p4d_t p4d)
 
 static inline int p4d_bad(p4d_t p4d)
 {
-	if (unlikely(p4d_val(p4d) & ~PAGE_MASK))
+	/* See pmd_bad() comment: page tables are MMUPAGE-aligned. */
+	if (unlikely(p4d_val(p4d) & ~MMUPAGE_MASK))
 		return 1;
 
 	return 0;
@@ -250,7 +259,13 @@ static inline int pmd_bad(pmd_t pmd)
 		return 0;
 #endif
 
-	if (unlikely(pmd_val(pmd) & ~PAGE_MASK))
+	/*
+	 * Page tables are MMUPAGE-sized.  Under PGCL the kernel page can
+	 * host multiple MMUPAGE-aligned PTE sub-tables (see arch/mips/mm/
+	 * pgtable_pte.c), so checking against ~PAGE_MASK would falsely
+	 * reject every sub-table at non-zero sub-page offset.
+	 */
+	if (unlikely(pmd_val(pmd) & ~MMUPAGE_MASK))
 		return 1;
 
 	return 0;
@@ -282,7 +297,8 @@ static inline int pud_none(pud_t pud)
 
 static inline int pud_bad(pud_t pud)
 {
-	return pud_val(pud) & ~PAGE_MASK;
+	/* See pmd_bad() comment: page tables are MMUPAGE-aligned. */
+	return pud_val(pud) & ~MMUPAGE_MASK;
 }
 
 static inline int pud_present(pud_t pud)
@@ -298,9 +314,15 @@ static inline void pud_clear(pud_t *pudp)
 
 #define pte_page(x)		pfn_to_page(pte_pfn(x))
 
-#define pte_pfn(x)		((unsigned long)((x).pte >> PFN_PTE_SHIFT))
-#define pfn_pte(pfn, prot)	__pte(((pfn) << PFN_PTE_SHIFT) | pgprot_val(prot))
-#define pfn_pmd(pfn, prot)	__pmd(((pfn) << PFN_PTE_SHIFT) | pgprot_val(prot))
+/*
+ * pte_pfn returns a PAGE-granular PFN (phys >> PAGE_SHIFT).
+ * pfn_pte accepts a PAGE-granular PFN.
+ * With PGCL, PFN_PTE_SHIFT is MMUPAGE-based, so we shift by an extra
+ * PAGE_MMUSHIFT to get/set PAGE-granular PFNs.
+ */
+#define pte_pfn(x)		((unsigned long)((x).pte >> (PFN_PTE_SHIFT + PAGE_MMUSHIFT)))
+#define pfn_pte(pfn, prot)	__pte(((unsigned long)(pfn) << (PFN_PTE_SHIFT + PAGE_MMUSHIFT)) | pgprot_val(prot))
+#define pfn_pmd(pfn, prot)	__pmd(((unsigned long)(pfn) << (PFN_PTE_SHIFT + PAGE_MMUSHIFT)) | pgprot_val(prot))
 
 #ifndef __PAGETABLE_PMD_FOLDED
 static inline pmd_t *pud_pgtable(pud_t pud)

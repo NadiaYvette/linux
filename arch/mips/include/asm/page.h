@@ -16,6 +16,17 @@
 
 #include <vdso/page.h>
 
+#ifdef CONFIG_PACK_PTE_PTLOCKS
+/*
+ * mips packs PAGE_MMUCOUNT MMUPAGE-sized PTE tables into one PAGE_SIZE
+ * ptdesc; tell the generic ptlock allocator to size the per-ptdesc lock
+ * array accordingly so each sub-table has its own spinlock and
+ * copy_page_range() doesn't deadlock when src and dst share a ptdesc.
+ * See arch/mips/mm/pgtable_pte.c.
+ */
+#define PTE_PACK_ORDER	PAGE_MMUSHIFT
+#endif
+
 /*
  * This is used for calculating the real page sizes
  * for FTLB or VTLB + FTLB configurations.
@@ -24,15 +35,15 @@ static inline unsigned int page_size_ftlb(unsigned int mmuextdef)
 {
 	switch (mmuextdef) {
 	case MIPS_CONF4_MMUEXTDEF_FTLBSIZEEXT:
-		if (PAGE_SIZE == (1 << 30))
+		if (MMUPAGE_SIZE == (1 << 30))
 			return 5;
-		if (PAGE_SIZE == (1llu << 32))
+		if (MMUPAGE_SIZE == (1llu << 32))
 			return 6;
-		if (PAGE_SIZE > (256 << 10))
+		if (MMUPAGE_SIZE > (256 << 10))
 			return 7; /* reserved */
 		fallthrough;
 	case MIPS_CONF4_MMUEXTDEF_VTLBSIZEEXT:
-		return (PAGE_SHIFT - 10) / 2;
+		return (MMUPAGE_SHIFT - 10) / 2;
 	default:
 		panic("Invalid FTLB configuration with Conf4_mmuextdef=%d value\n",
 		      mmuextdef >> 14);
@@ -40,7 +51,7 @@ static inline unsigned int page_size_ftlb(unsigned int mmuextdef)
 }
 
 #ifdef CONFIG_MIPS_HUGE_TLB_SUPPORT
-#define HPAGE_SHIFT	(PAGE_SHIFT + PAGE_SHIFT - 3)
+#define HPAGE_SHIFT	(2 * MMUPAGE_SHIFT - 3)
 #define HPAGE_SIZE	(_AC(1,UL) << HPAGE_SHIFT)
 #define HPAGE_MASK	(~(HPAGE_SIZE - 1))
 #define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
@@ -116,7 +127,15 @@ typedef struct { unsigned long pte; } pte_t;
 #define pte_val(x)	((x).pte)
 #define __pte(x)	((pte_t) { (x) } )
 #endif
-typedef struct page *pgtable_t;
+/*
+ * pgtable_t is the type passed to pmd_populate() / pte_free() and stored in
+ * the deposited-pgtable list for THP.  Use pte_t * directly (the address of
+ * the actual hardware PTE table) rather than struct page * so that PGCL can
+ * pack multiple MMUPAGE-sized PTE tables into one kernel PAGE_SIZE chunk:
+ * each sub-table has its own pte_t * but maps to the same struct page.
+ * Modeled after sparc64 / m68k-coldfire.
+ */
+typedef pte_t *pgtable_t;
 
 /*
  * Right now we don't support 4-level pagetables, so all pud-related
