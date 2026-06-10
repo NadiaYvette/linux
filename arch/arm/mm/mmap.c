@@ -13,9 +13,15 @@
 #include <linux/random.h>
 #include <asm/cachetype.h>
 
+/*
+ * pgoff is in MMUPAGE units (hardware base pages), so the byte offset used
+ * for cache colouring is pgoff << MMUPAGE_SHIFT, not PAGE_SHIFT.  Under page
+ * clustering (PAGE_MMUSHIFT > 0) PAGE_SIZE > MMUPAGE_SIZE and using PAGE_SHIFT
+ * miscomputes the colour.
+ */
 #define COLOUR_ALIGN(addr,pgoff)		\
 	((((addr)+SHMLBA-1)&~(SHMLBA-1)) +	\
-	 (((pgoff)<<PAGE_SHIFT) & (SHMLBA-1)))
+	 (((pgoff)<<MMUPAGE_SHIFT) & (SHMLBA-1)))
 
 /*
  * We need to ensure that shared mappings are correctly aligned to
@@ -49,7 +55,7 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
 	 */
 	if (flags & MAP_FIXED) {
 		if (aliasing && flags & MAP_SHARED &&
-		    (addr - (pgoff << PAGE_SHIFT)) & (SHMLBA - 1))
+		    (addr - (pgoff << MMUPAGE_SHIFT)) & (SHMLBA - 1))
 			return -EINVAL;
 		return addr;
 	}
@@ -72,8 +78,8 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
 	info.length = len;
 	info.low_limit = mm->mmap_base;
 	info.high_limit = TASK_SIZE;
-	info.align_mask = do_align ? (PAGE_MASK & (SHMLBA - 1)) : 0;
-	info.align_offset = pgoff << PAGE_SHIFT;
+	info.align_mask = do_align ? (MMUPAGE_MASK & (SHMLBA - 1)) : 0;
+	info.align_offset = pgoff << MMUPAGE_SHIFT;
 	return vm_unmapped_area(&info);
 }
 
@@ -102,7 +108,7 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 
 	if (flags & MAP_FIXED) {
 		if (aliasing && flags & MAP_SHARED &&
-		    (addr - (pgoff << PAGE_SHIFT)) & (SHMLBA - 1))
+		    (addr - (pgoff << MMUPAGE_SHIFT)) & (SHMLBA - 1))
 			return -EINVAL;
 		return addr;
 	}
@@ -123,8 +129,8 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 	info.length = len;
 	info.low_limit = FIRST_USER_ADDRESS;
 	info.high_limit = mm->mmap_base;
-	info.align_mask = do_align ? (PAGE_MASK & (SHMLBA - 1)) : 0;
-	info.align_offset = pgoff << PAGE_SHIFT;
+	info.align_mask = do_align ? (MMUPAGE_MASK & (SHMLBA - 1)) : 0;
+	info.align_offset = pgoff << MMUPAGE_SHIFT;
 	addr = vm_unmapped_area(&info);
 
 	/*
@@ -133,7 +139,7 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 	 * can happen with large stack limits and large mmap()
 	 * allocations.
 	 */
-	if (addr & ~PAGE_MASK) {
+	if (addr & ~MMUPAGE_MASK) {
 		VM_BUG_ON(addr != -ENOMEM);
 		info.flags = 0;
 		info.low_limit = mm->mmap_base;

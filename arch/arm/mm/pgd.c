@@ -20,7 +20,7 @@
 #define _pgd_alloc(mm)		kmalloc_objs(pgd_t, PTRS_PER_PGD, GFP_KERNEL | __GFP_ZERO)
 #define _pgd_free(mm, pgd)	kfree(pgd)
 #else
-#define _pgd_alloc(mm)		__pgd_alloc(mm, 2)
+#define _pgd_alloc(mm)		__pgd_alloc(mm, get_order(PGD_SIZE))
 #define _pgd_free(mm, pgd)	__pgd_free(mm, pgd)
 #endif
 
