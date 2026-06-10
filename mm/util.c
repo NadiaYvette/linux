@@ -1538,7 +1538,7 @@ EXPORT_SYMBOL(mmap_action_complete);
  * @pte: Page table entry for the first page.
  * @max_nr: The maximum number of table entries to consider.
  *
- * This is a simplified variant of folio_pte_batch_flags().
+ * This is a simplified variant of folio_pte_batch_flags().nr.
  *
  * Detect a PTE batch: consecutive (present) PTEs that map consecutive
  * pages of the same large folio in a single VMA and a single page table.
@@ -1555,7 +1555,7 @@ EXPORT_SYMBOL(mmap_action_complete);
 unsigned int folio_pte_batch(struct folio *folio, pte_t *ptep, pte_t pte,
 		unsigned int max_nr)
 {
-	return folio_pte_batch_flags(folio, NULL, ptep, &pte, max_nr, 0);
+	return folio_pte_batch_flags(folio, NULL, ptep, &pte, max_nr, 0).nr;
 }
 #endif /* CONFIG_MMU */
 

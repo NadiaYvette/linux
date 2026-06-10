@@ -306,6 +306,37 @@ static inline pte_t __pte_batch_clear_ignored(pte_t pte, fpb_t flags)
 }
 
 /**
+ * enum folio_pte_batch_kind - classification of a detected PTE batch.
+ *
+ * @BATCH_KIND_SINGLE: nr == 1; no batching benefit available.  Callers
+ *	may take a per-PTE fast path.
+ * @BATCH_KIND_PGCL_CLUSTER: batch is a PGCL clustering: nr consecutive
+ *	hardware PTEs covering one kernel page (sub-PAGE_SIZE granularity).
+ *	Used by callers that need to choose PGCL-aware locking/contract
+ *	behavior.  (Phase 2 expansion: currently produced only by
+ *	pgcl_pte_batch(); folio_pte_batch_flags() does not yet emit this
+ *	kind.)
+ * @BATCH_KIND_MTHP: batch spans multiple kernel pages of one large
+ *	(sub-PMD superpage / mTHP) folio.  Callers should hold folio_lock
+ *	for atomicity if processing rmap or refcount.
+ */
+enum folio_pte_batch_kind {
+	BATCH_KIND_SINGLE,
+	BATCH_KIND_PGCL_CLUSTER,
+	BATCH_KIND_MTHP,
+};
+
+/**
+ * struct folio_pte_batch_result - return value of folio_pte_batch_flags().
+ * @nr: number of table entries in the batch (>= 1).
+ * @kind: classification of the batch.  @BATCH_KIND_SINGLE iff @nr == 1.
+ */
+struct folio_pte_batch_result {
+	unsigned int nr;
+	enum folio_pte_batch_kind kind;
+};
+
+/**
  * folio_pte_batch_flags - detect a PTE batch for a large folio
  * @folio: The large folio to detect a PTE batch for.
  * @vma: The VMA. Only relevant with FPB_MERGE_WRITE, otherwise can be NULL.
@@ -333,9 +364,11 @@ static inline pte_t __pte_batch_clear_ignored(pte_t pte, fpb_t flags)
  * This function will be inlined to optimize based on the input parameters;
  * consider using folio_pte_batch() instead if applicable.
  *
- * Return: the number of table entries in the batch.
+ * Return: a &struct folio_pte_batch_result with @nr (the number of table
+ *	   entries in the batch) and @kind (the batch classification, see
+ *	   &enum folio_pte_batch_kind).
  */
-static inline unsigned int folio_pte_batch_flags(struct folio *folio,
+static inline struct folio_pte_batch_result folio_pte_batch_flags(struct folio *folio,
 		struct vm_area_struct *vma, pte_t *ptep, pte_t *ptentp,
 		unsigned int max_nr, fpb_t flags)
 {
@@ -387,11 +420,93 @@ static inline unsigned int folio_pte_batch_flags(struct folio *folio,
 	if (any_dirty)
 		*ptentp = pte_mkdirty(*ptentp);
 
-	return min(nr, max_nr);
+	nr = min(nr, max_nr);
+	return (struct folio_pte_batch_result){
+		.nr = nr,
+		.kind = (nr == 1) ? BATCH_KIND_SINGLE : BATCH_KIND_MTHP,
+	};
 }
 
 unsigned int folio_pte_batch(struct folio *folio, pte_t *ptep, pte_t pte,
 		unsigned int max_nr);
+
+#if PAGE_MMUSHIFT
+/**
+ * pgcl_page_folio - get the PGCL kernel page's head folio from any sub-page
+ * @page: any struct page pointer (may be a sub-page within a PGCL kernel page)
+ *
+ * For PGCL, order-0 allocations span PAGE_MMUCOUNT hardware pages but are
+ * NOT compound, so page_folio() returns the sub-page itself instead of the
+ * kernel page's head.  This helper returns the correct head by rounding
+ * down to the nearest PAGE_MMUCOUNT-aligned pfn.
+ *
+ * For compound pages (large folios), compound_head() already returns the
+ * correct head, so we defer to page_folio().
+ */
+static inline struct folio *pgcl_page_folio(struct page *page)
+{
+	unsigned long head = READ_ONCE(page->compound_info);
+
+	if (unlikely(head & 1))
+		return (struct folio *)(head - 1);
+	return (struct folio *)(page - (page_to_pfn(page) & (PAGE_MMUCOUNT - 1)));
+}
+#else
+static inline struct folio *pgcl_page_folio(struct page *page)
+{
+	return page_folio(page);
+}
+#endif
+
+#if PAGE_MMUSHIFT
+/**
+ * pgcl_pte_batch - count contiguous PTEs mapping the same kernel page
+ * @pte: first PTE value (must be present)
+ * @ptep: pointer to first PTE in the page table
+ * @max_nr: maximum number of PTEs to scan
+ *
+ * For PGCL order-0 pages (non-compound), scans consecutive PTEs to find
+ * how many map contiguous PFNs within the same kernel page.  Returns at
+ * least 1.  Only considers PFNs — does not check permission bits.
+ *
+ * This enables batching PTE clearing and TLB flushing for PGCL sub-pages
+ * without requiring compound page infrastructure.
+ */
+static inline unsigned int pgcl_pte_batch(pte_t pte, pte_t *ptep,
+					  unsigned int max_nr)
+{
+	/*
+	 * Use pte_pfn (PAGE-granular) for the kernel page identity.
+	 * Extract the sub-page index portably using __phys_to_pte_val():
+	 * dividing the raw PTE value by the PTE-encoded MMUPAGE step
+	 * strips permission bits (which are below the PFN field) and
+	 * yields a value whose low PAGE_MMUSHIFT bits are the sub-index.
+	 * This works on all architectures regardless of _PAGE_PFN_SHIFT.
+	 */
+	unsigned long base_page_pfn = pte_pfn(pte);
+	unsigned long mmu_step = __phys_to_pte_val(MMUPAGE_SIZE);
+	unsigned int sub = (unsigned int)((pte_val(pte) / mmu_step) &
+					  (PAGE_MMUCOUNT - 1));
+	unsigned int remaining = PAGE_MMUCOUNT - sub;
+	unsigned int nr;
+
+	max_nr = min(max_nr, remaining);
+	for (nr = 1; nr < max_nr; nr++) {
+		pte_t next = ptep_get(ptep + nr);
+
+		if (!pte_present(next))
+			break;
+		/* Must be same kernel page */
+		if (pte_pfn(next) != base_page_pfn)
+			break;
+		/* Must be next consecutive sub-page */
+		if (((pte_val(next) / mmu_step) &
+		     (PAGE_MMUCOUNT - 1)) != sub + nr)
+			break;
+	}
+	return nr;
+}
+#endif /* PAGE_MMUSHIFT */
 
 /**
  * pte_move_swp_offset - Move the swap entry offset field of a swap pte
@@ -1144,8 +1259,9 @@ static inline bool
 folio_within_range(struct folio *folio, struct vm_area_struct *vma,
 		unsigned long start, unsigned long end)
 {
-	pgoff_t pgoff, addr;
-	unsigned long vma_pglen = vma_pages(vma);
+	pgoff_t pgoff;
+	unsigned long addr;
+	unsigned long vma_mmupagelen = (vma->vm_end - vma->vm_start) >> MMUPAGE_SHIFT;
 
 	VM_WARN_ON_FOLIO(folio_test_ksm(folio), folio);
 	if (start > end)
@@ -1159,11 +1275,11 @@ folio_within_range(struct folio *folio, struct vm_area_struct *vma,
 
 	pgoff = folio_pgoff(folio);
 
-	/* if folio start address is not in vma range */
-	if (!in_range(pgoff, vma->vm_pgoff, vma_pglen))
+	/* if folio start address is not in vma range (MMUPAGE units) */
+	if (!in_range(pgoff_page_to_mmu(pgoff), vma->vm_pgoff, vma_mmupagelen))
 		return false;
 
-	addr = vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
+	addr = pgoff_to_vma_addr(vma, pgoff);
 
 	return !(addr < start || end - addr < folio_size(folio));
 }
@@ -1236,14 +1352,15 @@ static inline unsigned long vma_address(const struct vm_area_struct *vma,
 		pgoff_t pgoff, unsigned long nr_pages)
 {
 	unsigned long address;
+	pgoff_t pgoff_mmu = pgoff_page_to_mmu(pgoff);
+	pgoff_t nr_mmupages = nr_pages << PAGE_MMUSHIFT;
 
-	if (pgoff >= vma->vm_pgoff) {
-		address = vma->vm_start +
-			((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
+	if (pgoff_mmu >= vma->vm_pgoff) {
+		address = pgoff_to_vma_addr(vma, pgoff);
 		/* Check for address beyond vma (or wrapped through 0?) */
 		if (address < vma->vm_start || address >= vma->vm_end)
 			address = -EFAULT;
-	} else if (pgoff + nr_pages - 1 >= vma->vm_pgoff) {
+	} else if (pgoff_mmu + nr_mmupages - 1 >= vma->vm_pgoff) {
 		/* Test above avoids possibility of wrap to 0 on 32-bit */
 		address = vma->vm_start;
 	} else {
@@ -1267,7 +1384,7 @@ static inline unsigned long vma_address_end(struct page_vma_mapped_walk *pvmw)
 		return pvmw->address + PAGE_SIZE;
 
 	pgoff = pvmw->pgoff + pvmw->nr_pages;
-	address = vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
+	address = pgoff_to_vma_addr(vma, pgoff);
 	/* Check for address beyond vma (or wrapped through 0?) */
 	if (address < vma->vm_start || address > vma->vm_end)
 		address = vma->vm_end;

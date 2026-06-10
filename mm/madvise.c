@@ -348,7 +348,7 @@ static inline int madvise_folio_pte_batch(unsigned long addr, unsigned long end,
 	int max_nr = (end - addr) / PAGE_SIZE;
 
 	return folio_pte_batch_flags(folio, NULL, ptep, ptentp, max_nr,
-				     FPB_MERGE_YOUNG_DIRTY);
+				     FPB_MERGE_YOUNG_DIRTY).nr;
 }
 
 static int madvise_cold_or_pageout_pte_range(pmd_t *pmd,
