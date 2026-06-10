@@ -45,17 +45,17 @@ static bool enable_vma_readahead __read_mostly = true;
 
 #define SWAP_RA_ORDER_CEILING	5
 
-#define SWAP_RA_WIN_SHIFT	(PAGE_SHIFT / 2)
+#define SWAP_RA_WIN_SHIFT	(MMUPAGE_SHIFT / 2)
 #define SWAP_RA_HITS_MASK	((1UL << SWAP_RA_WIN_SHIFT) - 1)
 #define SWAP_RA_HITS_MAX	SWAP_RA_HITS_MASK
-#define SWAP_RA_WIN_MASK	(~PAGE_MASK & ~SWAP_RA_HITS_MASK)
+#define SWAP_RA_WIN_MASK	(~MMUPAGE_MASK & ~SWAP_RA_HITS_MASK)
 
 #define SWAP_RA_HITS(v)		((v) & SWAP_RA_HITS_MASK)
 #define SWAP_RA_WIN(v)		(((v) & SWAP_RA_WIN_MASK) >> SWAP_RA_WIN_SHIFT)
-#define SWAP_RA_ADDR(v)		((v) & PAGE_MASK)
+#define SWAP_RA_ADDR(v)		((v) & MMUPAGE_MASK)
 
 #define SWAP_RA_VAL(addr, win, hits)				\
-	(((addr) & PAGE_MASK) |					\
+	(((addr) & MMUPAGE_MASK) |				\
 	 (((win) << SWAP_RA_WIN_SHIFT) & SWAP_RA_WIN_MASK) |	\
 	 ((hits) & SWAP_RA_HITS_MASK))
 
@@ -766,19 +766,20 @@ static int swap_vma_ra_win(struct vm_fault *vmf, unsigned long *start,
 	prev_faddr = SWAP_RA_ADDR(ra_val);
 	prev_win = SWAP_RA_WIN(ra_val);
 	hits = SWAP_RA_HITS(ra_val);
-	win = __swapin_nr_pages(PFN_DOWN(prev_faddr), PFN_DOWN(faddr), hits,
+	win = __swapin_nr_pages(prev_faddr >> MMUPAGE_SHIFT,
+				faddr >> MMUPAGE_SHIFT, hits,
 				max_win, prev_win);
 	atomic_long_set(&vma->swap_readahead_info, SWAP_RA_VAL(faddr, win, 0));
 	if (win == 1)
 		return 1;
 
-	if (faddr == prev_faddr + PAGE_SIZE)
+	if (faddr == prev_faddr + MMUPAGE_SIZE)
 		left = faddr;
-	else if (prev_faddr == faddr + PAGE_SIZE)
-		left = faddr - (win << PAGE_SHIFT) + PAGE_SIZE;
+	else if (prev_faddr == faddr + MMUPAGE_SIZE)
+		left = faddr - (win << MMUPAGE_SHIFT) + MMUPAGE_SIZE;
 	else
-		left = faddr - (((win - 1) / 2) << PAGE_SHIFT);
-	right = left + (win << PAGE_SHIFT);
+		left = faddr - (((win - 1) / 2) << MMUPAGE_SHIFT);
+	right = left + (win << MMUPAGE_SHIFT);
 	if ((long)left < 0)
 		left = 0;
 	*start = max3(left, vma->vm_start, faddr & PMD_MASK);
@@ -819,10 +820,10 @@ static struct folio *swap_vma_readahead(swp_entry_t targ_entry, gfp_t gfp_mask,
 	if (win == 1)
 		goto skip;
 
-	ilx = targ_ilx - PFN_DOWN(vmf->address - start);
+	ilx = targ_ilx - ((vmf->address - start) >> MMUPAGE_SHIFT);
 
 	blk_start_plug(&plug);
-	for (addr = start; addr < end; ilx++, addr += PAGE_SIZE) {
+	for (addr = start; addr < end; ilx++, addr += MMUPAGE_SIZE) {
 		struct swap_info_struct *si = NULL;
 		softleaf_t entry;
 

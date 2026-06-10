@@ -86,7 +86,7 @@ static struct vfsmount *shm_mnt __ro_after_init;
 
 #include "internal.h"
 
-#define VM_ACCT(size)    (PAGE_ALIGN(size) >> PAGE_SHIFT)
+#define VM_ACCT(size)    (MMUPAGE_ALIGN(size) >> MMUPAGE_SHIFT)
 
 /* Pretend that each entry is of this size in directory's i_size */
 #define BOGO_DIRENT_SIZE 20
@@ -150,9 +150,21 @@ static unsigned long shmem_default_max_blocks(void)
 
 static unsigned long shmem_default_max_inodes(void)
 {
-	unsigned long nr_pages = totalram_pages();
+	/*
+	 * The default inode budget is a file count, and an inode's footprint
+	 * (BOGO_INODE_SIZE) is independent of PAGE_SIZE.  totalram_pages()
+	 * counts kernel pages, which under page clustering (PAGE_MMUSHIFT > 0)
+	 * are PAGE_MMUCOUNT times larger than the hardware base page; counting
+	 * the budget in those large pages starves tmpfs of inodes (e.g. ~960
+	 * instead of ~60000 on a 512MB box at PAGE_MMUSHIFT=6), making file-
+	 * heavy workloads hit ENOSPC long before the fd limit.  Count in
+	 * MMUPAGE units so the budget tracks real memory; identity when
+	 * PAGE_MMUSHIFT == 0.
+	 */
+	unsigned long nr_pages = totalram_pages() << PAGE_MMUSHIFT;
+	unsigned long nr_high = totalhigh_pages() << PAGE_MMUSHIFT;
 
-	return min3(nr_pages - totalhigh_pages(), nr_pages / 2,
+	return min3(nr_pages - nr_high, nr_pages / 2,
 			ULONG_MAX / BOGO_INODE_SIZE);
 }
 #endif
@@ -2748,8 +2760,22 @@ static vm_fault_t shmem_fault(struct vm_fault *vmf)
 	struct inode *inode = file_inode(vmf->vma->vm_file);
 	gfp_t gfp = mapping_gfp_mask(inode->i_mapping);
 	struct folio *folio = NULL;
+	/*
+	 * vmf->pgoff is in MMUPAGE units.  Convert to PAGE units for
+	 * page cache lookups.
+	 */
+	pgoff_t index = vmf->pgoff >> PAGE_MMUSHIFT;
 	vm_fault_t ret = 0;
 	int err;
+
+	/*
+	 * SIGBUS at MMUPAGE granularity: userspace sees MMUPAGE_SIZE pages,
+	 * so accesses beyond the file must SIGBUS at MMUPAGE boundaries,
+	 * not at kernel PAGE boundaries.
+	 */
+	if (unlikely(vmf->pgoff >=
+		     DIV_ROUND_UP(i_size_read(inode), MMUPAGE_SIZE)))
+		return VM_FAULT_SIGBUS;
 
 	/*
 	 * Trinity finds that probing a hole which tmpfs is punching can
@@ -2762,12 +2788,12 @@ static vm_fault_t shmem_fault(struct vm_fault *vmf)
 	}
 
 	WARN_ON_ONCE(vmf->page != NULL);
-	err = shmem_get_folio_gfp(inode, vmf->pgoff, 0, &folio, SGP_CACHE,
+	err = shmem_get_folio_gfp(inode, index, 0, &folio, SGP_CACHE,
 				  gfp, vmf, &ret);
 	if (err)
 		return vmf_error(err);
 	if (folio) {
-		vmf->page = folio_file_page(folio, vmf->pgoff);
+		vmf->page = folio_file_page(folio, index);
 		ret |= VM_FAULT_LOCKED;
 	}
 	return ret;
@@ -2853,13 +2879,13 @@ unsigned long shmem_get_unmapped_area(struct file *file,
 	if (len < hpage_size)
 		return addr;
 
-	offset = (pgoff << PAGE_SHIFT) & (hpage_size - 1);
+	offset = (pgoff << MMUPAGE_SHIFT) & (hpage_size - 1);
 	if (offset && offset + len < 2 * hpage_size)
 		return addr;
 	if ((addr & (hpage_size - 1)) == offset)
 		return addr;
 
-	inflated_len = len + hpage_size - PAGE_SIZE;
+	inflated_len = len + hpage_size - MMUPAGE_SIZE;
 	if (inflated_len > TASK_SIZE)
 		return addr;
 	if (inflated_len < len)
@@ -2901,7 +2927,7 @@ static struct mempolicy *shmem_get_policy(struct vm_area_struct *vma,
 	 * by page order, as in shmem_get_pgoff_policy() and get_vma_policy()).
 	 */
 	*ilx = inode->i_ino;
-	index = ((addr - vma->vm_start) >> PAGE_SHIFT) + vma->vm_pgoff;
+	index = ((addr - vma->vm_start) >> MMUPAGE_SHIFT) + vma->vm_pgoff;
 	return mpol_shared_policy_lookup(&SHMEM_I(inode)->policy, index);
 }
 
@@ -3183,7 +3209,7 @@ static struct folio *shmem_mfill_folio_alloc(struct vm_area_struct *vma,
 	struct inode *inode = file_inode(vma->vm_file);
 	struct address_space *mapping = inode->i_mapping;
 	struct shmem_inode_info *info = SHMEM_I(inode);
-	pgoff_t pgoff = linear_page_index(vma, addr);
+	pgoff_t pgoff = pgoff_mmu_to_page(linear_page_index(vma, addr));
 	gfp_t gfp = mapping_gfp_mask(mapping);
 	struct folio *folio;
 
