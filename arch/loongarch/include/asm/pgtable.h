@@ -27,21 +27,28 @@
 #include <asm/highmem.h>
 #endif
 
+/*
+ * LoongArch page table geometry: each level uses MMUPAGE_SIZE tables
+ * (hardware page), not kernel PAGE_SIZE. The hardware page table walker
+ * (lddir/ldpte) and PWCTL registers expect MMUPAGE-granular tables.
+ * With PGCL, PAGE_SIZE > MMUPAGE_SIZE, but page table structure must
+ * match hardware VA width (cpu_vabits).
+ */
 #if CONFIG_PGTABLE_LEVELS == 2
-#define PGDIR_SHIFT	(PAGE_SHIFT + (PAGE_SHIFT - PTRLOG))
+#define PGDIR_SHIFT	(MMUPAGE_SHIFT + (MMUPAGE_SHIFT - PTRLOG))
 #elif CONFIG_PGTABLE_LEVELS == 3
-#define PMD_SHIFT	(PAGE_SHIFT + (PAGE_SHIFT - PTRLOG))
+#define PMD_SHIFT	(MMUPAGE_SHIFT + (MMUPAGE_SHIFT - PTRLOG))
 #define PMD_SIZE	(1UL << PMD_SHIFT)
 #define PMD_MASK	(~(PMD_SIZE-1))
-#define PGDIR_SHIFT	(PMD_SHIFT + (PAGE_SHIFT - PTRLOG))
+#define PGDIR_SHIFT	(PMD_SHIFT + (MMUPAGE_SHIFT - PTRLOG))
 #elif CONFIG_PGTABLE_LEVELS == 4
-#define PMD_SHIFT	(PAGE_SHIFT + (PAGE_SHIFT - PTRLOG))
+#define PMD_SHIFT	(MMUPAGE_SHIFT + (MMUPAGE_SHIFT - PTRLOG))
 #define PMD_SIZE	(1UL << PMD_SHIFT)
 #define PMD_MASK	(~(PMD_SIZE-1))
-#define PUD_SHIFT	(PMD_SHIFT + (PAGE_SHIFT - PTRLOG))
+#define PUD_SHIFT	(PMD_SHIFT + (MMUPAGE_SHIFT - PTRLOG))
 #define PUD_SIZE	(1UL << PUD_SHIFT)
 #define PUD_MASK	(~(PUD_SIZE-1))
-#define PGDIR_SHIFT	(PUD_SHIFT + (PAGE_SHIFT - PTRLOG))
+#define PGDIR_SHIFT	(PUD_SHIFT + (MMUPAGE_SHIFT - PTRLOG))
 #endif
 
 #define PGDIR_SIZE	(1UL << PGDIR_SHIFT)
@@ -50,17 +57,17 @@
 #ifdef CONFIG_32BIT
 #define VA_BITS		32
 #else
-#define VA_BITS		(PGDIR_SHIFT + (PAGE_SHIFT - PTRLOG))
+#define VA_BITS		(PGDIR_SHIFT + (MMUPAGE_SHIFT - PTRLOG))
 #endif
 
-#define PTRS_PER_PGD	(PAGE_SIZE >> PTRLOG)
+#define PTRS_PER_PGD	(MMUPAGE_SIZE >> PTRLOG)
 #if CONFIG_PGTABLE_LEVELS > 3
-#define PTRS_PER_PUD	(PAGE_SIZE >> PTRLOG)
+#define PTRS_PER_PUD	(MMUPAGE_SIZE >> PTRLOG)
 #endif
 #if CONFIG_PGTABLE_LEVELS > 2
-#define PTRS_PER_PMD	(PAGE_SIZE >> PTRLOG)
+#define PTRS_PER_PMD	(MMUPAGE_SIZE >> PTRLOG)
 #endif
-#define PTRS_PER_PTE	(PAGE_SIZE >> PTRLOG)
+#define PTRS_PER_PTE	(MMUPAGE_SIZE >> PTRLOG)
 
 #ifdef CONFIG_32BIT
 #define USER_PTRS_PER_PGD       (TASK_SIZE / PGDIR_SIZE)
@@ -99,7 +106,7 @@ struct vm_area_struct;
 #define MODULES_END	(MODULES_VADDR + SZ_256M)
 
 #ifdef CONFIG_KFENCE
-#define KFENCE_AREA_SIZE	(((CONFIG_KFENCE_NUM_OBJECTS + 1) * 2 + 2) * PAGE_SIZE)
+#define KFENCE_AREA_SIZE	(((CONFIG_KFENCE_NUM_OBJECTS + 1) * 2 + 2) * MMUPAGE_SIZE)
 #else
 #define KFENCE_AREA_SIZE	0
 #endif
@@ -109,11 +116,11 @@ struct vm_area_struct;
 #ifndef CONFIG_KASAN
 #define VMALLOC_END	\
 	(vm_map_base +	\
-	 min(PTRS_PER_PGD * PTRS_PER_PUD * PTRS_PER_PMD * PTRS_PER_PTE * PAGE_SIZE, (1UL << cpu_vabits)) - PMD_SIZE - VMEMMAP_SIZE - KFENCE_AREA_SIZE)
+	 min(PTRS_PER_PGD * PTRS_PER_PUD * PTRS_PER_PMD * PTRS_PER_PTE * MMUPAGE_SIZE, (1UL << cpu_vabits)) - PMD_SIZE - VMEMMAP_SIZE - KFENCE_AREA_SIZE)
 #else
 #define VMALLOC_END	\
 	(vm_map_base +	\
-	 min(PTRS_PER_PGD * PTRS_PER_PUD * PTRS_PER_PMD * PTRS_PER_PTE * PAGE_SIZE, (1UL << cpu_vabits) / 2) - PMD_SIZE - VMEMMAP_SIZE - KFENCE_AREA_SIZE)
+	 min(PTRS_PER_PGD * PTRS_PER_PUD * PTRS_PER_PMD * PTRS_PER_PTE * MMUPAGE_SIZE, (1UL << cpu_vabits) / 2) - PMD_SIZE - VMEMMAP_SIZE - KFENCE_AREA_SIZE)
 #endif
 
 #define VMEMMAP_ALIGN	max(PMD_SIZE, MAX_FOLIO_VMEMMAP_ALIGN)
@@ -161,7 +168,7 @@ static inline int p4d_none(p4d_t p4d)
 
 static inline int p4d_bad(p4d_t p4d)
 {
-	return p4d_val(p4d) & ~PAGE_MASK;
+	return p4d_val(p4d) & ~MMUPAGE_MASK;
 }
 
 static inline int p4d_present(p4d_t p4d)
@@ -207,7 +214,7 @@ static inline int pud_none(pud_t pud)
 
 static inline int pud_bad(pud_t pud)
 {
-	return pud_val(pud) & ~PAGE_MASK;
+	return pud_val(pud) & ~MMUPAGE_MASK;
 }
 
 static inline int pud_present(pud_t pud)
@@ -245,7 +252,7 @@ static inline int pmd_none(pmd_t pmd)
 
 static inline int pmd_bad(pmd_t pmd)
 {
-	return (pmd_val(pmd) & ~PAGE_MASK);
+	return (pmd_val(pmd) & ~MMUPAGE_MASK);
 }
 
 static inline int pmd_present(pmd_t pmd)
@@ -276,10 +283,28 @@ static inline void pmd_clear(pmd_t *pmdp)
 
 extern void set_pmd_at(struct mm_struct *mm, unsigned long addr, pmd_t *pmdp, pmd_t pmd);
 
+/*
+ * PFN encoding: pte_pfn()/pfn_pte() use PAGE_SHIFT (PAGE-granular PFN)
+ * so pfn_to_page(pte_pfn(pte)) works correctly with struct page indexing.
+ * _PFN_MASK still covers all PA bits [MMUPAGE_SHIFT:PFN_END] for pte_modify.
+ * Sub-page advancement is handled by pte_advance_pfn (MMUPAGE granularity
+ * within set_ptes) and __phys_to_pte_val(MMUPAGE_SIZE) in PGCL paths.
+ */
 #define pte_page(x)		pfn_to_page(pte_pfn(x))
-#define pte_pfn(x)		((unsigned long)(((x).pte & _PFN_MASK) >> PFN_PTE_SHIFT))
-#define pfn_pte(pfn, prot)	__pte(((pfn) << PFN_PTE_SHIFT) | pgprot_val(prot))
-#define pfn_pmd(pfn, prot)	__pmd(((pfn) << PFN_PTE_SHIFT) | pgprot_val(prot))
+#define pte_pfn(x)		((unsigned long)(((x).pte & _PFN_MASK) >> PAGE_SHIFT))
+#define pfn_pte(pfn, prot)	__pte(((pfn) << PAGE_SHIFT) | pgprot_val(prot))
+#define pfn_pmd(pfn, prot)	__pmd(((pfn) << PAGE_SHIFT) | pgprot_val(prot))
+
+/*
+ * pte_advance_pfn: advance PTE by nr PAGE-sized steps.
+ * Since __phys_to_pte_val is identity on LoongArch, adding (nr << PAGE_SHIFT)
+ * directly to pte_val advances the physical address by nr * PAGE_SIZE.
+ */
+#define pte_advance_pfn pte_advance_pfn
+static inline pte_t pte_advance_pfn(pte_t pte, unsigned long nr)
+{
+	return __pte(pte_val(pte) + (nr << PAGE_SHIFT));
+}
 
 /*
  * Initialize a new pgd / pud / pmd table with invalid pointers.
@@ -479,7 +504,7 @@ static inline void update_mmu_cache_range(struct vm_fault *vmf,
 		__update_tlb(vma, address, ptep);
 		if (--nr == 0)
 			break;
-		address += PAGE_SIZE;
+		address += MMUPAGE_SIZE;
 		ptep++;
 	}
 }
@@ -497,7 +522,7 @@ static inline void update_mmu_cache_pmd(struct vm_area_struct *vma,
 
 static inline unsigned long pmd_pfn(pmd_t pmd)
 {
-	return (pmd_val(pmd) & _PFN_MASK) >> PFN_PTE_SHIFT;
+	return (pmd_val(pmd) & _PFN_MASK) >> PAGE_SHIFT;
 }
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE

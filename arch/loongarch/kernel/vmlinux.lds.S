@@ -4,7 +4,13 @@
 #include <asm/thread_info.h>
 #include <asm/orc_lookup.h>
 
-#define PAGE_SIZE _PAGE_SIZE
+/*
+ * Linker script alignment uses MMUPAGE_SIZE (hardware page), not kernel
+ * PAGE_SIZE. With PGCL, PAGE_SIZE can be 256KB which creates excessive
+ * padding and misaligns PE/COFF sections relative to PECOFF_SEGMENT_ALIGN.
+ */
+#define PAGE_SIZE _MMUPAGE_SIZE
+#define MMUPAGE_SIZE _MMUPAGE_SIZE
 #define RO_EXCEPTION_TABLE_ALIGN	4
 
 #ifdef CONFIG_32BIT
@@ -92,6 +98,13 @@ SECTIONS
 	}
 
 #ifdef CONFIG_SMP
+	/*
+	 * PGCL: PERCPU_SECTION uses PAGE_SIZE (redefined to MMUPAGE_SIZE
+	 * above) for alignment, but the percpu allocator checks
+	 * offset_in_page() with the real kernel PAGE_SIZE. Force the
+	 * real PAGE_SIZE alignment here.
+	 */
+	. = ALIGN(_PAGE_SIZE);
 	PERCPU_SECTION(1 << CONFIG_L1_CACHE_SHIFT)
 #endif
 

@@ -10,7 +10,14 @@
 
 #include <vdso/page.h>
 
-#define HPAGE_SHIFT	(PAGE_SHIFT + PAGE_SHIFT - PTRLOG)
+/*
+ * HPAGE_SHIFT = PMD_SHIFT = 2*MMUPAGE_SHIFT - PTRLOG.
+ * Each MMUPAGE-sized PTE table has (MMUPAGE_SIZE >> PTRLOG) entries,
+ * so a PMD entry covers (MMUPAGE_SIZE >> PTRLOG) * MMUPAGE_SIZE bytes.
+ * With PGCL, PAGE_SHIFT != MMUPAGE_SHIFT, so the old formula
+ * (MMUPAGE_SHIFT + PAGE_SHIFT - PTRLOG) was wrong — it gave 29 instead of 25.
+ */
+#define HPAGE_SHIFT	(MMUPAGE_SHIFT + MMUPAGE_SHIFT - PTRLOG)
 #define HPAGE_SIZE	(_AC(1, UL) << HPAGE_SHIFT)
 #define HPAGE_MASK	(~(HPAGE_SIZE - 1))
 #define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
