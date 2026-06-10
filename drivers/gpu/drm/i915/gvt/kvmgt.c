@@ -63,7 +63,7 @@ MODULE_IMPORT_NS("I915_GVT");
 #define VFIO_PCI_INDEX_TO_OFFSET(index) ((u64)(index) << VFIO_PCI_OFFSET_SHIFT)
 #define VFIO_PCI_OFFSET_MASK    (((u64)(1) << VFIO_PCI_OFFSET_SHIFT) - 1)
 
-#define EDID_BLOB_OFFSET (PAGE_SIZE/2)
+#define EDID_BLOB_OFFSET (MMUPAGE_SIZE/2)
 
 #define OPREGION_SIGNATURE "IntelGraphicsMem"
 
@@ -129,15 +129,15 @@ static ssize_t intel_vgpu_show_description(struct mdev_type *mtype, char *buf)
 static void gvt_unpin_guest_page(struct intel_vgpu *vgpu, unsigned long gfn,
 		unsigned long size)
 {
-	vfio_unpin_pages(&vgpu->vfio_device, gfn << PAGE_SHIFT,
-			 DIV_ROUND_UP(size, PAGE_SIZE));
+	vfio_unpin_pages(&vgpu->vfio_device, gfn << MMUPAGE_SHIFT,
+			 DIV_ROUND_UP(size, MMUPAGE_SIZE));
 }
 
 /* Pin a normal or compound guest page for dma. */
 static int gvt_pin_guest_page(struct intel_vgpu *vgpu, unsigned long gfn,
 		unsigned long size, struct page **page)
 {
-	int total_pages = DIV_ROUND_UP(size, PAGE_SIZE);
+	int total_pages = DIV_ROUND_UP(size, MMUPAGE_SIZE);
 	struct page *base_page = NULL;
 	int npage;
 	int ret;
@@ -147,7 +147,7 @@ static int gvt_pin_guest_page(struct intel_vgpu *vgpu, unsigned long gfn,
 	 * on stack to hold pfns.
 	 */
 	for (npage = 0; npage < total_pages; npage++) {
-		dma_addr_t cur_iova = (gfn + npage) << PAGE_SHIFT;
+		dma_addr_t cur_iova = (gfn + npage) << MMUPAGE_SHIFT;
 		struct page *cur_page;
 
 		ret = vfio_pin_pages(&vgpu->vfio_device, cur_iova, 1,
@@ -171,7 +171,7 @@ static int gvt_pin_guest_page(struct intel_vgpu *vgpu, unsigned long gfn,
 	return 0;
 err:
 	if (npage)
-		gvt_unpin_guest_page(vgpu, gfn, npage * PAGE_SIZE);
+		gvt_unpin_guest_page(vgpu, gfn, npage * MMUPAGE_SIZE);
 	return ret;
 }
 
@@ -623,8 +623,8 @@ static void intel_vgpu_dma_unmap(struct vfio_device *vfio_dev, u64 iova,
 {
 	struct intel_vgpu *vgpu = vfio_dev_to_vgpu(vfio_dev);
 	struct gvt_dma *entry;
-	u64 iov_pfn = iova >> PAGE_SHIFT;
-	u64 end_iov_pfn = iov_pfn + length / PAGE_SIZE;
+	u64 iov_pfn = iova >> MMUPAGE_SHIFT;
+	u64 end_iov_pfn = iov_pfn + length / MMUPAGE_SIZE;
 
 	mutex_lock(&vgpu->cache_lock);
 	for (; iov_pfn < end_iov_pfn; iov_pfn++) {
@@ -782,15 +782,15 @@ static int intel_vgpu_aperture_rw(struct intel_vgpu *vgpu, u64 off,
 	}
 
 	aperture_va = io_mapping_map_wc(&vgpu->gvt->gt->ggtt->iomap,
-					ALIGN_DOWN(off, PAGE_SIZE),
-					count + offset_in_page(off));
+					ALIGN_DOWN(off, MMUPAGE_SIZE),
+					count + (off & (MMUPAGE_SIZE - 1)));
 	if (!aperture_va)
 		return -EIO;
 
 	if (is_write)
-		memcpy_toio(aperture_va + offset_in_page(off), buf, count);
+		memcpy_toio(aperture_va + (off & (MMUPAGE_SIZE - 1)), buf, count);
 	else
-		memcpy_fromio(buf, aperture_va + offset_in_page(off), count);
+		memcpy_fromio(buf, aperture_va + (off & (MMUPAGE_SIZE - 1)), count);
 
 	io_mapping_unmap(aperture_va);
 
@@ -1020,7 +1020,7 @@ static int intel_vgpu_mmap(struct vfio_device *vfio_dev,
 	unsigned long req_size, pgoff, req_start;
 	pgprot_t pg_prot;
 
-	index = vma->vm_pgoff >> (VFIO_PCI_OFFSET_SHIFT - PAGE_SHIFT);
+	index = vma->vm_pgoff >> (VFIO_PCI_OFFSET_SHIFT - MMUPAGE_SHIFT);
 	if (index >= VFIO_PCI_ROM_REGION_INDEX)
 		return -EINVAL;
 
@@ -1035,8 +1035,8 @@ static int intel_vgpu_mmap(struct vfio_device *vfio_dev,
 	virtaddr = vma->vm_start;
 	req_size = vma->vm_end - vma->vm_start;
 	pgoff = vma->vm_pgoff &
-		((1U << (VFIO_PCI_OFFSET_SHIFT - PAGE_SHIFT)) - 1);
-	req_start = pgoff << PAGE_SHIFT;
+		((1U << (VFIO_PCI_OFFSET_SHIFT - MMUPAGE_SHIFT)) - 1);
+	req_start = pgoff << MMUPAGE_SHIFT;
 
 	if (!intel_vgpu_in_aperture(vgpu, req_start))
 		return -EINVAL;
@@ -1044,7 +1044,7 @@ static int intel_vgpu_mmap(struct vfio_device *vfio_dev,
 	    vgpu_aperture_offset(vgpu) + vgpu_aperture_sz(vgpu))
 		return -EINVAL;
 
-	pgoff = (gvt_aperture_pa_base(vgpu->gvt) >> PAGE_SHIFT) + pgoff;
+	pgoff = (gvt_aperture_pa_base(vgpu->gvt) >> MMUPAGE_SHIFT) + pgoff;
 
 	return remap_pfn_range(vma, virtaddr, pgoff, req_size, pg_prot);
 }
@@ -1566,7 +1566,7 @@ static void kvmgt_page_track_write(gpa_t gpa, const u8 *val, int len,
 
 	mutex_lock(&info->vgpu_lock);
 
-	if (kvmgt_gfn_is_write_protected(info, gpa >> PAGE_SHIFT))
+	if (kvmgt_gfn_is_write_protected(info, gpa >> MMUPAGE_SHIFT))
 		intel_vgpu_page_track_handler(info, gpa,
 						     (void *)val, len);
 

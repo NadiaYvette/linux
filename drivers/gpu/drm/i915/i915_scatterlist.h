@@ -54,7 +54,7 @@ static inline int __sg_page_count(const struct scatterlist *sg)
 
 static inline int __sg_dma_page_count(const struct scatterlist *sg)
 {
-	return sg_dma_len(sg) >> PAGE_SHIFT;
+	return sg_dma_len(sg) >> MMUPAGE_SHIFT;
 }
 
 static inline struct scatterlist *____sg_next(struct scatterlist *sg)
@@ -130,7 +130,7 @@ static inline unsigned int i915_sg_dma_sizes(struct scatterlist *sg)
 	page_sizes = 0;
 	while (sg && sg_dma_len(sg)) {
 		GEM_BUG_ON(sg->offset);
-		GEM_BUG_ON(!IS_ALIGNED(sg_dma_len(sg), PAGE_SIZE));
+		GEM_BUG_ON(!IS_ALIGNED(sg_dma_len(sg), MMUPAGE_SIZE));
 		page_sizes |= sg_dma_len(sg);
 		sg = __sg_next(sg);
 	}
@@ -156,8 +156,8 @@ static inline unsigned int i915_sg_segment_size(struct device *dev)
 	 * with addressing limitations.
 	 */
 	if (xen_pv_domain())
-		max = PAGE_SIZE;
-	return round_down(max, PAGE_SIZE);
+		max = MMUPAGE_SIZE;
+	return round_down(max, MMUPAGE_SIZE);
 }
 
 bool i915_sg_trim(struct sg_table *orig_st);

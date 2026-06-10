@@ -209,26 +209,26 @@ intel_region_ttm_resource_alloc(struct intel_memory_region *mem,
 	if (flags & I915_BO_ALLOC_CONTIGUOUS)
 		place.flags |= TTM_PL_FLAG_CONTIGUOUS;
 	if (offset != I915_BO_INVALID_OFFSET) {
-		if (WARN_ON(overflows_type(offset >> PAGE_SHIFT, place.fpfn))) {
+		if (WARN_ON(overflows_type(offset >> MMUPAGE_SHIFT, place.fpfn))) {
 			ret = -E2BIG;
 			goto out;
 		}
-		place.fpfn = offset >> PAGE_SHIFT;
-		if (WARN_ON(overflows_type(place.fpfn + (size >> PAGE_SHIFT), place.lpfn))) {
+		place.fpfn = offset >> MMUPAGE_SHIFT;
+		if (WARN_ON(overflows_type(place.fpfn + (size >> MMUPAGE_SHIFT), place.lpfn))) {
 			ret = -E2BIG;
 			goto out;
 		}
-		place.lpfn = place.fpfn + (size >> PAGE_SHIFT);
+		place.lpfn = place.fpfn + (size >> MMUPAGE_SHIFT);
 	} else if (resource_size(&mem->io) && resource_size(&mem->io) < mem->total) {
 		if (flags & I915_BO_ALLOC_GPU_ONLY) {
 			place.flags |= TTM_PL_FLAG_TOPDOWN;
 		} else {
 			place.fpfn = 0;
-			if (WARN_ON(overflows_type(resource_size(&mem->io) >> PAGE_SHIFT, place.lpfn))) {
+			if (WARN_ON(overflows_type(resource_size(&mem->io) >> MMUPAGE_SHIFT, place.lpfn))) {
 				ret = -E2BIG;
 				goto out;
 			}
-			place.lpfn = resource_size(&mem->io) >> PAGE_SHIFT;
+			place.lpfn = resource_size(&mem->io) >> MMUPAGE_SHIFT;
 		}
 	}
 
