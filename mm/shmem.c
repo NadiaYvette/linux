@@ -150,9 +150,21 @@ static unsigned long shmem_default_max_blocks(void)
 
 static unsigned long shmem_default_max_inodes(void)
 {
-	unsigned long nr_pages = totalram_pages();
+	/*
+	 * The default inode budget is a file count, and an inode's footprint
+	 * (BOGO_INODE_SIZE) is independent of PAGE_SIZE.  totalram_pages()
+	 * counts kernel pages, which under page clustering (PAGE_MMUSHIFT > 0)
+	 * are PAGE_MMUCOUNT times larger than the hardware base page; counting
+	 * the budget in those large pages starves tmpfs of inodes (e.g. ~960
+	 * instead of ~60000 on a 512MB box at PAGE_MMUSHIFT=6), making file-
+	 * heavy workloads hit ENOSPC long before the fd limit.  Count in
+	 * MMUPAGE units so the budget tracks real memory; identity when
+	 * PAGE_MMUSHIFT == 0.
+	 */
+	unsigned long nr_pages = totalram_pages() << PAGE_MMUSHIFT;
+	unsigned long nr_high = totalhigh_pages() << PAGE_MMUSHIFT;
 
-	return min3(nr_pages - totalhigh_pages(), nr_pages / 2,
+	return min3(nr_pages - nr_high, nr_pages / 2,
 			ULONG_MAX / BOGO_INODE_SIZE);
 }
 #endif
