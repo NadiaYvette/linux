@@ -1149,12 +1149,21 @@ int fat_alloc_new_dir(struct inode *dir, struct timespec64 *ts)
 {
 	struct super_block *sb = dir->i_sb;
 	struct msdos_sb_info *sbi = MSDOS_SB(sb);
-	struct buffer_head *bhs[MAX_BUF_PER_PAGE];
+	struct buffer_head **bhs;
 	struct msdos_dir_entry *de;
 	sector_t blknr;
 	__le16 date, time;
 	u8 time_cs;
 	int err, cluster;
+
+	/*
+	 * MAX_BUF_PER_PAGE scales with PAGE_SIZE (PAGE_SIZE / 512), so
+	 * a stack array can blow the 2 KiB frame budget under PGCL with
+	 * PAGE_MMUSHIFT >= 4.  Heap-allocate instead.
+	 */
+	bhs = kmalloc_array(MAX_BUF_PER_PAGE, sizeof(*bhs), GFP_KERNEL);
+	if (!bhs)
+		return -ENOMEM;
 
 	err = fat_alloc_clusters(dir, &cluster, 1);
 	if (err)
@@ -1201,11 +1210,13 @@ int fat_alloc_new_dir(struct inode *dir, struct timespec64 *ts)
 	if (err)
 		goto error_free;
 
+	kfree(bhs);
 	return cluster;
 
 error_free:
 	fat_free_clusters(dir, cluster);
 error:
+	kfree(bhs);
 	return err;
 }
 EXPORT_SYMBOL_GPL(fat_alloc_new_dir);
@@ -1216,10 +1227,18 @@ static int fat_add_new_entries(struct inode *dir, void *slots, int nr_slots,
 {
 	struct super_block *sb = dir->i_sb;
 	struct msdos_sb_info *sbi = MSDOS_SB(sb);
-	struct buffer_head *bhs[MAX_BUF_PER_PAGE];
+	struct buffer_head **bhs;
 	sector_t blknr, start_blknr, last_blknr;
 	unsigned long size, copy;
 	int err, i, n, offset, cluster[2];
+
+	/*
+	 * MAX_BUF_PER_PAGE scales with PAGE_SIZE; heap-allocate to avoid
+	 * blowing the 2 KiB stack frame budget under PGCL.
+	 */
+	bhs = kmalloc_array(MAX_BUF_PER_PAGE, sizeof(*bhs), GFP_KERNEL);
+	if (!bhs)
+		return -ENOMEM;
 
 	/*
 	 * The minimum cluster size is 512bytes, and maximum entry
@@ -1279,6 +1298,7 @@ static int fat_add_new_entries(struct inode *dir, void *slots, int nr_slots,
 	if (err)
 		goto error_free;
 
+	kfree(bhs);
 	return cluster[0];
 
 error_free:
@@ -1290,6 +1310,7 @@ error_nomem:
 		bforget(bhs[i]);
 	fat_free_clusters(dir, cluster[0]);
 error:
+	kfree(bhs);
 	return err;
 }
 

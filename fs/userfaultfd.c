@@ -1234,7 +1234,16 @@ static __always_inline int validate_unaligned_range(
 {
 	__u64 task_size = mm->task_size;
 
-	if (len & ~PAGE_MASK)
+	/*
+	 * Userfaultfd is a userspace-visible interface; ranges are measured
+	 * in the userspace page size, which is MMUPAGE_SIZE under PGCL
+	 * (PAGE_MMUSHIFT > 0).  Without this, mmap'd 10 * sysconf(PAGESIZE)
+	 * = 10 * MMUPAGE_SIZE is rejected as not PAGE_MASK-aligned, breaking
+	 * any uffd consumer that uses sub-PAGE-aligned ranges (e.g. the
+	 * tools/testing/selftests/mm/guard-regions.c uffd subtest).
+	 * At PAGE_MMUSHIFT == 0 the two masks coincide; no change.
+	 */
+	if (len & ~MMUPAGE_MASK)
 		return -EINVAL;
 	if (!len)
 		return -EINVAL;
@@ -1250,7 +1259,7 @@ static __always_inline int validate_unaligned_range(
 static __always_inline int validate_range(struct mm_struct *mm,
 					  __u64 start, __u64 len)
 {
-	if (start & ~PAGE_MASK)
+	if (start & ~MMUPAGE_MASK)
 		return -EINVAL;
 
 	return validate_unaligned_range(mm, start, len);

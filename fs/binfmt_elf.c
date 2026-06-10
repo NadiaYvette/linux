@@ -79,10 +79,10 @@ static int elf_core_dump(struct coredump_params *cprm);
 #define elf_core_dump	NULL
 #endif
 
-#if ELF_EXEC_PAGESIZE > PAGE_SIZE
+#if ELF_EXEC_PAGESIZE > MMUPAGE_SIZE
 #define ELF_MIN_ALIGN	ELF_EXEC_PAGESIZE
 #else
-#define ELF_MIN_ALIGN	PAGE_SIZE
+#define ELF_MIN_ALIGN	MMUPAGE_SIZE
 #endif
 
 #ifndef ELF_CORE_EFLAGS
@@ -399,6 +399,7 @@ static unsigned long elf_map(struct file *filep, unsigned long addr,
 	} else
 		map_addr = vm_mmap(filep, addr, size, prot, type, off);
 
+
 	if ((type & MAP_FIXED_NOREPLACE) &&
 	    PTR_ERR((void *)map_addr) == -EEXIST)
 		pr_info("%d (%s): Uhuuh, elf segment at %px requested but the memory is mapped already\n",
@@ -421,8 +422,9 @@ static unsigned long elf_load(struct file *filep, unsigned long addr,
 
 	if (eppnt->p_filesz) {
 		map_addr = elf_map(filep, addr, eppnt, prot, type, total_size);
-		if (BAD_ADDR(map_addr))
+		if (BAD_ADDR(map_addr)) {
 			return map_addr;
+		}
 		if (eppnt->p_memsz > eppnt->p_filesz) {
 			zero_start = map_addr + ELF_PAGEOFFSET(eppnt->p_vaddr) +
 				eppnt->p_filesz;
@@ -433,8 +435,9 @@ static unsigned long elf_load(struct file *filep, unsigned long addr,
 			 * Zero the end of the last mapped page but ignore
 			 * any errors if the segment isn't writable.
 			 */
-			if (padzero(zero_start) && (prot & PROT_WRITE))
+			if (padzero(zero_start) && (prot & PROT_WRITE)) {
 				return -EFAULT;
+			}
 		}
 	} else {
 		map_addr = zero_start = ELF_PAGESTART(addr);
@@ -1027,8 +1030,9 @@ out_free_interp:
 	   change some of these later */
 	retval = setup_arg_pages(bprm, randomize_stack_top(STACK_TOP),
 				 executable_stack);
-	if (retval < 0)
+	if (retval < 0) {
 		goto out_free_dentry;
+	}
 
 	elf_brk = 0;
 
@@ -1335,7 +1339,7 @@ out_free_interp:
 		 * leave a gap between .bss and brk.
 		 */
 		if (!brk_moved)
-			mm->brk = mm->start_brk = mm->brk + PAGE_SIZE;
+			mm->brk = mm->start_brk = mm->brk + MMUPAGE_SIZE;
 
 		mm->brk = mm->start_brk = arch_randomize_brk(mm);
 		brk_moved = true;
@@ -1351,10 +1355,10 @@ out_free_interp:
 		   and some applications "depend" upon this behavior.
 		   Since we do not have the power to recompile these, we
 		   emulate the SVr4 behavior. Sigh. */
-		error = vm_mmap(NULL, 0, PAGE_SIZE, PROT_READ | PROT_EXEC,
+		error = vm_mmap(NULL, 0, MMUPAGE_SIZE, PROT_READ | PROT_EXEC,
 				MAP_FIXED | MAP_PRIVATE, 0);
 
-		retval = do_mseal(0, PAGE_SIZE, 0);
+		retval = do_mseal(0, MMUPAGE_SIZE, 0);
 		if (retval)
 			pr_warn_ratelimited("pid=%d, couldn't seal address 0, ret=%d.\n",
 					    task_pid_nr(current), retval);
@@ -1658,7 +1662,7 @@ static int fill_files_note(struct memelfnote *note, struct coredump_params *cprm
 
 	/* Now we know exact count of files, can store it */
 	data[0] = count;
-	data[1] = PAGE_SIZE;
+	data[1] = ELF_EXEC_PAGESIZE;
 	/*
 	 * Count usually is less than mm->map_count,
 	 * we need to move filenames down.
