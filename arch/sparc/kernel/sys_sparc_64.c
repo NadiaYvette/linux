@@ -93,7 +93,17 @@ static unsigned long get_align_mask(struct file *filp, unsigned long flags)
 	if (filp && is_file_hugepages(filp))
 		return huge_page_mask_align(filp);
 	if (filp || (flags & MAP_SHARED))
-		return PAGE_MASK & (SHMLBA - 1);
+		/*
+		 * Cache-colour alignment.  The colour bits live between the
+		 * userspace base-page boundary (MMUPAGE_SHIFT) and SHMLBA.
+		 * Use MMUPAGE_MASK, not PAGE_MASK: under page clustering
+		 * (PAGE_MMUSHIFT>0) PAGE_SIZE can exceed SHMLBA (e.g. 512K
+		 * vs 16K), so PAGE_MASK & (SHMLBA-1) collapses to 0 and the
+		 * shared/file mapping is returned only MMUPAGE-aligned, not
+		 * SHMLBA-coloured -- which then trips the MAP_FIXED colour
+		 * sanity check on any later MREMAP_FIXED of that mapping.
+		 */
+		return MMUPAGE_MASK & (SHMLBA - 1);
 
 	return 0;
 }
