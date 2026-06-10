@@ -17,7 +17,7 @@
 #define compat_elf_check_arch(x)	((x)->e_machine == EM_PPC)
 
 #define CORE_DUMP_USE_REGSET
-#define ELF_EXEC_PAGESIZE	PAGE_SIZE
+#define ELF_EXEC_PAGESIZE	MMUPAGE_SIZE
 
 /*
  * This is the base location for PIE (ET_DYN with INTERP) loads. On
