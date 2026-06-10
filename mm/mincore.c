@@ -48,7 +48,7 @@ static int mincore_hugetlb(pte_t *pte, unsigned long hmask, unsigned long addr,
 			present = 1;
 	}
 
-	for (; addr != end; vec++, addr += PAGE_SIZE)
+	for (; addr != end; vec++, addr += MMUPAGE_SIZE)
 		*vec = present;
 	walk->private = vec;
 	spin_unlock(ptl);
@@ -135,7 +135,7 @@ static unsigned char mincore_page(struct address_space *mapping, pgoff_t index)
 static int __mincore_unmapped_range(unsigned long addr, unsigned long end,
 				struct vm_area_struct *vma, unsigned char *vec)
 {
-	unsigned long nr = (end - addr) >> PAGE_SHIFT;
+	unsigned long nr = (end - addr) >> MMUPAGE_SHIFT;
 	int i;
 
 	if (vma->vm_file) {
@@ -143,7 +143,8 @@ static int __mincore_unmapped_range(unsigned long addr, unsigned long end,
 
 		pgoff = linear_page_index(vma, addr);
 		for (i = 0; i < nr; i++, pgoff++)
-			vec[i] = mincore_page(vma->vm_file->f_mapping, pgoff);
+			vec[i] = mincore_page(vma->vm_file->f_mapping,
+					      pgoff_mmu_to_page(pgoff));
 	} else {
 		for (i = 0; i < nr; i++)
 			vec[i] = 0;
@@ -167,7 +168,7 @@ static int mincore_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 	struct vm_area_struct *vma = walk->vma;
 	pte_t *ptep;
 	unsigned char *vec = walk->private;
-	int nr = (end - addr) >> PAGE_SHIFT;
+	int nr = (end - addr) >> MMUPAGE_SHIFT;
 	int step, i;
 
 	ptl = pmd_trans_huge_lock(pmd, vma);
@@ -182,19 +183,19 @@ static int mincore_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 		walk->action = ACTION_AGAIN;
 		return 0;
 	}
-	for (; addr != end; ptep += step, addr += step * PAGE_SIZE) {
+	for (; addr != end; ptep += step, addr += step * MMUPAGE_SIZE) {
 		pte_t pte = ptep_get(ptep);
 
 		step = 1;
 		/* We need to do cache lookup too for markers */
 		if (pte_none(pte) || pte_is_marker(pte))
-			__mincore_unmapped_range(addr, addr + PAGE_SIZE,
+			__mincore_unmapped_range(addr, addr + MMUPAGE_SIZE,
 						 vma, vec);
 		else if (pte_present(pte)) {
 			unsigned int batch = pte_batch_hint(ptep, pte);
 
 			if (batch > 1) {
-				unsigned int max_nr = (end - addr) >> PAGE_SHIFT;
+				unsigned int max_nr = (end - addr) >> MMUPAGE_SHIFT;
 
 				step = min_t(unsigned int, batch, max_nr);
 			}
@@ -253,16 +254,27 @@ static long do_mincore(unsigned long addr, unsigned long pages, unsigned char *v
 	vma = vma_lookup(current->mm, addr);
 	if (!vma)
 		return -ENOMEM;
-	end = min(vma->vm_end, addr + (pages << PAGE_SHIFT));
+	/*
+	 * pages << MMUPAGE_SHIFT can be as large as
+	 * PAGE_SIZE << MMUPAGE_SHIFT = (1 << PAGE_SHIFT) << MMUPAGE_SHIFT,
+	 * which on PGCL=6 / 32-bit (e.g. m68k PAGE_SHIFT=18) is 1 GiB
+	 * — easily overflows addr + size to wrap below vma->vm_end.
+	 * Saturate on overflow so the subsequent min() yields a sane end.
+	 */
+	end = addr + (pages << MMUPAGE_SHIFT);
+	if (end < addr)
+		end = vma->vm_end;
+	else
+		end = min(vma->vm_end, end);
 	if (!can_do_mincore(vma)) {
-		unsigned long pages = DIV_ROUND_UP(end - addr, PAGE_SIZE);
+		unsigned long pages = DIV_ROUND_UP(end - addr, MMUPAGE_SIZE);
 		memset(vec, 1, pages);
 		return pages;
 	}
 	err = walk_page_range(vma->vm_mm, addr, end, &mincore_walk_ops, vec);
 	if (err < 0)
 		return err;
-	return (end - addr) >> PAGE_SHIFT;
+	return (end - addr) >> MMUPAGE_SHIFT;
 }
 
 /*
@@ -299,16 +311,16 @@ SYSCALL_DEFINE3(mincore, unsigned long, start, size_t, len,
 	start = untagged_addr(start);
 
 	/* Check the start address: needs to be page-aligned.. */
-	if (unlikely(start & ~PAGE_MASK))
+	if (unlikely(start & ~MMUPAGE_MASK))
 		return -EINVAL;
 
 	/* ..and we need to be passed a valid user-space range */
 	if (!access_ok((void __user *) start, len))
 		return -ENOMEM;
 
-	/* This also avoids any overflows on PAGE_ALIGN */
-	pages = len >> PAGE_SHIFT;
-	pages += (offset_in_page(len)) != 0;
+	/* This also avoids any overflows on MMUPAGE_ALIGN */
+	pages = len >> MMUPAGE_SHIFT;
+	pages += (len & ~MMUPAGE_MASK) != 0;
 
 	if (!access_ok(vec, pages))
 		return -EFAULT;
@@ -324,7 +336,7 @@ SYSCALL_DEFINE3(mincore, unsigned long, start, size_t, len,
 		 * the temporary buffer size.
 		 */
 		mmap_read_lock(current->mm);
-		retval = do_mincore(start, min(pages, PAGE_SIZE), tmp);
+		retval = do_mincore(start, min(pages, (unsigned long)PAGE_SIZE), tmp);
 		mmap_read_unlock(current->mm);
 
 		if (retval <= 0)
@@ -335,7 +347,7 @@ SYSCALL_DEFINE3(mincore, unsigned long, start, size_t, len,
 		}
 		pages -= retval;
 		vec += retval;
-		start += retval << PAGE_SHIFT;
+		start += retval << MMUPAGE_SHIFT;
 		retval = 0;
 	}
 	free_page((unsigned long) tmp);
