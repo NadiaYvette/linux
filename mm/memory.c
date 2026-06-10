@@ -1090,6 +1090,16 @@ copy_present_page(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 
 	/* All done, just insert the new page copy in the child */
 	pte = folio_mk_pte(new_folio, dst_vma->vm_page_prot);
+	/*
+	 * With PAGE_MMUSHIFT > 0, the new (copied) folio must be
+	 * pointed at the same sub-PAGE as the source PTE pointed to,
+	 * because copy_user_highpage copies sub-PAGE-for-sub-PAGE.
+	 * Read the sub-PAGE offset from the source PTE rather than
+	 * recomputing it from vma->vm_pgoff (which may diverge from
+	 * vm_start>>MMUPAGE_SHIFT after relocate_vma_down or mremap).
+	 */
+	if (PAGE_MMUSHIFT > 0)
+		pte = __pte(pte_val(pte) + __phys_to_pte_val(pte_suboffset(ptep_get(src_pte))));
 	pte = maybe_mkwrite(pte_mkdirty(pte), dst_vma);
 	if (userfaultfd_pte_wp(dst_vma, ptep_get(src_pte)))
 		/* Uffd-wp needs to be delivered to dest pte as well */
@@ -1118,6 +1128,23 @@ static __always_inline void __copy_present_ptes(struct vm_area_struct *dst_vma,
 	if (!userfaultfd_wp(dst_vma))
 		pte = pte_clear_uffd_wp(pte);
 
+#if PAGE_MMUSHIFT
+	/*
+	 * Legacy safety: folio_pte_batch returns MMUPAGE-granular counts
+	 * on PGCL (always 1 for order-0 folios).  Since S48, set_ptes(nr)
+	 * writes exactly nr PTEs, so this per-PTE fallback is only needed
+	 * if folio_pte_batch ever returns nr>1 on PGCL (currently doesn't).
+	 */
+	if (nr > 1) {
+		int i;
+
+		for (i = 0; i < nr; i++) {
+			set_ptes(dst_vma->vm_mm, addr + (unsigned long)i * MMUPAGE_SIZE, dst_pte + i, pte, 1);
+			pte = __pte(pte_val(pte) + __phys_to_pte_val(MMUPAGE_SIZE));
+		}
+		return;
+	}
+#endif
 	set_ptes(dst_vma->vm_mm, addr, dst_pte, pte, nr);
 }
 
@@ -1173,6 +1200,63 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 				    addr, nr);
 		return nr;
 	}
+
+
+#if PAGE_MMUSHIFT
+	/*
+	 * PGCL batch: batch-copy contiguous sub-page PTEs within the
+	 * same kernel page.  Write individual PTEs (not set_ptes nr>1
+	 * which multiplies by PAGE_MMUCOUNT) and batch rmap/refcount.
+	 *
+	 * Check rmap FIRST so that if the page is pinned we fall through
+	 * to the single-PTE path without having modified any PTEs.
+	 */
+	if (max_nr > 1 && folio_test_anon(folio) && !folio_test_large(folio)) {
+		nr = pgcl_pte_batch(pte, src_pte, max_nr);
+		if (nr > 1) {
+			folio_ref_add(folio, nr);
+			if (!folio_try_dup_anon_rmap_ptes(folio, page,
+							  1, dst_vma,
+							  src_vma)) {
+				int i;
+
+				/*
+				 * folio_try_dup_anon_rmap_ptes only does
+				 * atomic_inc(&folio->_mapcount) for non-large
+				 * folios regardless of nr_pages.  With PGCL,
+				 * all PTEs within a kernel page map the same
+				 * folio, so we need nr mappings tracked.
+				 * Pass nr=1 to avoid the page+nr-1 folio
+				 * check (all sub-pages share one struct page).
+				 */
+				atomic_add(nr - 1, &folio->_mapcount);
+
+				for (i = 0; i < nr; i++) {
+					pte_t p = ptep_get(src_pte + i);
+
+					if (is_cow_mapping(src_vma->vm_flags)
+					    && pte_write(p)) {
+						ptep_set_wrprotect(
+							src_vma->vm_mm,
+							addr + i * MMUPAGE_SIZE,
+							src_pte + i);
+						p = pte_wrprotect(p);
+					}
+					if (src_vma->vm_flags & VM_SHARED)
+						p = pte_mkclean(p);
+					p = pte_mkold(p);
+					if (!userfaultfd_wp(dst_vma))
+						p = pte_clear_uffd_wp(p);
+					set_ptes(dst_vma->vm_mm, addr + (unsigned long)i * MMUPAGE_SIZE, dst_pte + i, p, 1);
+				}
+				rss[MM_ANONPAGES] += nr;
+				return nr;
+			}
+			/* Pinned page — undo refcount, fall through */
+			folio_ref_sub(folio, nr);
+		}
+	}
+#endif
 
 	folio_get(folio);
 	if (folio_test_anon(folio)) {
@@ -1259,6 +1343,7 @@ again:
 		goto out;
 	}
 
+
 	/*
 	 * We already hold the exclusive mmap_lock, the copy_pte_range() and
 	 * retract_page_tables() are using vma->anon_vma to be exclusive, so
@@ -1319,7 +1404,7 @@ again:
 			WARN_ON_ONCE(ret != -ENOENT);
 		}
 		/* copy_present_ptes() will clear `*prealloc' if consumed */
-		max_nr = (end - addr) / PAGE_SIZE;
+		max_nr = (end - addr) / MMUPAGE_SIZE;
 		ret = copy_present_ptes(dst_vma, src_vma, dst_pte, src_pte,
 					ptent, addr, max_nr, rss, &prealloc);
 		/*
@@ -1341,7 +1426,7 @@ again:
 		}
 		nr = ret;
 		progress += 8 * nr;
-	} while (dst_pte += nr, src_pte += nr, addr += PAGE_SIZE * nr,
+	} while (dst_pte += nr, src_pte += nr, addr += MMUPAGE_SIZE * nr,
 		 addr != end);
 
 	lazy_mmu_mode_disable();
@@ -1632,7 +1717,7 @@ zap_install_uffd_wp_if_needed(struct vm_area_struct *vma,
 		if (--nr == 0)
 			break;
 		pte++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 	}
 
 	return was_installed;
@@ -1671,12 +1756,8 @@ static __always_inline void zap_present_folio_ptes(struct mmu_gather *tlb,
 		*any_skipped = zap_install_uffd_wp_if_needed(vma, addr, pte,
 							     nr, details, ptent);
 
-	if (!delay_rmap) {
+	if (!delay_rmap)
 		folio_remove_rmap_ptes(folio, page, nr, vma);
-
-		if (unlikely(folio_mapcount(folio) < 0))
-			print_bad_pte(vma, addr, ptent, page);
-	}
 	if (unlikely(__tlb_remove_folio_pages(tlb, page, nr, delay_rmap))) {
 		*force_flush = true;
 		*force_break = true;
@@ -1730,6 +1811,37 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 				       force_break, any_skipped);
 		return nr;
 	}
+#if PAGE_MMUSHIFT
+	/*
+	 * PGCL batch: order-0 pages are not compound, so we can't use
+	 * folio_pte_batch.  Instead, batch PTE clearing and TLB flushing
+	 * for contiguous sub-pages within the same kernel page.
+	 */
+	if (max_nr > 1 && folio_test_anon(folio)) {
+		nr = pgcl_pte_batch(ptent, pte, max_nr);
+		if (nr > 1) {
+			int i;
+
+			clear_full_ptes(mm, addr, pte, nr, tlb->fullmm);
+			rss[MM_ANONPAGES] -= nr;
+			arch_check_zapped_pte(vma, ptent);
+			tlb_remove_tlb_entries(tlb, pte, nr, addr);
+
+			for (i = 0; i < nr; i++)
+				folio_remove_rmap_pte(folio, page, vma);
+
+			if (nr > 1)
+				folio_ref_sub(folio, nr - 1);
+			if (unlikely(__tlb_remove_page_size(tlb,
+					page,
+					MMUPAGE_SIZE))) {
+				*force_flush = true;
+				*force_break = true;
+			}
+			return nr;
+		}
+	}
+#endif
 	zap_present_folio_ptes(tlb, vma, folio, page, pte, ptent, 1, addr,
 			       details, rss, force_flush, force_break, any_skipped);
 	return 1;
@@ -1814,7 +1926,7 @@ static inline int do_zap_pte_range(struct mmu_gather *tlb,
 				   bool *any_skipped)
 {
 	pte_t ptent = ptep_get(pte);
-	int max_nr = (end - addr) / PAGE_SIZE;
+	int max_nr = (end - addr) / MMUPAGE_SIZE;
 	int nr = 0;
 
 	/* Skip all consecutive none ptes */
@@ -1828,7 +1940,7 @@ static inline int do_zap_pte_range(struct mmu_gather *tlb,
 		if (!max_nr)
 			return nr;
 		pte += nr;
-		addr += nr * PAGE_SIZE;
+		addr += nr * MMUPAGE_SIZE;
 	}
 
 	if (pte_present(ptent))
@@ -1918,7 +2030,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 	int nr;
 
 retry:
-	tlb_change_page_size(tlb, PAGE_SIZE);
+	tlb_change_page_size(tlb, MMUPAGE_SIZE);
 	init_rss_vec(rss);
 	start_pte = pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
 	if (!pte)
@@ -1939,11 +2051,11 @@ retry:
 		if (any_skipped)
 			can_reclaim_pt = false;
 		if (unlikely(force_break)) {
-			addr += nr * PAGE_SIZE;
+			addr += nr * MMUPAGE_SIZE;
 			direct_reclaim = false;
 			break;
 		}
-	} while (pte += nr, addr += PAGE_SIZE * nr, addr != end);
+	} while (pte += nr, addr += MMUPAGE_SIZE * nr, addr != end);
 
 	/*
 	 * Fast path: try to hold the pmd lock and unmap the PTE page.
