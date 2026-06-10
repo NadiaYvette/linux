@@ -14,7 +14,7 @@ ENTRY(relocate_new_kernel)
 	movel %sp@(4),%a0		/* a0 = ptr */
 	movel %sp@(8),%a1		/* a1 = start */
 	movel %sp@(12),%d1		/* d1 = cpu_mmu_flags */
-	movew #PAGE_MASK,%d2		/* d2 = PAGE_MASK */
+	movel #PAGE_MASK,%d2		/* d2 = PAGE_MASK */
 
 	/* Disable MMU */
 
@@ -86,14 +86,14 @@ ENTRY(relocate_new_kernel)
 
 	btst #1,%d0			/* entry & IND_INDIRECTION? */
 	jeq 1f
-	andw %d2,%d0
+	andl %d2,%d0
 	movel %d0,%a0			/* ptr = entry & PAGE_MASK */
 	jra .Lcopy
 
 1:
 	btst #0,%d0			/* entry & IND_DESTINATION? */
 	jeq 2f
-	andw %d2,%d0
+	andl %d2,%d0
 	movel %d0,%a2			/* a2 = dst = entry & PAGE_MASK */
 	jra .Lcopy
 
@@ -101,7 +101,7 @@ ENTRY(relocate_new_kernel)
 	btst #3,%d0			/* entry & IND_SOURCE? */
 	jeq .Lcopy
 
-	andw %d2,%d0
+	andl %d2,%d0
 	movel %d0,%a3			/* a3 = src = entry & PAGE_MASK */
 	movew #PAGE_SIZE/32 - 1,%d0	/* d0 = PAGE_SIZE/32 - 1 */
 3:
