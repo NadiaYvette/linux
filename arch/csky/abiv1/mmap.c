@@ -9,9 +9,14 @@
 #include <linux/random.h>
 #include <linux/io.h>
 
+/*
+ * pgoff is in MMUPAGE units; colour byte offset is pgoff << MMUPAGE_SHIFT.
+ * Under page clustering (PAGE_MMUSHIFT > 0) PAGE_SIZE > MMUPAGE_SIZE, so
+ * PAGE_SHIFT would miscompute the colour.
+ */
 #define COLOUR_ALIGN(addr,pgoff)		\
 	((((addr)+SHMLBA-1)&~(SHMLBA-1)) +	\
-	 (((pgoff)<<PAGE_SHIFT) & (SHMLBA-1)))
+	 (((pgoff)<<MMUPAGE_SHIFT) & (SHMLBA-1)))
 
 /*
  * We need to ensure that shared mappings are correctly aligned to
@@ -33,7 +38,7 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
 		.length = len,
 		.low_limit = mm->mmap_base,
 		.high_limit = TASK_SIZE,
-		.align_offset = pgoff << PAGE_SHIFT
+		.align_offset = pgoff << MMUPAGE_SHIFT
 	};
 
 	/*
@@ -47,7 +52,7 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
 	 */
 	if (flags & MAP_FIXED) {
 		if (flags & MAP_SHARED &&
-		    (addr - (pgoff << PAGE_SHIFT)) & (SHMLBA - 1))
+		    (addr - (pgoff << MMUPAGE_SHIFT)) & (SHMLBA - 1))
 			return -EINVAL;
 		return addr;
 	}
@@ -67,6 +72,6 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
 			return addr;
 	}
 
-	info.align_mask = do_align ? (PAGE_MASK & (SHMLBA - 1)) : 0;
+	info.align_mask = do_align ? (MMUPAGE_MASK & (SHMLBA - 1)) : 0;
 	return vm_unmapped_area(&info);
 }
