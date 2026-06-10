@@ -89,6 +89,7 @@
 #include "pgalloc-track.h"
 #include "internal.h"
 #include "swap.h"
+#include <linux/pte_cluster.h>
 
 #if defined(LAST_CPUPID_NOT_IN_PAGE_FLAGS) && !defined(CONFIG_COMPILE_TEST)
 #warning Unfortunate NUMA and NUMA Balancing config, growing page-frame for last_cpupid.
@@ -97,6 +98,8 @@
 static vm_fault_t do_fault(struct vm_fault *vmf);
 static vm_fault_t do_anonymous_page(struct vm_fault *vmf);
 static bool vmf_pte_changed(struct vm_fault *vmf);
+
+/* (debug tripwire removed — using persistent PTE monitor instead) */
 
 /*
  * Return true if the original pte was a uffd-wp pte marker (so the pte was
@@ -2392,7 +2395,7 @@ static int insert_page_into_pte_locked(struct vm_area_struct *vma, pte_t *pte,
 static int insert_page(struct vm_area_struct *vma, unsigned long addr,
 			struct page *page, pgprot_t prot, bool mkwrite)
 {
-	int retval;
+	int retval, j;
 	pte_t *pte;
 	spinlock_t *ptl;
 
@@ -2405,6 +2408,25 @@ static int insert_page(struct vm_area_struct *vma, unsigned long addr,
 		goto out;
 	retval = insert_page_into_pte_locked(vma, pte, addr, page, prot,
 					mkwrite);
+	/*
+	 * Map remaining sub-page MMUPAGEs within this kernel page.
+	 * No-op when PAGE_MMUSHIFT == 0.
+	 */
+	for (j = 1; !retval && j < PAGE_MMUCOUNT; j++) {
+		struct folio *folio = page_folio(page);
+		pte_t pteval = mk_pte(page, prot);
+
+		pteval = __pte(pte_val(pteval) + __phys_to_pte_val((phys_addr_t)j * MMUPAGE_SIZE));
+		if (mkwrite) {
+			pteval = pte_mkyoung(pteval);
+			pteval = maybe_mkwrite(pte_mkdirty(pteval), vma);
+		}
+		folio_get(folio);
+		inc_mm_counter(vma->vm_mm, mm_counter_file(folio));
+		folio_add_file_rmap_pte(folio, page, vma);
+		set_pte_at(vma->vm_mm, addr + j * MMUPAGE_SIZE,
+			   pte + j, pteval);
+	}
 	pte_unmap_unlock(pte, ptl);
 out:
 	return retval;
@@ -2441,8 +2463,12 @@ more:
 	if (!pmd)
 		goto out;
 
-	pages_to_write_in_pmd = min_t(unsigned long,
-		remaining_pages_total, PTRS_PER_PTE - pte_index(addr));
+	/*
+	 * Each page needs PAGE_MMUCOUNT PTEs.  Compute how many pages
+	 * fit in the remaining PTE slots of this PMD.
+	 */
+	pages_to_write_in_pmd = min_t(unsigned long, remaining_pages_total,
+		(PTRS_PER_PTE - pte_index(addr)) / PAGE_MMUCOUNT);
 
 	/* Allocate the PTE if necessary; takes PMD lock once only. */
 	ret = -ENOMEM;
@@ -2450,7 +2476,7 @@ more:
 		goto out;
 
 	while (pages_to_write_in_pmd) {
-		int pte_idx = 0;
+		int page_idx = 0;
 		const int batch_size = min_t(int, pages_to_write_in_pmd, 8);
 
 		start_pte = pte_offset_map_lock(mm, pmd, addr, &pte_lock);
@@ -2458,16 +2484,37 @@ more:
 			ret = -EFAULT;
 			goto out;
 		}
-		for (pte = start_pte; pte_idx < batch_size; ++pte, ++pte_idx) {
+		for (pte = start_pte; page_idx < batch_size; ++page_idx) {
+			int j;
 			int err = insert_page_in_batch_locked(vma, pte,
 				addr, pages[curr_page_idx], prot);
 			if (unlikely(err)) {
 				pte_unmap_unlock(start_pte, pte_lock);
 				ret = err;
-				remaining_pages_total -= pte_idx;
+				remaining_pages_total -= page_idx;
 				goto out;
 			}
-			addr += PAGE_SIZE;
+			pte++;
+			addr += MMUPAGE_SIZE;
+			/*
+			 * Map remaining sub-page MMUPAGEs within this
+			 * kernel page (no-op when PAGE_MMUSHIFT == 0).
+			 */
+			for (j = 1; j < PAGE_MMUCOUNT; j++) {
+				struct folio *folio =
+					page_folio(pages[curr_page_idx]);
+				pte_t pteval = mk_pte(pages[curr_page_idx],
+						      prot);
+				pteval = __pte(pte_val(pteval) +
+					       j * MMUPAGE_SIZE);
+				folio_get(folio);
+				inc_mm_counter(mm, mm_counter_file(folio));
+				folio_add_file_rmap_pte(folio,
+					pages[curr_page_idx], vma);
+				set_pte_at(mm, addr, pte, pteval);
+				pte++;
+				addr += MMUPAGE_SIZE;
+			}
 			++curr_page_idx;
 		}
 		pte_unmap_unlock(start_pte, pte_lock);
@@ -2915,20 +2962,26 @@ static int remap_pte_range(struct mm_struct *mm, pmd_t *pmd,
 	pte_t *pte, *mapped_pte;
 	spinlock_t *ptl;
 	int err = 0;
+	unsigned long phys = (unsigned long)pfn << PAGE_SHIFT;
 
 	mapped_pte = pte = pte_alloc_map_lock(mm, pmd, addr, &ptl);
 	if (!pte)
 		return -ENOMEM;
 	lazy_mmu_mode_enable();
 	do {
+		pte_t entry;
+
 		BUG_ON(!pte_none(ptep_get(pte)));
-		if (!pfn_modify_allowed(pfn, prot)) {
+		if (!pfn_modify_allowed(phys >> PAGE_SHIFT, prot)) {
 			err = -EACCES;
 			break;
 		}
-		set_pte_at(mm, addr, pte, pte_mkspecial(pfn_pte(pfn, prot)));
-		pfn++;
-	} while (pte++, addr += PAGE_SIZE, addr != end);
+		entry = pfn_pte(phys >> PAGE_SHIFT, prot);
+		if (PAGE_MMUSHIFT > 0)
+			entry = pte_mksub(entry, phys & (PAGE_SIZE - 1));
+		set_pte_at(mm, addr, pte, pte_mkspecial(entry));
+		phys += MMUPAGE_SIZE;
+	} while (pte++, addr += MMUPAGE_SIZE, addr != end);
 	lazy_mmu_mode_disable();
 	pte_unmap_unlock(mapped_pte, ptl);
 	return err;
@@ -3025,11 +3078,11 @@ static int remap_pfn_range_internal(struct vm_area_struct *vma, unsigned long ad
 {
 	pgd_t *pgd;
 	unsigned long next;
-	unsigned long end = addr + PAGE_ALIGN(size);
+	unsigned long end = addr + MMUPAGE_ALIGN(size);
 	struct mm_struct *mm = vma->vm_mm;
 	int err;
 
-	if (WARN_ON_ONCE(!PAGE_ALIGNED(addr)))
+	if (WARN_ON_ONCE(!MMUPAGE_ALIGNED(addr)))
 		return -EINVAL;
 
 	VM_WARN_ON_ONCE(!vma_test_all_mask(vma, VMA_REMAP_FLAGS));
@@ -3105,7 +3158,7 @@ static int remap_pfn_range_track(struct vm_area_struct *vma, unsigned long addr,
 	struct pfnmap_track_ctx *ctx = NULL;
 	int err;
 
-	size = PAGE_ALIGN(size);
+	size = MMUPAGE_ALIGN(size);
 
 	/*
 	 * If we cover the full VMA, we'll perform actual tracking, and
@@ -3174,7 +3227,7 @@ static int remap_pfn_range_prepare_vma(struct vm_area_struct *vma,
 				       unsigned long addr, unsigned long pfn,
 				       unsigned long size)
 {
-	const unsigned long end = addr + PAGE_ALIGN(size);
+	const unsigned long end = addr + MMUPAGE_ALIGN(size);
 	const bool is_cow = is_cow_mapping(vma->vm_flags);
 	int err;
 
@@ -3339,7 +3392,7 @@ static int apply_to_pte_range(struct mm_struct *mm, pmd_t *pmd,
 				if (err)
 					break;
 			}
-		} while (pte++, addr += PAGE_SIZE, addr != end);
+		} while (pte++, addr += MMUPAGE_SIZE, addr != end);
 	}
 	*mask |= PGTBL_PTE_MODIFIED;
 
@@ -3900,6 +3953,12 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 
 	__folio_mark_uptodate(new_folio);
 
+	/*
+	 * With PAGE_MMUSHIFT > 0, COW clustering may clear+remap
+	 * multiple PTEs within the kernel page, so the notifier
+	 * range covers the full PAGE_SIZE.  When PAGE_MMUSHIFT == 0,
+	 * this degenerates to the single-page range.
+	 */
 	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, mm,
 				vmf->address & PAGE_MASK,
 				(vmf->address & PAGE_MASK) + PAGE_SIZE);
@@ -3921,6 +3980,18 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 		}
 		flush_cache_page(vma, vmf->address, pte_pfn(vmf->orig_pte));
 		entry = folio_mk_pte(new_folio, vma->vm_page_prot);
+		/*
+		 * With PAGE_MMUSHIFT > 0, the new PTE must point to the same
+		 * sub-PAGE of the new folio as the old PTE pointed to of the
+		 * old folio — __wp_page_copy_user copied the whole old folio
+		 * to the new one sub-PAGE-for-sub-PAGE.  Take the sub-PAGE
+		 * offset from the original PTE rather than from vma->vm_pgoff
+		 * (which may diverge from vm_start>>MMUPAGE_SHIFT after
+		 * relocate_vma_down or mremap).
+		 */
+		if (PAGE_MMUSHIFT > 0)
+			entry = __pte(pte_val(entry) +
+				      __phys_to_pte_val(pte_suboffset(vmf->orig_pte)));
 		entry = pte_sw_mkyoung(entry);
 		if (unlikely(unshare)) {
 			if (pte_soft_dirty(vmf->orig_pte))
@@ -3970,6 +4041,112 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 			folio_remove_rmap_pte(old_folio, vmf->page, vma);
 		}
 
+#if PAGE_MMUSHIFT
+		/*
+		 * COW clustering: remap neighbor PTEs in the same kernel
+		 * page that still point to the old page.  The new page
+		 * already has a full copy of the old page's contents
+		 * (done by __wp_page_copy_user above).
+		 *
+		 * With PGCL, pte_page() returns the same struct page for
+		 * all PTEs within a kernel page (PFN = phys >> PAGE_SHIFT),
+		 * so all refcount/mapcount operations naturally target the
+		 * same folio.
+		 */
+		if (old_folio && folio_test_anon(old_folio) && !unshare) {
+			/*
+			 * base_pte / base_addr index the PTE table and the
+			 * address space, so sub must be the ADDRESS-based
+			 * sub-PAGE position within the kernel page.  Using
+			 * vma->vm_pgoff would assume it tracks vm_start mod
+			 * PAGE_MMUCOUNT, but relocate_vma_down() preserves
+			 * the OLD vm_pgoff (so the OLD physical sub-PAGE
+			 * mapping survives move_page_tables), and that
+			 * pgoff-based sub does NOT match the new PTE table
+			 * layout.  Each replaced PTE's *content* sub-PAGE
+			 * (where it points inside the new folio) is preserved
+			 * separately via pte_suboffset(pteval) below.
+			 */
+			unsigned int sub = (vmf->address >> MMUPAGE_SHIFT) &
+					   (PAGE_MMUCOUNT - 1);
+			pte_t *base_pte = vmf->pte - sub;
+			unsigned long base_addr = vmf->address -
+					(unsigned long)sub * MMUPAGE_SIZE;
+			pte_t base_entry = folio_mk_pte(new_folio,
+							vma->vm_page_prot);
+			unsigned long extra = 0;
+			int j;
+
+			base_entry = pte_sw_mkyoung(base_entry);
+			base_entry = maybe_mkwrite(pte_mkdirty(base_entry),
+						   vma);
+
+			for (j = 0; j < PAGE_MMUCOUNT; j++) {
+				unsigned long a = base_addr +
+					(unsigned long)j * MMUPAGE_SIZE;
+				pte_t *ptep = base_pte + j;
+				pte_t pteval;
+
+				/* Skip the PTE we already handled */
+				if (ptep == vmf->pte)
+					continue;
+				/* Skip if outside VMA bounds */
+				if (a < vma->vm_start || a >= vma->vm_end)
+					continue;
+				pteval = ptep_get(ptep);
+				/* Skip if not present */
+				if (!pte_present(pteval))
+					continue;
+				/* Skip if not in the same kernel page */
+				if (page_folio(pte_page(pteval)) !=
+				    old_folio)
+					continue;
+
+				/*
+				 * Preserve the OLD PTE's sub-PAGE offset:
+				 * __wp_page_copy_user copied the entire old
+				 * folio to the new folio sub-PAGE-for-sub-PAGE,
+				 * so the new PTE must point to the SAME
+				 * sub-PAGE of new_folio as old PTE pointed to
+				 * of old_folio.
+				 */
+				ptep_clear_flush(vma, a, ptep);
+				set_pte_at(mm, a, ptep,
+					   pte_mksub(base_entry,
+						     pte_suboffset(pteval)));
+				/*
+				 * Refresh the arch MMU cache for the neighbor
+				 * sub-PTE we just rewrote.  Without this the
+				 * faulting sub-PTE alone gets its entry above
+				 * via update_mmu_cache_range(..., 1) — the rest
+				 * rely on the TLB miss handler walking the page
+				 * tables for the new PTE, which on sparc64
+				 * PGCL=2 loops indefinitely after a COW write
+				 * to the second sub-MMUPAGE of a cluster.
+				 */
+				update_mmu_cache_range(vmf, vma, a, ptep, 1);
+				folio_remove_rmap_pte(old_folio,
+						      pte_page(pteval), vma);
+				extra++;
+			}
+			if (extra) {
+				/*
+				 * Adjust new folio: add refs and mapcount
+				 * for the extra PTEs.  Use atomic_add on
+				 * _mapcount directly — the anon_vma is
+				 * already set up by folio_add_new_anon_rmap.
+				 */
+				folio_ref_add(new_folio, extra);
+				atomic_add(extra, &new_folio->_mapcount);
+				/*
+				 * Drop old folio refs for the remapped
+				 * neighbor PTEs.  The faulting PTE's ref
+				 * is dropped by folio_put(old_folio) below.
+				 */
+				folio_ref_sub(old_folio, extra);
+			}
+		}
+#endif
 		/* Free the old page.. */
 		new_folio = old_folio;
 		page_copied = 1;
@@ -4344,13 +4521,25 @@ static inline void unmap_mapping_range_tree(struct rb_root_cached *root,
 	struct vm_area_struct *vma;
 	unsigned long start, size;
 	struct mmu_gather tlb;
+	/*
+	 * Callers pass first/last_index in PAGE-cache units.  Under PGCL
+	 * the i_mmap interval tree is keyed on vma->vm_pgoff which is in
+	 * MMUPAGE units.  Convert before querying the tree and use
+	 * MMUPAGE_SHIFT for the byte-offset arithmetic so the resulting
+	 * (start, size) lies within [vma->vm_start, vma->vm_end).
+	 * At PAGE_MMUSHIFT==0 these helpers are identity.
+	 */
+	pgoff_t mmu_first = pgoff_page_to_mmu(first_index);
+	pgoff_t mmu_last = (last_index == ULONG_MAX) ?
+		ULONG_MAX : (pgoff_page_to_mmu(last_index + 1) - 1);
 
-	vma_interval_tree_foreach(vma, root, first_index, last_index) {
-		const pgoff_t start_idx = max(first_index, vma->vm_pgoff);
-		const pgoff_t end_idx = min(last_index, vma_last_pgoff(vma)) + 1;
+	vma_interval_tree_foreach(vma, root, mmu_first, mmu_last) {
+		const pgoff_t start_idx = max(mmu_first, vma->vm_pgoff);
+		const pgoff_t end_idx = min(mmu_last, vma_last_pgoff(vma)) + 1;
 
-		start = vma->vm_start + ((start_idx - vma->vm_pgoff) << PAGE_SHIFT);
-		size = (end_idx - start_idx) << PAGE_SHIFT;
+		start = vma->vm_start +
+			((start_idx - vma->vm_pgoff) << MMUPAGE_SHIFT);
+		size = (end_idx - start_idx) << MMUPAGE_SHIFT;
 
 		tlb_gather_mmu(&tlb, vma->vm_mm);
 		zap_vma_range_batched(&tlb, vma, start, size, details);
@@ -5255,7 +5444,8 @@ static struct folio *alloc_anon_folio(struct vm_fault *vmf)
 	order = highest_order(orders);
 	while (orders) {
 		addr = ALIGN_DOWN(vmf->address, PAGE_SIZE << order);
-		if (pte_range_none(pte + pte_index(addr), 1 << order))
+		if (pte_range_none(pte + pte_index(addr),
+				    (1 << order) * PAGE_MMUCOUNT))
 			break;
 		order = next_order(&orders, order);
 	}
@@ -5304,6 +5494,19 @@ void map_anon_folio_pte_nopf(struct folio *folio, pte_t *pte,
 {
 	const unsigned int nr_pages = folio_nr_pages(folio);
 	pte_t entry = folio_mk_pte(folio, vma->vm_page_prot);
+#if PAGE_MMUSHIFT
+	/*
+	 * For large folios (nr_pages > 1), every kernel page maps
+	 * PAGE_MMUCOUNT PTEs.  For single-page (nr_pages == 1), we
+	 * install exactly 1 PTE — clustering of the remaining sub-pages
+	 * is handled by the caller (do_anonymous_page inline block).
+	 *
+	 * PGCL=0 (PAGE_MMUSHIFT == 0) doesn't need this — the #else
+	 * branch below uses nr_pages directly.
+	 */
+	const unsigned long nr_ptes = (nr_pages > 1)
+		? (unsigned long)nr_pages * PAGE_MMUCOUNT : 1;
+#endif
 
 	entry = pte_sw_mkyoung(entry);
 
@@ -5312,11 +5515,45 @@ void map_anon_folio_pte_nopf(struct folio *folio, pte_t *pte,
 	if (uffd_wp)
 		entry = pte_mkuffd_wp(entry);
 
+#if PAGE_MMUSHIFT
+	/*
+	 * PGCL sub-page adjustment.  folio_mk_pte() returns a PTE pointing
+	 * to sub-page 0 of the folio.  For single-page faults (nr_pages==1),
+	 * adjust the PTE to the correct MMUPAGE within the kernel page based
+	 * on the faulting virtual address.  For large folios (nr_pages>1),
+	 * addr is already aligned to the folio size and we start from sub-page 0.
+	 */
+	if (nr_pages == 1) {
+		unsigned int sub = (addr >> MMUPAGE_SHIFT) & (PAGE_MMUCOUNT - 1);
+		entry = pte_mksub(entry, (unsigned long)sub * MMUPAGE_SIZE);
+	}
+
+	folio_ref_add(folio, nr_ptes - 1);
+	folio_add_new_anon_rmap(folio, vma, addr, RMAP_EXCLUSIVE);
+	if (nr_pages > 1) {
+		/*
+		 * For large folios, folio_add_new_anon_rmap set per-page
+		 * _mapcount to 0 (= 1 mapping) and _large_mapcount to
+		 * nr_pages - 1.  We need PAGE_MMUCOUNT mappings per page
+		 * and nr_ptes total large mapcount.
+		 */
+		int i;
+
+		for (i = 0; i < nr_pages; i++)
+			atomic_add(PAGE_MMUCOUNT - 1,
+				   &folio_page(folio, i)->_mapcount);
+		folio_add_large_mapcount(folio, nr_ptes - nr_pages, vma);
+	}
+	folio_add_lru_vma(folio, vma);
+	set_ptes(vma->vm_mm, addr, pte, entry, nr_ptes);
+	update_mmu_cache_range(NULL, vma, addr, pte, nr_ptes);
+#else
 	folio_ref_add(folio, nr_pages - 1);
 	folio_add_new_anon_rmap(folio, vma, addr, RMAP_EXCLUSIVE);
 	folio_add_lru_vma(folio, vma);
 	set_ptes(vma->vm_mm, addr, pte, entry, nr_pages);
 	update_mmu_cache_range(NULL, vma, addr, pte, nr_pages);
+#endif
 }
 
 static void map_anon_folio_pte_pf(struct folio *folio, pte_t *pte,
@@ -5325,7 +5562,21 @@ static void map_anon_folio_pte_pf(struct folio *folio, pte_t *pte,
 	const unsigned int order = folio_order(folio);
 
 	map_anon_folio_pte_nopf(folio, pte, vma, addr, uffd_wp);
+#if PAGE_MMUSHIFT
+	/*
+	 * MM_ANONPAGES is MMUPAGE-granular.  For large folios (order > 0),
+	 * we installed nr_pages * PAGE_MMUCOUNT PTEs.  For single-page
+	 * (order == 0), we installed exactly 1 PTE (clustering adds
+	 * the rest separately in do_anonymous_page).
+	 */
+	if (order > 0)
+		add_mm_counter(vma->vm_mm, MM_ANONPAGES,
+			       (1L << order) * PAGE_MMUCOUNT);
+	else
+		add_mm_counter(vma->vm_mm, MM_ANONPAGES, 1);
+#else
 	add_mm_counter(vma->vm_mm, MM_ANONPAGES, 1L << order);
+#endif
 	count_mthp_stat(order, MTHP_STAT_ANON_FAULT_ALLOC);
 }
 
@@ -5396,7 +5647,10 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		goto oom;
 
 	nr_pages = folio_nr_pages(folio);
-	addr = ALIGN_DOWN(vmf->address, nr_pages * PAGE_SIZE);
+	if (nr_pages == 1)
+		addr = ALIGN_DOWN(vmf->address, MMUPAGE_SIZE);
+	else
+		addr = ALIGN_DOWN(vmf->address, nr_pages * PAGE_SIZE);
 
 	/*
 	 * The memory barrier inside __folio_mark_uptodate makes sure that
@@ -5405,13 +5659,15 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	 */
 	__folio_mark_uptodate(folio);
 
+
 	vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd, addr, &vmf->ptl);
 	if (!vmf->pte)
 		goto release;
 	if (nr_pages == 1 && vmf_pte_changed(vmf)) {
 		update_mmu_tlb(vma, addr, vmf->pte);
 		goto release;
-	} else if (nr_pages > 1 && !pte_range_none(vmf->pte, nr_pages)) {
+	} else if (nr_pages > 1 &&
+		   !pte_range_none(vmf->pte, nr_pages * PAGE_MMUCOUNT)) {
 		update_mmu_tlb_range(vma, addr, vmf->pte, nr_pages);
 		goto release;
 	}
@@ -5426,6 +5682,101 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		folio_put(folio);
 		return handle_userfault(vmf, VM_UFFD_MISSING);
 	}
+#if PAGE_MMUSHIFT
+	if (nr_pages == 1 && !(vma->vm_flags & VM_RAND_READ)) {
+		/*
+		 * Page clustering: map all sub-page PTEs within the
+		 * allocated kernel page that fall inside the VMA and
+		 * are currently pte_none.  This avoids wasting memory
+		 * by using only 1/PAGE_MMUCOUNT of each allocated page.
+		 *
+		 * Suppress clustering when MADV_RANDOM is set — the VMA
+		 * has opted out of prefaulting around the fault address.
+		 *
+		 * For anonymous VMAs (pgoff typically 0), the cluster
+		 * never crosses PMD boundaries since PAGE_MMUCOUNT
+		 * divides PTRS_PER_PTE evenly.
+		 */
+		pte_t entry;
+		/*
+		 * Fresh allocation: this is a brand new folio with no prior
+		 * sub-PAGE assignment, so the ADDRESS-based sub-PAGE position
+		 * works for both the PTE table indexing and the folio sub-PAGE
+		 * mapping (we map address-sub-PAGE-j to folio-sub-PAGE-j).
+		 * Using vma->vm_pgoff would silently assume it tracks
+		 * vm_start>>MMUPAGE_SHIFT, which relocate_vma_down does not
+		 * preserve.
+		 */
+		unsigned int sub = (vmf->address >> MMUPAGE_SHIFT) &
+				   (PAGE_MMUCOUNT - 1);
+		pte_t *base_pte = vmf->pte - sub;
+		unsigned long base_addr = addr - (unsigned long)sub * MMUPAGE_SIZE;
+		unsigned long rss = 0;
+		int j;
+
+		folio_ref_add(folio, nr_pages - 1);
+		add_mm_counter(vma->vm_mm, MM_ANONPAGES, nr_pages);
+		count_mthp_stat(folio_order(folio), MTHP_STAT_ANON_FAULT_ALLOC);
+		folio_add_new_anon_rmap(folio, vma, addr, RMAP_EXCLUSIVE);
+		folio_add_lru_vma(folio, vma);
+
+		entry = folio_mk_pte(folio, vma->vm_page_prot);
+		entry = pte_sw_mkyoung(entry);
+		if (vma->vm_flags & VM_WRITE)
+			entry = pte_mkwrite(pte_mkdirty(entry), vma);
+		if (vmf_orig_pte_uffd_wp(vmf))
+			entry = pte_mkuffd_wp(entry);
+
+		for (j = 0; j < PAGE_MMUCOUNT; j++) {
+			unsigned long a = base_addr + (unsigned long)j * MMUPAGE_SIZE;
+			pte_t *ptep = base_pte + j;
+
+			/* Skip if outside VMA bounds */
+			if (a < vma->vm_start || a >= vma->vm_end)
+				continue;
+			/* Skip if PTE already occupied */
+			if (!pte_none(ptep_get(ptep)))
+				continue;
+			set_ptes(vma->vm_mm, a, ptep, pte_mksub(entry, (unsigned long)j * MMUPAGE_SIZE), 1);
+			/*
+			 * Pre-insert the per-sub-PTE arch MMU cache entry now,
+			 * not just for the faulting sub-PTE.  Without this the
+			 * remaining sub-PTEs in the cluster get inserted into
+			 * the arch cache only when the userspace next touches
+			 * them and the TLB miss handler walks the page tables;
+			 * on sparc64 PGCL=2 (4 MMUPAGEs per PAGE) that path
+			 * loops indefinitely instead of completing the TLB
+			 * fill, so the second sub-PAGE write traps forever.
+			 * Inserting eagerly here bypasses the broken slow walk
+			 * and matches how update_mmu_cache_range is normally
+			 * called paired with set_ptes for each installed PTE.
+			 */
+			update_mmu_cache_range(vmf, vma, a, ptep, 1);
+			rss++;
+		}
+		/*
+		 * PGCL convention (Option A): one rmap event per PTE.
+		 * folio_add_new_anon_rmap above set _mapcount = 0 (= 1 mapping)
+		 * for the first sub-PTE.  Add (rss - 1) more so mapcount equals
+		 * the number of sub-PTEs actually installed.  Per-PTE unmap paths
+		 * (zap_present_ptes anon-batch loop, do_wp_page COW clustering,
+		 * PVMW callbacks consuming nr_mmupages) decrement once per PTE,
+		 * so this keeps mapcount accounting balanced across fault → fork
+		 * → unmap.  Refcount and MM_ANONPAGES are also MMUPAGE-granular.
+		 */
+		if (rss > 1) {
+			folio_ref_add(folio, rss - 1);
+			atomic_add(rss - 1, &folio->_mapcount);
+			lruvec_stat_mod_folio(folio, NR_ANON_MAPPED, rss - 1);
+		}
+		/* Fix RSS: we added 1 above (nr_pages), need rss total */
+		add_mm_counter(vma->vm_mm, MM_ANONPAGES, rss - 1);
+		/* update_mmu_cache_range is now called per-sub-PTE inside the
+		 * loop above; no trailing call needed.
+		 */
+		goto unlock;
+	}
+#endif
 	map_anon_folio_pte_pf(folio, vmf->pte, vma, addr,
 			      vmf_orig_pte_uffd_wp(vmf));
 unlock:
@@ -5569,7 +5920,7 @@ vm_fault_t do_set_pmd(struct vm_fault *vmf, struct folio *folio, struct page *pa
 	if (write)
 		entry = maybe_pmd_mkwrite(pmd_mkdirty(entry), vma);
 
-	add_mm_counter(vma->vm_mm, mm_counter_file(folio), HPAGE_PMD_NR);
+	add_mm_counter(vma->vm_mm, mm_counter_file(folio), HPAGE_PMD_MMUNR);
 	folio_add_file_rmap_pmd(folio, page, vma);
 
 	/*
@@ -5601,7 +5952,7 @@ vm_fault_t do_set_pmd(struct vm_fault *vmf, struct folio *folio, struct page *pa
  * @vmf: Fault description.
  * @folio: The folio that contains @page.
  * @page: The first page to create a PTE for.
- * @nr: The number of PTEs to create.
+ * @nr: The number of kernel pages to map (1 PTE for nr==1, nr*PAGE_MMUCOUNT PTEs for nr>1).
  * @addr: The first address to create a PTE for.
  */
 void set_pte_range(struct vm_fault *vmf, struct folio *folio,
@@ -5611,9 +5962,31 @@ void set_pte_range(struct vm_fault *vmf, struct folio *folio,
 	bool write = vmf->flags & FAULT_FLAG_WRITE;
 	bool prefault = !in_range(vmf->address, addr, nr * PAGE_SIZE);
 	pte_t entry;
+	/*
+	 * nr is the kernel page count.  For PGCL with nr > 1 (large
+	 * folio), each kernel page has PAGE_MMUCOUNT sub-pages, so we
+	 * need nr * PAGE_MMUCOUNT PTEs.  For nr == 1, we map a single
+	 * sub-page (one PTE).
+	 */
+	unsigned int nr_ptes = (PAGE_MMUSHIFT && nr > 1) ?
+		nr * PAGE_MMUCOUNT : nr;
 
 	flush_icache_pages(vma, page, nr);
 	entry = mk_pte(page, vma->vm_page_prot);
+
+	/*
+	 * With PAGE_MMUSHIFT > 0, each PTE maps one MMUPAGE (sub-page).
+	 * Adjust the PTE to point to the correct MMUPAGE within the page.
+	 * Compute the effective pgoff from the actual address being mapped,
+	 * not vmf->pgoff, because during fault-around multiple pages are
+	 * mapped with different sub-page offsets.
+	 */
+	if (PAGE_MMUSHIFT > 0) {
+		pgoff_t effective_pgoff = vma->vm_pgoff +
+			((addr - vma->vm_start) >> MMUPAGE_SHIFT);
+		unsigned int sub = pgoff_sub_page_index(effective_pgoff);
+		entry = __pte(pte_val(entry) + __phys_to_pte_val((phys_addr_t)sub * MMUPAGE_SIZE));
+	}
 
 	if (prefault && arch_wants_old_prefaulted_pte())
 		entry = pte_mkold(entry);
@@ -5634,10 +6007,10 @@ void set_pte_range(struct vm_fault *vmf, struct folio *folio,
 	} else {
 		folio_add_file_rmap_ptes(folio, page, nr, vma);
 	}
-	set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr);
+	set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr_ptes);
 
 	/* no need to invalidate: a not-present page won't be cached */
-	update_mmu_cache_range(vmf, vma, addr, vmf->pte, nr);
+	update_mmu_cache_range(vmf, vma, addr, vmf->pte, nr_ptes);
 }
 
 static bool vmf_pte_changed(struct vm_fault *vmf)
@@ -5732,10 +6105,19 @@ fallback:
 		nr_pages = 1;
 	} else if (nr_pages > 1) {
 		pgoff_t idx = folio_page_idx(folio, page);
-		/* The page offset of vmf->address within the VMA. */
-		pgoff_t vma_off = vmf->pgoff - vmf->vma->vm_pgoff;
-		/* The index of the entry in the pagetable for fault page. */
-		pgoff_t pte_off = pte_index(vmf->address);
+		/*
+		 * The PAGE offset of vmf->address within the VMA.
+		 * vmf->pgoff and vm_pgoff are in MMUPAGE units;
+		 * convert to PAGE units for comparison with idx.
+		 */
+		pgoff_t vma_off = (vmf->pgoff - vmf->vma->vm_pgoff)
+				  >> PAGE_MMUSHIFT;
+		/*
+		 * The PAGE-granular index within this PMD.
+		 * pte_index() returns MMUPAGE-granular PTE index;
+		 * convert to PAGE units.
+		 */
+		pgoff_t pte_off = pte_index(vmf->address) >> PAGE_MMUSHIFT;
 
 		/*
 		 * Fallback to per-page fault in case the folio size in page
@@ -5744,11 +6126,15 @@ fallback:
 		if (unlikely(vma_off < idx ||
 			    vma_off + (nr_pages - idx) > vma_pages(vma) ||
 			    pte_off < idx ||
-			    pte_off + (nr_pages - idx)  > PTRS_PER_PTE)) {
+			    pte_off + (nr_pages - idx) >
+				(PTRS_PER_PTE >> PAGE_MMUSHIFT))) {
 			nr_pages = 1;
 		} else {
-			/* Now we can set mappings for the whole large folio. */
-			addr = vmf->address - idx * PAGE_SIZE;
+			/*
+			 * Map the whole large folio.  Align addr down to
+			 * PAGE boundary then back up to folio start.
+			 */
+			addr = (vmf->address & PAGE_MASK) - idx * PAGE_SIZE;
 			page = &folio->page;
 		}
 	}
@@ -5763,16 +6149,27 @@ fallback:
 		update_mmu_tlb(vma, addr, vmf->pte);
 		ret = VM_FAULT_NOPAGE;
 		goto unlock;
-	} else if (nr_pages > 1 && !pte_range_none(vmf->pte, nr_pages)) {
+	} else if (nr_pages > 1 &&
+		   !pte_range_none(vmf->pte, nr_pages * PAGE_MMUCOUNT)) {
 		needs_fallback = true;
 		pte_unmap_unlock(vmf->pte, vmf->ptl);
 		goto fallback;
 	}
 
-	folio_ref_add(folio, nr_pages - 1);
-	set_pte_range(vmf, folio, page, nr_pages, addr);
-	type = is_cow ? MM_ANONPAGES : mm_counter_file(folio);
-	add_mm_counter(vma->vm_mm, type, nr_pages);
+	/*
+	 * With page clustering (PAGE_MMUSHIFT > 0), nr_ptes is the actual
+	 * number of hardware PTEs to create (PTE/MMUPAGE count).
+	 * nr_pages > 1 occurs for large folios; set_pte_range handles
+	 * the PGCL nr_pages-to-nr_ptes conversion internally.
+	 */
+	{
+		unsigned long nr_ptes = (PAGE_MMUSHIFT && nr_pages > 1) ?
+			(unsigned long)nr_pages * PAGE_MMUCOUNT : nr_pages;
+		folio_ref_add(folio, nr_ptes - 1);
+		set_pte_range(vmf, folio, page, nr_pages, addr);
+		type = is_cow ? MM_ANONPAGES : mm_counter_file(folio);
+		add_mm_counter(vma->vm_mm, type, nr_ptes);
+	}
 	ret = 0;
 
 unlock:
@@ -5842,20 +6239,24 @@ late_initcall(fault_around_debugfs);
  */
 static vm_fault_t do_fault_around(struct vm_fault *vmf)
 {
-	pgoff_t nr_pages = READ_ONCE(fault_around_pages);
+	/* Convert fault_around_pages (PAGE units) to PTE count (MMUPAGE units) */
+	pgoff_t nr_ptes = READ_ONCE(fault_around_pages) << PAGE_MMUSHIFT;
 	pgoff_t pte_off = pte_index(vmf->address);
-	/* The page offset of vmf->address within the VMA. */
+	/* The MMUPAGE offset of vmf->address within the VMA. */
 	pgoff_t vma_off = vmf->pgoff - vmf->vma->vm_pgoff;
+	/* VMA size in MMUPAGE units */
+	pgoff_t vma_mmupages = (vmf->vma->vm_end - vmf->vma->vm_start)
+				>> MMUPAGE_SHIFT;
 	pgoff_t from_pte, to_pte;
 	vm_fault_t ret;
 
 	/* The PTE offset of the start address, clamped to the VMA. */
-	from_pte = max(ALIGN_DOWN(pte_off, nr_pages),
+	from_pte = max(ALIGN_DOWN(pte_off, nr_ptes),
 		       pte_off - min(pte_off, vma_off));
 
 	/* The PTE offset of the end address, clamped to the VMA and PTE. */
-	to_pte = min3(from_pte + nr_pages, (pgoff_t)PTRS_PER_PTE,
-		      pte_off + vma_pages(vmf->vma) - vma_off) - 1;
+	to_pte = min3(from_pte + nr_ptes, (pgoff_t)PTRS_PER_PTE,
+		      pte_off + vma_mmupages - vma_off) - 1;
 
 	if (pmd_none(*vmf->pmd)) {
 		vmf->prealloc_pte = pte_alloc_one(vmf->vma->vm_mm);
@@ -6130,10 +6531,10 @@ static void numa_rebuild_large_mapping(struct vm_fault *vmf, struct vm_area_stru
 	start = max3(addr_start, pt_start, vma->vm_start);
 	end = min3(addr_start + folio_size(folio), pt_start + PMD_SIZE,
 		   vma->vm_end);
-	start_ptep = vmf->pte - ((addr - start) >> PAGE_SHIFT);
+	start_ptep = vmf->pte - ((addr - start) >> MMUPAGE_SHIFT);
 
 	/* Restore all PTEs' mapping of the large folio */
-	for (addr = start; addr != end; start_ptep++, addr += PAGE_SIZE) {
+	for (addr = start; addr != end; start_ptep++, addr += MMUPAGE_SIZE) {
 		pte_t ptent = ptep_get(start_ptep);
 		bool writable = false;
 
@@ -6467,7 +6868,7 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 {
 	struct vm_fault vmf = {
 		.vma = vma,
-		.address = address & PAGE_MASK,
+		.address = address & MMUPAGE_MASK,
 		.real_address = address,
 		.flags = flags,
 		.pgoff = linear_page_index(vma, address),
@@ -7322,7 +7723,7 @@ void print_vma_addr(char *prefix, unsigned long ip)
 	if (vma && vma->vm_file) {
 		struct file *f = vma->vm_file;
 		ip -= vma->vm_start;
-		ip += vma->vm_pgoff << PAGE_SHIFT;
+		ip += vma->vm_pgoff << MMUPAGE_SHIFT;
 		printk("%s%pD[%lx,%lx+%lx]", prefix, f, ip,
 				vma->vm_start,
 				vma->vm_end - vma->vm_start);
@@ -7568,8 +7969,14 @@ static struct kmem_cache *page_ptl_cachep;
 
 void __init ptlock_cache_init(void)
 {
-	page_ptl_cachep = kmem_cache_create("page->ptl", sizeof(spinlock_t), 0,
-			SLAB_PANIC, NULL);
+	/*
+	 * Each ptdesc may host PTE_PACK_NR sub-tables (PACK_PTE_PTLOCKS);
+	 * size the cache to hold one spinlock per sub-table.  At PTE_PACK_NR
+	 * = 1 (the default for non-packing arches) this is the historical
+	 * single-spinlock allocation, unchanged.
+	 */
+	page_ptl_cachep = kmem_cache_create("page->ptl",
+			PTE_PACK_NR * sizeof(spinlock_t), 0, SLAB_PANIC, NULL);
 }
 
 bool ptlock_alloc(struct ptdesc *ptdesc)
