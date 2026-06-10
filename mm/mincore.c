@@ -254,7 +254,18 @@ static long do_mincore(unsigned long addr, unsigned long pages, unsigned char *v
 	vma = vma_lookup(current->mm, addr);
 	if (!vma)
 		return -ENOMEM;
-	end = min(vma->vm_end, addr + (pages << MMUPAGE_SHIFT));
+	/*
+	 * pages << MMUPAGE_SHIFT can be as large as
+	 * PAGE_SIZE << MMUPAGE_SHIFT = (1 << PAGE_SHIFT) << MMUPAGE_SHIFT,
+	 * which on PGCL=6 / 32-bit (e.g. m68k PAGE_SHIFT=18) is 1 GiB
+	 * — easily overflows addr + size to wrap below vma->vm_end.
+	 * Saturate on overflow so the subsequent min() yields a sane end.
+	 */
+	end = addr + (pages << MMUPAGE_SHIFT);
+	if (end < addr)
+		end = vma->vm_end;
+	else
+		end = min(vma->vm_end, end);
 	if (!can_do_mincore(vma)) {
 		unsigned long pages = DIV_ROUND_UP(end - addr, MMUPAGE_SIZE);
 		memset(vec, 1, pages);
