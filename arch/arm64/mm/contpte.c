@@ -58,7 +58,7 @@ static void contpte_try_unfold_partial(struct mm_struct *mm, unsigned long addr,
 		contpte_try_unfold(mm, addr, ptep, __ptep_get(ptep));
 
 	if (ptep + nr != contpte_align_down(ptep + nr)) {
-		unsigned long last_addr = addr + PAGE_SIZE * (nr - 1);
+		unsigned long last_addr = addr + MMUPAGE_SIZE * (nr - 1);
 		pte_t *last_ptep = ptep + nr - 1;
 
 		contpte_try_unfold(mm, last_addr, last_ptep,
@@ -76,9 +76,18 @@ static void contpte_convert(struct mm_struct *mm, unsigned long addr,
 
 	start_ptep = ptep = contpte_align_down(ptep);
 	start_addr = addr = ALIGN_DOWN(addr, CONT_PTE_SIZE);
-	pte = pfn_pte(ALIGN_DOWN(pte_pfn(pte), CONT_PTES), pte_pgprot(pte));
+	/*
+	 * Reset the PTE to point at the FIRST sub-page of this CONT range
+	 * (which may not be sub-page 0 of the enclosing kernel page).  With
+	 * PGCL, a kernel page contains PAGE_MMUCOUNT sub-pages and several
+	 * CONT_PTE-sized cont ranges; using pfn_pte(pte_pfn(pte), ...) would
+	 * always reset to sub-page 0 of the kernel page, miscoloring the
+	 * second/third/fourth cont range to point back at sub-page 0.
+	 */
+	pte = __pte(__phys_to_pte_val(ALIGN_DOWN(__pte_to_phys(pte),
+				CONT_PTE_SIZE)) | pgprot_val(pte_pgprot(pte)));
 
-	for (i = 0; i < CONT_PTES; i++, ptep++, addr += PAGE_SIZE) {
+	for (i = 0; i < CONT_PTES; i++, ptep++, addr += MMUPAGE_SIZE) {
 		pte_t ptent = __ptep_get_and_clear(mm, addr, ptep);
 
 		if (pte_dirty(ptent))
@@ -225,7 +234,7 @@ static void contpte_convert(struct mm_struct *mm, unsigned long addr,
 	 */
 
 	if (!system_supports_bbml2_noabort())
-		__flush_tlb_range(&vma, start_addr, addr, PAGE_SIZE, 3,
+		__flush_tlb_range(&vma, start_addr, addr, MMUPAGE_SIZE, 3,
 				  TLBF_NOWALKCACHE);
 
 	__set_ptes(mm, start_addr, start_ptep, pte, CONT_PTES);
@@ -257,7 +266,6 @@ void __contpte_try_fold(struct mm_struct *mm, unsigned long addr,
 	pte_t expected_pte, subpte;
 	struct folio *folio;
 	struct page *page;
-	unsigned long pfn;
 	pte_t *orig_ptep;
 	pgprot_t prot;
 
@@ -268,7 +276,8 @@ void __contpte_try_fold(struct mm_struct *mm, unsigned long addr,
 
 	page = pte_page(pte);
 	folio = page_folio(page);
-	folio_start = addr - (page - &folio->page) * PAGE_SIZE;
+	folio_start = addr - (page - &folio->page) * PAGE_SIZE
+			  - ((__pte_to_phys(pte) & ~PAGE_MASK) >> MMUPAGE_SHIFT) * MMUPAGE_SIZE;
 	folio_end = folio_start + folio_nr_pages(folio) * PAGE_SIZE;
 	cont_start = ALIGN_DOWN(addr, CONT_PTE_SIZE);
 	cont_end = cont_start + CONT_PTE_SIZE;
@@ -276,9 +285,9 @@ void __contpte_try_fold(struct mm_struct *mm, unsigned long addr,
 	if (folio_start > cont_start || folio_end < cont_end)
 		return;
 
-	pfn = ALIGN_DOWN(pte_pfn(pte), CONT_PTES);
 	prot = pte_pgprot(pte_mkold(pte_mkclean(pte)));
-	expected_pte = pfn_pte(pfn, prot);
+	expected_pte = __pte(__phys_to_pte_val(ALIGN_DOWN(__pte_to_phys(pte),
+				CONT_PTE_SIZE)) | pgprot_val(prot));
 	orig_ptep = ptep;
 	ptep = contpte_align_down(ptep);
 
@@ -358,12 +367,12 @@ pte_t contpte_ptep_get(pte_t *ptep, pte_t orig_pte)
 }
 EXPORT_SYMBOL_GPL(contpte_ptep_get);
 
-static inline bool contpte_is_consistent(pte_t pte, unsigned long pfn,
+static inline bool contpte_is_consistent(pte_t pte, phys_addr_t phys,
 					pgprot_t orig_prot)
 {
 	pgprot_t prot = pte_pgprot(pte_mkold(pte_mkclean(pte)));
 
-	return pte_valid_cont(pte) && pte_pfn(pte) == pfn &&
+	return pte_valid_cont(pte) && __pte_to_phys(pte) == phys &&
 			pgprot_val(prot) == pgprot_val(orig_prot);
 }
 
@@ -387,7 +396,7 @@ pte_t contpte_ptep_get_lockless(pte_t *orig_ptep)
 	 */
 
 	pgprot_t orig_prot;
-	unsigned long pfn;
+	phys_addr_t phys;
 	pte_t orig_pte;
 	pte_t *ptep;
 	pte_t pte;
@@ -401,20 +410,20 @@ retry:
 
 	orig_prot = pte_pgprot(pte_mkold(pte_mkclean(orig_pte)));
 	ptep = contpte_align_down(orig_ptep);
-	pfn = pte_pfn(orig_pte) - (orig_ptep - ptep);
+	phys = __pte_to_phys(orig_pte) - (orig_ptep - ptep) * MMUPAGE_SIZE;
 
-	for (i = 0; i < CONT_PTES; i++, ptep++, pfn++) {
+	for (i = 0; i < CONT_PTES; i++, ptep++, phys += MMUPAGE_SIZE) {
 		pte = __ptep_get(ptep);
 
-		if (!contpte_is_consistent(pte, pfn, orig_prot))
+		if (!contpte_is_consistent(pte, phys, orig_prot))
 			goto retry;
 
 		if (pte_dirty(pte)) {
 			orig_pte = pte_mkdirty(orig_pte);
-			for (; i < CONT_PTES; i++, ptep++, pfn++) {
+			for (; i < CONT_PTES; i++, ptep++, phys += MMUPAGE_SIZE) {
 				pte = __ptep_get(ptep);
 
-				if (!contpte_is_consistent(pte, pfn, orig_prot))
+				if (!contpte_is_consistent(pte, phys, orig_prot))
 					goto retry;
 
 				if (pte_young(pte)) {
@@ -429,11 +438,11 @@ retry:
 			orig_pte = pte_mkyoung(orig_pte);
 			i++;
 			ptep++;
-			pfn++;
-			for (; i < CONT_PTES; i++, ptep++, pfn++) {
+			phys += MMUPAGE_SIZE;
+			for (; i < CONT_PTES; i++, ptep++, phys += MMUPAGE_SIZE) {
 				pte = __ptep_get(ptep);
 
-				if (!contpte_is_consistent(pte, pfn, orig_prot))
+				if (!contpte_is_consistent(pte, phys, orig_prot))
 					goto retry;
 
 				if (pte_dirty(pte)) {
@@ -454,7 +463,7 @@ void contpte_set_ptes(struct mm_struct *mm, unsigned long addr,
 {
 	unsigned long next;
 	unsigned long end;
-	unsigned long pfn;
+	phys_addr_t phys;
 	pgprot_t prot;
 
 	/*
@@ -468,16 +477,16 @@ void contpte_set_ptes(struct mm_struct *mm, unsigned long addr,
 	if (!mm_is_user(mm))
 		return __set_ptes(mm, addr, ptep, pte, nr);
 
-	end = addr + (nr << PAGE_SHIFT);
-	pfn = pte_pfn(pte);
+	end = addr + ((unsigned long)nr << MMUPAGE_SHIFT);
+	phys = __pte_to_phys(pte);
 	prot = pte_pgprot(pte);
 
 	do {
 		next = pte_cont_addr_end(addr, end);
-		nr = (next - addr) >> PAGE_SHIFT;
-		pte = pfn_pte(pfn, prot);
+		nr = (next - addr) >> MMUPAGE_SHIFT;
+		pte = __pte(__phys_to_pte_val(phys) | pgprot_val(prot));
 
-		if (((addr | next | (pfn << PAGE_SHIFT)) & ~CONT_PTE_MASK) == 0)
+		if (((addr | next | phys) & ~CONT_PTE_MASK) == 0)
 			pte = pte_mkcont(pte);
 		else
 			pte = pte_mknoncont(pte);
@@ -486,7 +495,7 @@ void contpte_set_ptes(struct mm_struct *mm, unsigned long addr,
 
 		addr = next;
 		ptep += nr;
-		pfn += nr;
+		phys += (unsigned long)nr << MMUPAGE_SHIFT;
 
 	} while (addr != end);
 }
@@ -524,11 +533,11 @@ bool contpte_test_and_clear_young_ptes(struct vm_area_struct *vma,
 	 * of the same large folio in a single VMA and a single page table.
 	 */
 
-	unsigned long end = addr + nr * PAGE_SIZE;
+	unsigned long end = addr + nr * MMUPAGE_SIZE;
 	bool young = false;
 
 	ptep = contpte_align_addr_ptep(&addr, &end, ptep, nr);
-	for (; addr != end; ptep++, addr += PAGE_SIZE)
+	for (; addr != end; ptep++, addr += MMUPAGE_SIZE)
 		young |= __ptep_test_and_clear_young(vma, addr, ptep);
 
 	return young;
@@ -543,14 +552,14 @@ bool contpte_clear_flush_young_ptes(struct vm_area_struct *vma,
 	young = contpte_test_and_clear_young_ptes(vma, addr, ptep, nr);
 
 	if (young) {
-		unsigned long end = addr + nr * PAGE_SIZE;
+		unsigned long end = addr + nr * MMUPAGE_SIZE;
 
 		contpte_align_addr_ptep(&addr, &end, ptep, nr);
 		/*
 		 * See comment in __ptep_clear_flush_young(); same rationale for
 		 * eliding the trailing DSB applies here.
 		 */
-		__flush_tlb_range(vma, addr, end, PAGE_SIZE, 3,
+		__flush_tlb_range(vma, addr, end, MMUPAGE_SIZE, 3,
 				  TLBF_NOWALKCACHE | TLBF_NOSYNC);
 	}
 
@@ -591,10 +600,10 @@ void contpte_clear_young_dirty_ptes(struct vm_area_struct *vma,
 	 * clearing access/dirty for the whole block.
 	 */
 	unsigned long start = addr;
-	unsigned long end = start + nr * PAGE_SIZE;
+	unsigned long end = start + nr * MMUPAGE_SIZE;
 
 	ptep = contpte_align_addr_ptep(&start, &end, ptep, nr);
-	__clear_young_dirty_ptes(vma, start, ptep, (end - start) / PAGE_SIZE, flags);
+	__clear_young_dirty_ptes(vma, start, ptep, (end - start) / MMUPAGE_SIZE, flags);
 }
 EXPORT_SYMBOL_GPL(contpte_clear_young_dirty_ptes);
 
@@ -680,7 +689,7 @@ int contpte_ptep_set_access_flags(struct vm_area_struct *vma,
 		 * for the whole contpte block and returned early, pte_same()
 		 * within __ptep_set_access_flags() is likely false.
 		 */
-		for (i = 0; i < CONT_PTES; i++, ptep++, addr += PAGE_SIZE)
+		for (i = 0; i < CONT_PTES; i++, ptep++, addr += MMUPAGE_SIZE)
 			__ptep_set_access_flags(vma, addr, ptep, entry, 0);
 
 		if (dirty)

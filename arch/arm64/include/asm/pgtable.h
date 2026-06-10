@@ -133,6 +133,7 @@ static inline pteval_t __phys_to_pte_val(phys_addr_t phys)
 }
 #endif
 
+#define __phys_to_pte_val __phys_to_pte_val
 #define pte_pfn(pte)		(__pte_to_phys(pte) >> PAGE_SHIFT)
 #define pfn_pte(pfn,prot)	\
 	__pte(__phys_to_pte_val((phys_addr_t)(pfn) << PAGE_SHIFT) | pgprot_val(prot))
@@ -456,15 +457,24 @@ static inline void __sync_cache_and_tags(pte_t pte, unsigned int nr_pages)
 #define pte_pgprot pte_pgprot
 static inline pgprot_t pte_pgprot(pte_t pte)
 {
-	unsigned long pfn = pte_pfn(pte);
-
-	return __pgprot(pte_val(pfn_pte(pfn, __pgprot(0))) ^ pte_val(pte));
+	/*
+	 * Extract protection bits by XOR'ing out the address encoding.
+	 * Use __pte_to_phys + __phys_to_pte_val to get the full physical
+	 * address encoding (including sub-page bits with PGCL), rather than
+	 * pte_pfn which drops sub-page bits and would leak them into pgprot.
+	 */
+	return __pgprot(__phys_to_pte_val(__pte_to_phys(pte)) ^ pte_val(pte));
 }
 
 #define pte_advance_pfn pte_advance_pfn
 static inline pte_t pte_advance_pfn(pte_t pte, unsigned long nr)
 {
-	return pfn_pte(pte_pfn(pte) + nr, pte_pgprot(pte));
+	/*
+	 * With PGCL, "pfn" units are MMUPAGE-sized (hardware page granularity).
+	 * Advance the physical address by nr * MMUPAGE_SIZE.
+	 */
+	phys_addr_t phys = __pte_to_phys(pte) + (nr << MMUPAGE_SHIFT);
+	return __pte(__phys_to_pte_val(phys) | pgprot_val(pte_pgprot(pte)));
 }
 
 /*
@@ -674,10 +684,10 @@ static inline void __set_ptes_anysz(struct mm_struct *mm, unsigned long addr,
 				    pte_t *ptep, pte_t pte, unsigned int nr,
 				    unsigned long pgsize)
 {
-	unsigned long stride = pgsize >> PAGE_SHIFT;
+	unsigned long stride = pgsize >> MMUPAGE_SHIFT;
 
 	switch (pgsize) {
-	case PAGE_SIZE:
+	case MMUPAGE_SIZE:
 		page_table_check_ptes_set(mm, addr, ptep, pte, nr);
 		break;
 	case PMD_SIZE:
@@ -711,7 +721,7 @@ static inline void __set_ptes_anysz(struct mm_struct *mm, unsigned long addr,
 static inline void __set_ptes(struct mm_struct *mm, unsigned long addr,
 			      pte_t *ptep, pte_t pte, unsigned int nr)
 {
-	__set_ptes_anysz(mm, addr, ptep, pte, nr, PAGE_SIZE);
+	__set_ptes_anysz(mm, addr, ptep, pte, nr, MMUPAGE_SIZE);
 }
 
 static inline void __set_pmds(struct mm_struct *mm, unsigned long addr,
@@ -788,7 +798,7 @@ static inline bool pmd_leaf(pmd_t pmd)
 #define pmd_bad(pmd)		(!pmd_table(pmd))
 
 #define pmd_leaf_size(pmd)	(pmd_cont(pmd) ? CONT_PMD_SIZE : PMD_SIZE)
-#define pte_leaf_size(pte)	(pte_cont(pte) ? CONT_PTE_SIZE : PAGE_SIZE)
+#define pte_leaf_size(pte)	(pte_cont(pte) ? CONT_PTE_SIZE : MMUPAGE_SIZE)
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 static inline int pmd_trans_huge(pmd_t pmd)
@@ -997,7 +1007,7 @@ static inline pud_t *p4d_to_folded_pud(p4d_t *p4dp, unsigned long addr)
 	/* Ensure that 'p4dp' indexes a page table according to 'addr' */
 	VM_BUG_ON(((addr >> P4D_SHIFT) ^ ((u64)p4dp >> 3)) % PTRS_PER_P4D);
 
-	return (pud_t *)PTR_ALIGN_DOWN(p4dp, PAGE_SIZE) + pud_index(addr);
+	return (pud_t *)PTR_ALIGN_DOWN(p4dp, MMUPAGE_SIZE) + pud_index(addr);
 }
 
 static inline pud_t *p4d_pgtable(p4d_t p4d)
@@ -1125,7 +1135,7 @@ static inline p4d_t *pgd_to_folded_p4d(pgd_t *pgdp, unsigned long addr)
 	/* Ensure that 'pgdp' indexes a page table according to 'addr' */
 	VM_BUG_ON(((addr >> PGDIR_SHIFT) ^ ((u64)pgdp >> 3)) % PTRS_PER_PGD);
 
-	return (p4d_t *)PTR_ALIGN_DOWN(pgdp, PAGE_SIZE) + p4d_index(addr);
+	return (p4d_t *)PTR_ALIGN_DOWN(pgdp, MMUPAGE_SIZE) + p4d_index(addr);
 }
 
 static inline phys_addr_t p4d_offset_phys(pgd_t *pgdp, unsigned long addr)
@@ -1357,7 +1367,7 @@ static inline pte_t __ptep_get_and_clear_anysz(struct mm_struct *mm,
 	pte_t pte = __pte(xchg_relaxed(&pte_val(*ptep), 0));
 
 	switch (pgsize) {
-	case PAGE_SIZE:
+	case MMUPAGE_SIZE:
 		page_table_check_pte_clear(mm, address, pte);
 		break;
 	case PMD_SIZE:
@@ -1378,7 +1388,7 @@ static inline pte_t __ptep_get_and_clear_anysz(struct mm_struct *mm,
 static inline pte_t __ptep_get_and_clear(struct mm_struct *mm,
 				       unsigned long address, pte_t *ptep)
 {
-	return __ptep_get_and_clear_anysz(mm, address, ptep, PAGE_SIZE);
+	return __ptep_get_and_clear_anysz(mm, address, ptep, MMUPAGE_SIZE);
 }
 
 static inline void __clear_full_ptes(struct mm_struct *mm, unsigned long addr,
@@ -1389,7 +1399,7 @@ static inline void __clear_full_ptes(struct mm_struct *mm, unsigned long addr,
 		if (--nr == 0)
 			break;
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 	}
 }
 
@@ -1402,7 +1412,7 @@ static inline pte_t __get_and_clear_full_ptes(struct mm_struct *mm,
 	pte = __ptep_get_and_clear(mm, addr, ptep);
 	while (--nr) {
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 		tmp_pte = __ptep_get_and_clear(mm, addr, ptep);
 		if (pte_dirty(tmp_pte))
 			pte = pte_mkdirty(pte);
@@ -1450,7 +1460,7 @@ static inline void __wrprotect_ptes(struct mm_struct *mm, unsigned long address,
 {
 	unsigned int i;
 
-	for (i = 0; i < nr; i++, address += PAGE_SIZE, ptep++)
+	for (i = 0; i < nr; i++, address += MMUPAGE_SIZE, ptep++)
 		__ptep_set_wrprotect(mm, address, ptep);
 }
 
@@ -1490,7 +1500,7 @@ static inline void __clear_young_dirty_ptes(struct vm_area_struct *vma,
 		if (--nr == 0)
 			break;
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 	}
 }
 
@@ -1616,11 +1626,11 @@ static inline void update_mmu_cache_range(struct vm_fault *vmf,
  * entry), and HPA can coalesce it (4 pages into 1 TLB entry) when 16K base
  * pages are in use.
  */
-#define exec_folio_order() ilog2(SZ_64K >> PAGE_SHIFT)
+#define exec_folio_order() ilog2(SZ_64K >> MMUPAGE_SHIFT)
 
 static inline bool pud_sect_supported(void)
 {
-	return PAGE_SIZE == SZ_4K;
+	return MMUPAGE_SIZE == SZ_4K;
 }
 
 
@@ -1689,7 +1699,7 @@ static __always_inline void contpte_try_fold(struct mm_struct *mm,
 	 */
 
 	const unsigned long contmask = CONT_PTES - 1;
-	bool valign = ((addr >> PAGE_SHIFT) & contmask) == contmask;
+	bool valign = ((addr >> MMUPAGE_SHIFT) & contmask) == contmask;
 
 	if (unlikely(valign)) {
 		bool palign = (pte_pfn(pte) & contmask) == contmask;

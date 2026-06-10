@@ -330,7 +330,24 @@ void __init bootmem_init(void)
 
 void __init arch_setup_zero_pages(void)
 {
+#if PAGE_MMUSHIFT > 0
+	/*
+	 * PGCL: the static empty_zero_page buffer is only MMUPAGE_SIZE
+	 * aligned (assembler limit on some arches forced relaxation in
+	 * mm_init.c).  phys_to_page() on a symbol that is not PAGE_SIZE
+	 * aligned returns a struct page covering a kernel page that also
+	 * contains adjacent BSS data, leaking it through the zero-page
+	 * mapping.  Allocate a fresh PAGE_SIZE-aligned zero page from
+	 * memblock instead.
+	 */
+	void *z = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
+
+	if (!z)
+		panic("Failed to allocate zero page");
+	__zero_page = virt_to_page(z);
+#else
 	__zero_page = phys_to_page(__pa_symbol(empty_zero_page));
+#endif
 }
 
 void __init arch_mm_preinit(void)
@@ -394,8 +411,12 @@ void free_initmem(void)
 	void *lm_init_begin = lm_alias(__init_begin);
 	void *lm_init_end = lm_alias(__init_end);
 
-	WARN_ON(!IS_ALIGNED((unsigned long)lm_init_begin, PAGE_SIZE));
-	WARN_ON(!IS_ALIGNED((unsigned long)lm_init_end, PAGE_SIZE));
+	/* Kernel sections are SEGMENT_ALIGN-aligned (64K) per linker script;
+	 * vmap/page-tables walk at MMUPAGE granularity.  PAGE_SIZE alignment
+	 * is over-strict under page-clustering (PAGE_SIZE up to 1MB).
+	 */
+	WARN_ON(!IS_ALIGNED((unsigned long)lm_init_begin, MMUPAGE_SIZE));
+	WARN_ON(!IS_ALIGNED((unsigned long)lm_init_end, MMUPAGE_SIZE));
 
 	free_reserved_area(lm_init_begin, lm_init_end,
 			   POISON_FREE_INITMEM, "unused kernel");
