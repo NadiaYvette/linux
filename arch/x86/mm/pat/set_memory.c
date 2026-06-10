@@ -873,8 +873,13 @@ phys_addr_t slow_virt_to_phys(void *__virt_addr)
 		offset = virt_addr & ~PMD_MASK;
 		break;
 	default:
-		phys_addr = (phys_addr_t)pte_pfn(*pte) << PAGE_SHIFT;
-		offset = virt_addr & ~PAGE_MASK;
+	{
+		phys_addr_t raw = pte_val(*pte);
+
+		raw ^= protnone_mask(raw);
+		phys_addr = raw & PTE_PFN_MASK;
+		offset = virt_addr & ~MMUPAGE_MASK;
+	}
 	}
 
 	return (phys_addr_t)(phys_addr | offset);
@@ -1087,12 +1092,17 @@ static int should_split_large_page(pte_t *kpte, unsigned long address,
 	return do_split;
 }
 
-static void split_set_pte(struct cpa_data *cpa, pte_t *pte, unsigned long pfn,
+static void split_set_pte(struct cpa_data *cpa, pte_t *pte, phys_addr_t paddr,
 			  pgprot_t ref_prot, unsigned long address,
 			  unsigned long size)
 {
 	unsigned int npg = PFN_DOWN(size);
+	unsigned long pfn = PFN_DOWN(paddr);
 	pgprot_t prot;
+
+	/* Ensure at least 1 page for static_protections range check */
+	if (npg < 1)
+		npg = 1;
 
 	/*
 	 * If should_split_large_page() discovered an inconsistent mapping,
@@ -1115,19 +1125,28 @@ static void split_set_pte(struct cpa_data *cpa, pte_t *pte, unsigned long pfn,
 	 * pages. Warn for now and revisit it in case this actually
 	 * happens.
 	 */
-	if (size == PAGE_SIZE)
+	if (size <= MMUPAGE_SIZE)
 		ref_prot = prot;
 	else
 		pr_warn_once("CPA: Cannot fixup static protections for PUD split\n");
 set:
-	set_pte(pte, pfn_pte(pfn, ref_prot));
+	if (size <= MMUPAGE_SIZE) {
+		/*
+		 * PTE level: use MMUPAGE-granularity physical address directly
+		 * to avoid losing sub-PAGE_SIZE address bits through pfn_pte().
+		 */
+		set_pte(pte, __pte((paddr & PTE_PFN_MASK) |
+				   pgprot_val(ref_prot)));
+	} else {
+		set_pte(pte, pfn_pte(pfn, ref_prot));
+	}
 }
 
 static int
 __split_large_page(struct cpa_data *cpa, pte_t *kpte, unsigned long address,
 		   struct ptdesc *ptdesc)
 {
-	unsigned long lpaddr, lpinc, ref_pfn, pfn, pfninc = 1;
+	unsigned long lpaddr, lpinc, ref_pfn;
 	struct page *base = ptdesc_page(ptdesc);
 	pte_t *pbase = (pte_t *)page_address(base);
 	unsigned int i, level;
@@ -1158,13 +1177,12 @@ __split_large_page(struct cpa_data *cpa, pte_t *kpte, unsigned long address,
 		ref_prot = pgprot_large_2_4k(ref_prot);
 		ref_pfn = pmd_pfn(*(pmd_t *)kpte);
 		lpaddr = address & PMD_MASK;
-		lpinc = PAGE_SIZE;
+		lpinc = MMUPAGE_SIZE;
 		break;
 
 	case PG_LEVEL_1G:
 		ref_prot = pud_pgprot(*(pud_t *)kpte);
 		ref_pfn = pud_pfn(*(pud_t *)kpte);
-		pfninc = PMD_SIZE >> PAGE_SHIFT;
 		lpaddr = address & PUD_MASK;
 		lpinc = PMD_SIZE;
 		/*
@@ -1184,11 +1202,16 @@ __split_large_page(struct cpa_data *cpa, pte_t *kpte, unsigned long address,
 	ref_prot = pgprot_clear_protnone_bits(ref_prot);
 
 	/*
-	 * Get the target pfn from the original entry:
+	 * Get the target physical address from the original entry.
+	 * Use physical address arithmetic to avoid losing sub-PAGE_SIZE
+	 * address bits when PAGE_MMUSHIFT > 0.
 	 */
-	pfn = ref_pfn;
-	for (i = 0; i < PTRS_PER_PTE; i++, pfn += pfninc, lpaddr += lpinc)
-		split_set_pte(cpa, pbase + i, pfn, ref_prot, lpaddr, lpinc);
+	{
+		phys_addr_t paddr = (phys_addr_t)ref_pfn << PAGE_SHIFT;
+
+		for (i = 0; i < PTRS_PER_PTE; i++, paddr += lpinc, lpaddr += lpinc)
+			split_set_pte(cpa, pbase + i, paddr, ref_prot, lpaddr, lpinc);
+	}
 
 	if (virt_addr_valid(address)) {
 		unsigned long pfn = PFN_DOWN(__pa(address));
@@ -1438,7 +1461,7 @@ static bool unmap_pte_range(pmd_t *pmd, unsigned long start, unsigned long end)
 	while (start < end) {
 		set_pte(pte, __pte(0));
 
-		start += PAGE_SIZE;
+		start += MMUPAGE_SIZE;
 		pte++;
 	}
 
@@ -1573,18 +1596,23 @@ static void populate_pte(struct cpa_data *cpa,
 			 unsigned num_pages, pmd_t *pmd, pgprot_t pgprot)
 {
 	pte_t *pte;
+	phys_addr_t paddr;
+	unsigned int num_mmu_pages = num_pages << PAGE_MMUSHIFT;
 
 	pte = pte_offset_kernel(pmd, start);
 
 	pgprot = pgprot_clear_protnone_bits(pgprot);
+	paddr = (phys_addr_t)cpa->pfn << PAGE_SHIFT;
 
-	while (num_pages-- && start < end) {
-		set_pte(pte, pfn_pte(cpa->pfn, pgprot));
+	while (num_mmu_pages-- && start < end) {
+		set_pte(pte, __pte((paddr & PTE_PFN_MASK) |
+				   pgprot_val(pgprot)));
 
-		start	 += PAGE_SIZE;
-		cpa->pfn++;
+		start += MMUPAGE_SIZE;
+		paddr += MMUPAGE_SIZE;
 		pte++;
 	}
+	cpa->pfn = PFN_DOWN(paddr);
 }
 
 static long populate_pmd(struct cpa_data *cpa,
@@ -1864,38 +1892,51 @@ repeat:
 		return __cpa_process_fault(cpa, address, primary);
 
 	if (level == PG_LEVEL_4K) {
-		pte_t new_pte;
-		pgprot_t old_prot = pte_pgprot(old_pte);
-		pgprot_t new_prot = pte_pgprot(old_pte);
-		unsigned long pfn = pte_pfn(old_pte);
-
-		pgprot_val(new_prot) &= ~pgprot_val(cpa->mask_clr);
-		pgprot_val(new_prot) |= pgprot_val(cpa->mask_set);
-
-		cpa_inc_4k_install();
-		/* Hand in lpsize = 0 to enforce the protection mechanism */
-		new_prot = static_protections(new_prot, address, pfn, 1, 0,
-					      CPA_PROTECT);
-
-		new_prot = verify_rwx(old_prot, new_prot, address, pfn, 1,
-				      nx, rw);
-
-		new_prot = pgprot_clear_protnone_bits(new_prot);
-
 		/*
-		 * We need to keep the pfn from the existing PTE,
-		 * after all we're only going to change its attributes
-		 * not the memory it points to
+		 * When PAGE_MMUSHIFT > 0, one logical page spans multiple
+		 * MMUPAGE-sized PTEs.  Process all PAGE_MMUCOUNT PTEs for
+		 * this logical page so the outer loop can advance by
+		 * PAGE_SIZE correctly.
 		 */
-		new_pte = pfn_pte(pfn, new_prot);
-		cpa->pfn = pfn;
-		/*
-		 * Do we really change anything ?
-		 */
-		if (pte_val(old_pte) != pte_val(new_pte)) {
-			set_pte_atomic(kpte, new_pte);
-			cpa->flags |= CPA_FLUSHTLB;
+		int sub;
+
+		for (sub = 0; sub < PAGE_MMUCOUNT; sub++) {
+			pte_t sub_old = *(kpte + sub);
+			unsigned long sub_addr = address + sub * MMUPAGE_SIZE;
+			pte_t new_pte;
+			pgprot_t old_prot, new_prot;
+
+			if (pte_none(sub_old))
+				continue;
+
+			old_prot = pte_pgprot(sub_old);
+			new_prot = pte_pgprot(sub_old);
+
+			pgprot_val(new_prot) &= ~pgprot_val(cpa->mask_clr);
+			pgprot_val(new_prot) |= pgprot_val(cpa->mask_set);
+
+			cpa_inc_4k_install();
+			new_prot = static_protections(new_prot, sub_addr,
+						      pte_pfn(sub_old), 1, 0,
+						      CPA_PROTECT);
+			new_prot = verify_rwx(old_prot, new_prot, sub_addr,
+					      pte_pfn(sub_old), 1, nx, rw);
+			new_prot = pgprot_clear_protnone_bits(new_prot);
+
+			{
+				phys_addr_t phys = pte_val(sub_old);
+
+				phys ^= protnone_mask(phys);
+				phys &= PTE_PFN_MASK;
+				new_pte = __pte(phys | pgprot_val(new_prot));
+			}
+
+			if (pte_val(sub_old) != pte_val(new_pte)) {
+				set_pte_atomic(kpte + sub, new_pte);
+				cpa->flags |= CPA_FLUSHTLB;
+			}
 		}
+		cpa->pfn = pte_pfn(old_pte);
 		cpa->numpages = 1;
 		return 0;
 	}

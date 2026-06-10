@@ -17,6 +17,7 @@
 #include <linux/highmem.h>
 #include <linux/pci.h>
 #include <linux/ptdump.h>
+#include <asm/realmode.h>
 
 #include <asm/e820/types.h>
 
@@ -149,7 +150,7 @@ static struct addr_marker address_markers[] = {
 #endif /* !CONFIG_X86_64 */
 
 /* Multipliers for offsets within the PTEs */
-#define PTE_LEVEL_MULT (PAGE_SIZE)
+#define PTE_LEVEL_MULT (MMUPAGE_SIZE)
 #define PMD_LEVEL_MULT (PTRS_PER_PTE * PTE_LEVEL_MULT)
 #define PUD_LEVEL_MULT (PTRS_PER_PMD * PMD_LEVEL_MULT)
 #define P4D_LEVEL_MULT (PTRS_PER_PUD * PUD_LEVEL_MULT)
@@ -228,7 +229,7 @@ static void note_wx(struct pg_state *st, unsigned long addr)
 {
 	unsigned long npages;
 
-	npages = (addr - st->start_address) / PAGE_SIZE;
+	npages = (addr - st->start_address) / MMUPAGE_SIZE;
 
 #ifdef CONFIG_PCI_BIOS
 	/*
@@ -241,6 +242,23 @@ static void note_wx(struct pg_state *st, unsigned long addr)
 		return;
 	}
 #endif
+	/*
+	 * With PAGE_MMUSHIFT > 0, the realmode trampoline text and
+	 * writable data share the same PAGE_SIZE page(s).  CPA cannot
+	 * set MMUPAGE-granularity permissions, so the trampoline area
+	 * is intentionally W+X.  Suppress the warning.
+	 */
+	if (PAGE_MMUSHIFT > 0 && real_mode_header) {
+		unsigned long rm_base = (unsigned long)real_mode_header;
+		unsigned long rm_end = rm_base +
+			PAGE_ALIGN(real_mode_blob_end - real_mode_blob);
+
+		if (st->start_address >= rm_base &&
+		    addr <= rm_end) {
+			st->wx_pages += npages;
+			return;
+		}
+	}
 	/* Account the WX pages */
 	st->wx_pages += npages;
 	WARN_ONCE(__supported_pte_mask & _PAGE_NX,

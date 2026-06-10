@@ -83,10 +83,10 @@ SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
 		unsigned long, prot, unsigned long, flags,
 		unsigned long, fd, unsigned long, off)
 {
-	if (off & ~PAGE_MASK)
+	if (off & ~MMUPAGE_MASK)
 		return -EINVAL;
 
-	return ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> PAGE_SHIFT);
+	return ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> MMUPAGE_SHIFT);
 }
 
 static void find_start_end(unsigned long addr, unsigned long flags,
@@ -152,7 +152,7 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr, unsigned long len,
 	info.low_limit = begin;
 	info.high_limit = end;
 	if (!(filp && is_file_hugepages(filp))) {
-		info.align_offset = pgoff << PAGE_SHIFT;
+		info.align_offset = pgoff << MMUPAGE_SHIFT;
 		info.start_gap = stack_guard_placement(vm_flags);
 	}
 	if (filp) {
@@ -207,7 +207,7 @@ get_unmapped_area:
 	info.high_limit = get_mmap_base(0);
 	if (!(filp && is_file_hugepages(filp))) {
 		info.start_gap = stack_guard_placement(vm_flags);
-		info.align_offset = pgoff << PAGE_SHIFT;
+		info.align_offset = pgoff << MMUPAGE_SHIFT;
 	}
 
 	/*

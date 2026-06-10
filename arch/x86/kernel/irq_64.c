@@ -36,17 +36,18 @@ DEFINE_PER_CPU_PAGE_ALIGNED(struct irq_stack, irq_stack_backing_store) __visible
 static int map_irq_stack(unsigned int cpu)
 {
 	char *stack = (char *)per_cpu_ptr(&irq_stack_backing_store, cpu);
-	struct page *pages[IRQ_STACK_SIZE / PAGE_SIZE];
+	const int nr_pages = DIV_ROUND_UP(IRQ_STACK_SIZE, PAGE_SIZE);
+	struct page *pages[DIV_ROUND_UP(IRQ_STACK_SIZE, PAGE_SIZE)];
 	void *va;
 	int i;
 
-	for (i = 0; i < IRQ_STACK_SIZE / PAGE_SIZE; i++) {
+	for (i = 0; i < nr_pages; i++) {
 		phys_addr_t pa = per_cpu_ptr_to_phys(stack + (i << PAGE_SHIFT));
 
 		pages[i] = pfn_to_page(pa >> PAGE_SHIFT);
 	}
 
-	va = vmap(pages, IRQ_STACK_SIZE / PAGE_SIZE, VM_MAP, PAGE_KERNEL);
+	va = vmap(pages, nr_pages, VM_MAP, PAGE_KERNEL);
 	if (!va)
 		return -ENOMEM;
 

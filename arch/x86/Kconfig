@@ -1575,6 +1575,20 @@ config ARCH_SPARSEMEM_ENABLE
 config ARCH_SPARSEMEM_DEFAULT
 	def_bool X86_64 || (NUMA && X86_32)
 
+# x86 has no notion of multiple base page sizes, but PGCL widens
+# PAGE_SIZE by 2**PAGE_MMUSHIFT.  The mmzone.h invariant
+# MAX_PAGE_ORDER + PAGE_SHIFT <= SECTION_SIZE_BITS (=27 on x86_64,
+# =29/26 on x86_32) breaks at the upstream default of 10 once
+# PAGE_MMUSHIFT reaches 4 on x86_32-PAE / 6 on x86_64.  Provide a
+# default that scales down so the buddy allocator fits within the
+# section.
+config ARCH_FORCE_MAX_ORDER
+	int
+	default 5 if PAGE_MMUSHIFT >= 6
+	default 8 if PAGE_MMUSHIFT >= 4
+	default 10 if PAGE_MMUSHIFT >= 2
+	default 10
+
 config ARCH_SELECT_MEMORY_MODEL
 	def_bool y
 	depends on ARCH_SPARSEMEM_ENABLE && ARCH_FLATMEM_ENABLE

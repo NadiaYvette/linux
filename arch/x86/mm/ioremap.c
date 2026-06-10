@@ -219,11 +219,15 @@ __ioremap_caller(resource_size_t phys_addr, unsigned long size,
 	}
 
 	/*
-	 * Mappings have to be page-aligned
+	 * Mappings have to be MMU-page-aligned (hardware page size).
+	 * The vm_area allocated by get_vm_area_caller rounds up to
+	 * PAGE_SIZE, but we only map the MMUPAGE-aligned range to
+	 * avoid extending into adjacent memory regions (which could
+	 * cross RAM/reserved boundaries and fail memtype_reserve).
 	 */
-	offset = phys_addr & ~PAGE_MASK;
-	phys_addr &= PAGE_MASK;
-	size = PAGE_ALIGN(last_addr+1) - phys_addr;
+	offset = phys_addr & ~MMUPAGE_MASK;
+	phys_addr &= MMUPAGE_MASK;
+	size = ALIGN(last_addr + 1, MMUPAGE_SIZE) - phys_addr;
 
 	/*
 	 * Mask out any bits not part of the actual physical
@@ -821,7 +825,7 @@ void __init *early_memremap_decrypted_wp(resource_size_t phys_addr,
 }
 #endif	/* CONFIG_AMD_MEM_ENCRYPT */
 
-static pte_t bm_pte[PAGE_SIZE/sizeof(pte_t)] __page_aligned_bss;
+static pte_t bm_pte[MMUPAGE_SIZE/sizeof(pte_t)] __page_aligned_bss;
 
 static inline pmd_t * __init early_ioremap_pmd(unsigned long addr)
 {
@@ -842,7 +846,7 @@ static inline pte_t * __init early_ioremap_pte(unsigned long addr)
 
 bool __init is_early_ioremap_ptep(pte_t *ptep)
 {
-	return ptep >= &bm_pte[0] && ptep < &bm_pte[PAGE_SIZE/sizeof(pte_t)];
+	return ptep >= &bm_pte[0] && ptep < &bm_pte[MMUPAGE_SIZE/sizeof(pte_t)];
 }
 
 void __init early_ioremap_init(void)
@@ -850,9 +854,9 @@ void __init early_ioremap_init(void)
 	pmd_t *pmd;
 
 #ifdef CONFIG_X86_64
-	BUILD_BUG_ON((fix_to_virt(0) + PAGE_SIZE) & ((1 << PMD_SHIFT) - 1));
+	BUILD_BUG_ON((fix_to_virt(0) + MMUPAGE_SIZE) & ((1 << PMD_SHIFT) - 1));
 #else
-	WARN_ON((fix_to_virt(0) + PAGE_SIZE) & ((1 << PMD_SHIFT) - 1));
+	WARN_ON((fix_to_virt(0) + MMUPAGE_SIZE) & ((1 << PMD_SHIFT) - 1));
 #endif
 
 	early_ioremap_setup();
@@ -865,7 +869,7 @@ void __init early_ioremap_init(void)
 	 * The boot-ioremap range spans multiple pmds, for which
 	 * we are not prepared:
 	 */
-#define __FIXADDR_TOP (-PAGE_SIZE)
+#define __FIXADDR_TOP (-MMUPAGE_SIZE)
 	BUILD_BUG_ON((__fix_to_virt(FIX_BTMAP_BEGIN) >> PMD_SHIFT)
 		     != (__fix_to_virt(FIX_BTMAP_END) >> PMD_SHIFT));
 #undef __FIXADDR_TOP
@@ -900,7 +904,7 @@ void __init __early_set_fixmap(enum fixed_addresses idx,
 	pgprot_val(flags) &= __supported_pte_mask;
 
 	if (pgprot_val(flags))
-		set_pte(pte, pfn_pte(phys >> PAGE_SHIFT, flags));
+		set_pte(pte, __pte((phys & MMUPAGE_MASK) | pgprot_val(flags)));
 	else
 		pte_clear(&init_mm, addr, pte);
 	flush_tlb_one_kernel(addr);
