@@ -314,9 +314,9 @@ static int memcg_charge_kernel_stack(struct vm_struct *vm_area)
 	int ret;
 	int nr_charged = 0;
 
-	BUG_ON(vm_area->nr_pages != THREAD_SIZE / PAGE_SIZE);
+	BUG_ON(vm_area->nr_pages != DIV_ROUND_UP(THREAD_SIZE, PAGE_SIZE));
 
-	for (i = 0; i < THREAD_SIZE / PAGE_SIZE; i++) {
+	for (i = 0; i < vm_area->nr_pages; i++) {
 		ret = memcg_kmem_charge_page(vm_area->pages[i], GFP_KERNEL, 0);
 		if (ret)
 			goto err;
@@ -391,7 +391,7 @@ static void free_thread_stack(struct task_struct *tsk)
  * Allocate pages if THREAD_SIZE is >= PAGE_SIZE, otherwise use a
  * kmemcache based allocator.
  */
-#if THREAD_SIZE >= PAGE_SIZE
+#if THREAD_SIZE >= MMUPAGE_SIZE
 
 static void thread_stack_free_rcu(struct rcu_head *rh)
 {
@@ -423,7 +423,7 @@ static void free_thread_stack(struct task_struct *tsk)
 	tsk->stack = NULL;
 }
 
-#else /* !(THREAD_SIZE >= PAGE_SIZE) */
+#else /* !(THREAD_SIZE >= MMUPAGE_SIZE) */
 
 static struct kmem_cache *thread_stack_cache;
 
@@ -462,7 +462,7 @@ void thread_stack_cache_init(void)
 	BUG_ON(thread_stack_cache == NULL);
 }
 
-#endif /* THREAD_SIZE >= PAGE_SIZE */
+#endif /* THREAD_SIZE >= MMUPAGE_SIZE */
 #endif /* CONFIG_VMAP_STACK */
 
 /* SLAB cache for signal_struct structures (tsk->signal) */
@@ -484,11 +484,10 @@ static void account_kernel_stack(struct task_struct *tsk, int account)
 {
 	if (IS_ENABLED(CONFIG_VMAP_STACK)) {
 		struct vm_struct *vm_area = task_stack_vm_area(tsk);
-		int i;
 
-		for (i = 0; i < THREAD_SIZE / PAGE_SIZE; i++)
-			mod_lruvec_page_state(vm_area->pages[i], NR_KERNEL_STACK_KB,
-					      account * (PAGE_SIZE / 1024));
+		/* Account actual THREAD_SIZE, not the rounded-up page size */
+		mod_lruvec_page_state(vm_area->pages[0], NR_KERNEL_STACK_KB,
+				      account * (THREAD_SIZE / 1024));
 	} else {
 		void *stack = task_stack_page(tsk);
 
@@ -507,7 +506,7 @@ void exit_task_stack_account(struct task_struct *tsk)
 		int i;
 
 		vm_area = task_stack_vm_area(tsk);
-		for (i = 0; i < THREAD_SIZE / PAGE_SIZE; i++)
+		for (i = 0; i < DIV_ROUND_UP(THREAD_SIZE, PAGE_SIZE); i++)
 			memcg_kmem_uncharge_page(vm_area->pages[i], 0);
 	}
 }

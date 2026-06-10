@@ -806,13 +806,13 @@ void rb_free_aux(struct perf_buffer *rb)
 static struct page *
 __perf_mmap_to_page(struct perf_buffer *rb, unsigned long pgoff)
 {
-	if (pgoff > rb->nr_pages)
+	if (pgoff > (unsigned long)rb->nr_pages << PAGE_MMUSHIFT)
 		return NULL;
 
-	if (pgoff == 0)
+	if (pgoff < PAGE_MMUCOUNT)
 		return virt_to_page(rb->user_page);
 
-	return virt_to_page(rb->data_pages[pgoff - 1]);
+	return virt_to_page(rb->data_pages[(pgoff >> PAGE_MMUSHIFT) - 1]);
 }
 
 static void *perf_mmap_alloc_page(int cpu)
@@ -896,10 +896,10 @@ static struct page *
 __perf_mmap_to_page(struct perf_buffer *rb, unsigned long pgoff)
 {
 	/* The '>' counts in the user page. */
-	if (pgoff > data_page_nr(rb))
+	if (pgoff > (unsigned long)data_page_nr(rb) << PAGE_MMUSHIFT)
 		return NULL;
 
-	return vmalloc_to_page((void *)rb->user_page + pgoff * PAGE_SIZE);
+	return vmalloc_to_page((void *)rb->user_page + pgoff * MMUPAGE_SIZE);
 }
 
 static void rb_free_work(struct work_struct *work)
