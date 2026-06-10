@@ -282,8 +282,17 @@ acpi_map_lookup_virt(void __iomem *virt, acpi_size size)
 	return NULL;
 }
 
-#if defined(CONFIG_ARM64) || defined(CONFIG_RISCV)
-/* ioremap will take care of cache attributes */
+#if defined(CONFIG_ARM64) || defined(CONFIG_RISCV) || defined(CONFIG_LOONGARCH)
+/*
+ * ioremap will take care of cache attributes (LoongArch uses the DMW
+ * direct-mapped window, ioremap is essentially free there).
+ *
+ * The kmap path is also unsafe under PGCL (PAGE_MMUSHIFT > 0): each
+ * struct page covers PAGE_SIZE bytes which spans multiple MMUPAGEs, so
+ * pfn_to_page(pg_off >> MMUPAGE_SHIFT) and the per-MMUPAGE offset
+ * arithmetic in acpi_os_map_iomem() would read from a wrong physical
+ * region.  Routing LoongArch through ioremap dodges that.
+ */
 #define should_use_kmap(pfn)   0
 #else
 #define should_use_kmap(pfn)   page_is_ram(pfn)
@@ -293,9 +302,9 @@ static void __iomem *acpi_map(acpi_physical_address pg_off, unsigned long pg_sz)
 {
 	unsigned long pfn;
 
-	pfn = pg_off >> PAGE_SHIFT;
+	pfn = pg_off >> MMUPAGE_SHIFT;
 	if (should_use_kmap(pfn)) {
-		if (pg_sz > PAGE_SIZE)
+		if (pg_sz > MMUPAGE_SIZE)
 			return NULL;
 		return (void __iomem __force *)kmap(pfn_to_page(pfn));
 	} else
@@ -306,7 +315,7 @@ static void acpi_unmap(acpi_physical_address pg_off, void __iomem *vaddr)
 {
 	unsigned long pfn;
 
-	pfn = pg_off >> PAGE_SHIFT;
+	pfn = pg_off >> MMUPAGE_SHIFT;
 	if (should_use_kmap(pfn))
 		kunmap(pfn_to_page(pfn));
 	else
@@ -356,8 +365,8 @@ void __iomem __ref
 		return NULL;
 	}
 
-	pg_off = round_down(phys, PAGE_SIZE);
-	pg_sz = round_up(phys + size, PAGE_SIZE) - pg_off;
+	pg_off = round_down(phys, MMUPAGE_SIZE);
+	pg_sz = round_up(phys + size, MMUPAGE_SIZE) - pg_off;
 	virt = acpi_map(phys, size);
 	if (!virt) {
 		mutex_unlock(&acpi_ioremap_lock);
@@ -366,7 +375,7 @@ void __iomem __ref
 	}
 
 	INIT_LIST_HEAD(&map->list);
-	map->virt = (void __iomem __force *)((unsigned long)virt & PAGE_MASK);
+	map->virt = (void __iomem __force *)((unsigned long)virt & MMUPAGE_MASK);
 	map->phys = pg_off;
 	map->size = pg_sz;
 	map->track.refcount = 1;

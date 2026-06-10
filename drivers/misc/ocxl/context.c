@@ -143,7 +143,7 @@ static vm_fault_t ocxl_mmap_fault(struct vm_fault *vmf)
 	u64 offset;
 	vm_fault_t ret;
 
-	offset = vmf->pgoff << PAGE_SHIFT;
+	offset = vmf->pgoff << MMUPAGE_SHIFT;
 	pr_debug("%s: pasid %d address 0x%lx offset 0x%llx\n", __func__,
 		ctx->pasid, vmf->address, offset);
 
@@ -161,7 +161,7 @@ static const struct vm_operations_struct ocxl_vmops = {
 static int check_mmap_afu_irq(struct ocxl_context *ctx,
 			struct vm_area_struct *vma)
 {
-	int irq_id = ocxl_irq_offset_to_id(ctx, vma->vm_pgoff << PAGE_SHIFT);
+	int irq_id = ocxl_irq_offset_to_id(ctx, vma->vm_pgoff << MMUPAGE_SHIFT);
 
 	/* only one page */
 	if (vma_pages(vma) != 1)
@@ -197,7 +197,7 @@ int ocxl_context_mmap(struct ocxl_context *ctx, struct vm_area_struct *vma)
 {
 	int rc;
 
-	if ((vma->vm_pgoff << PAGE_SHIFT) < ctx->afu->irq_base_offset)
+	if ((vma->vm_pgoff << MMUPAGE_SHIFT) < ctx->afu->irq_base_offset)
 		rc = check_mmap_mmio(ctx, vma);
 	else
 		rc = check_mmap_afu_irq(ctx, vma);
