@@ -32,9 +32,14 @@ syscall_t sys_call_table[] /* FIXME __cacheline_aligned */= {
 #include <asm/syscall_table.h>
 };
 
+/*
+ * pgoff is in MMUPAGE units; colour byte offset is pgoff << MMUPAGE_SHIFT.
+ * Under page clustering (PAGE_MMUSHIFT > 0) PAGE_SIZE > MMUPAGE_SIZE, so
+ * PAGE_SHIFT would miscompute the colour.
+ */
 #define COLOUR_ALIGN(addr, pgoff) \
 	((((addr) + SHMLBA - 1) & ~(SHMLBA - 1)) + \
-	 (((pgoff) << PAGE_SHIFT) & (SHMLBA - 1)))
+	 (((pgoff) << MMUPAGE_SHIFT) & (SHMLBA - 1)))
 
 asmlinkage long xtensa_shmat(int shmid, char __user *shmaddr, int shmflg)
 {
@@ -66,7 +71,7 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr,
 		 * cache aliasing constraints.
 		 */
 		if ((flags & MAP_SHARED) &&
-				((addr - (pgoff << PAGE_SHIFT)) & (SHMLBA - 1)))
+				((addr - (pgoff << MMUPAGE_SHIFT)) & (SHMLBA - 1)))
 			return -EINVAL;
 		return addr;
 	}
