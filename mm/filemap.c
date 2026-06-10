@@ -3308,7 +3308,9 @@ static struct file *do_sync_mmap_readahead(struct vm_fault *vmf)
 	struct file *file = vmf->vma->vm_file;
 	struct file_ra_state *ra = &file->f_ra;
 	struct address_space *mapping = file->f_mapping;
-	DEFINE_READAHEAD(ractl, file, ra, mapping, vmf->pgoff);
+	/* vmf->pgoff is in MMUPAGE units; readahead uses PAGE-unit indices */
+	pgoff_t pgoff_pages = vmf->pgoff >> PAGE_MMUSHIFT;
+	DEFINE_READAHEAD(ractl, file, ra, mapping, pgoff_pages);
 	struct file *fpin = NULL;
 	vm_flags_t vm_flags = vmf->vma->vm_flags;
 	bool force_thp_readahead = false;
@@ -3380,12 +3382,13 @@ static struct file *do_sync_mmap_readahead(struct vm_fault *vmf)
 		 * of memory.
 		 */
 		struct vm_area_struct *vma = vmf->vma;
-		unsigned long start = vma->vm_pgoff;
+		/* Convert MMUPAGE-unit vm_pgoff to PAGE units for readahead */
+		unsigned long start = vma->vm_pgoff >> PAGE_MMUSHIFT;
 		unsigned long end = start + vma_pages(vma);
 		unsigned long ra_end;
 
 		ra->order = exec_folio_order();
-		ra->start = round_down(vmf->pgoff, 1UL << ra->order);
+		ra->start = round_down(pgoff_pages, 1UL << ra->order);
 		ra->start = max(ra->start, start);
 		ra_end = round_up(ra->start + ra->ra_pages, 1UL << ra->order);
 		ra_end = min(ra_end, end);
@@ -3395,7 +3398,7 @@ static struct file *do_sync_mmap_readahead(struct vm_fault *vmf)
 		/*
 		 * mmap read-around
 		 */
-		ra->start = max_t(long, 0, vmf->pgoff - ra->ra_pages / 2);
+		ra->start = max_t(long, 0, pgoff_pages - ra->ra_pages / 2);
 		ra->size = ra->ra_pages;
 		ra->async_size = ra->ra_pages / 4;
 		ra->order = 0;
@@ -3417,7 +3420,9 @@ static struct file *do_async_mmap_readahead(struct vm_fault *vmf,
 {
 	struct file *file = vmf->vma->vm_file;
 	struct file_ra_state *ra = &file->f_ra;
-	DEFINE_READAHEAD(ractl, file, ra, file->f_mapping, vmf->pgoff);
+	/* vmf->pgoff is in MMUPAGE units; readahead uses PAGE-unit indices */
+	DEFINE_READAHEAD(ractl, file, ra, file->f_mapping,
+			 vmf->pgoff >> PAGE_MMUSHIFT);
 	struct file *fpin = NULL;
 	unsigned short mmap_miss;
 
@@ -3517,13 +3522,22 @@ vm_fault_t filemap_fault(struct vm_fault *vmf)
 	struct file *fpin = NULL;
 	struct address_space *mapping = file->f_mapping;
 	struct inode *inode = mapping->host;
-	pgoff_t max_idx, index = vmf->pgoff;
+	/*
+	 * vmf->pgoff is in MMUPAGE units.  Convert to PAGE units for
+	 * page cache lookups.  Keep the MMUPAGE pgoff for sub-page PTE
+	 * offset computation later.
+	 */
+	pgoff_t max_idx, index = vmf->pgoff >> PAGE_MMUSHIFT;
 	struct folio *folio;
 	vm_fault_t ret = 0;
 	bool mapping_locked = false;
 
-	max_idx = DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE);
-	if (unlikely(index >= max_idx))
+	/*
+	 * SIGBUS at MMUPAGE granularity: userspace sees MMUPAGE_SIZE pages,
+	 * so accesses beyond the file must SIGBUS at MMUPAGE boundaries.
+	 */
+	max_idx = DIV_ROUND_UP(i_size_read(inode), MMUPAGE_SIZE);
+	if (unlikely(vmf->pgoff >= max_idx))
 		return VM_FAULT_SIGBUS;
 
 	trace_mm_filemap_fault(mapping, index);
@@ -3626,8 +3640,8 @@ retry_find:
 	 * Found the page and have a reference on it.
 	 * We must recheck i_size under page lock.
 	 */
-	max_idx = DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE);
-	if (unlikely(index >= max_idx)) {
+	max_idx = DIV_ROUND_UP(i_size_read(inode), MMUPAGE_SIZE);
+	if (unlikely(vmf->pgoff >= max_idx)) {
 		folio_unlock(folio);
 		folio_put(folio);
 		return VM_FAULT_SIGBUS;
@@ -3740,6 +3754,80 @@ skip:
 	return NULL;
 }
 
+#if PAGE_MMUSHIFT > 0
+/*
+ * PGCL: Set all PAGE_MMUCOUNT PTEs for a single page in the page cache.
+ * Each PTE points to a consecutive MMUPAGE within the page.
+ * Skips PTEs that are non-none (markers or existing mappings).
+ *
+ * The base PTE entry is mk_pte(page, prot) with permissions already set.
+ * We add i * MMUPAGE_SIZE for each sub-page PTE.
+ *
+ * Returns true if at least one PTE was mapped.
+ */
+/**
+ * filemap_set_ptes_cluster - map PAGE_MMUCOUNT PTEs for one kernel page
+ *
+ * Returns the number of PTEs actually set (0 if none).
+ * The caller must add the return value to both RSS and folio refcount.
+ * Each mapped PTE gets its own rmap reference, matching zap_pte_range's
+ * per-PTE rmap removal.
+ */
+static int filemap_set_ptes_cluster(struct vm_fault *vmf,
+		struct folio *folio, struct page *page,
+		pte_t *ptep, unsigned long addr)
+{
+	struct vm_area_struct *vma = vmf->vma;
+	pte_t base;
+	int i, nr_set = 0;
+
+	base = mk_pte(page, vma->vm_page_prot);
+	if (pte_write(base) && folio_test_dirty(folio))
+		base = pte_mkdirty(base);
+
+	{
+	unsigned long start_pmd = addr & PMD_MASK;
+	for (i = 0; i < PAGE_MMUCOUNT; i++) {
+		unsigned long sub_addr = addr + (unsigned long)i * MMUPAGE_SIZE;
+		pte_t entry;
+
+		/*
+		 * The cluster must not cross a PMD boundary: ptep was
+		 * obtained from one pte_offset_map_lock on a single PMD
+		 * and indexes that PMD's PTE table only.  If sub_addr
+		 * lands in the next PMD, ptep + i would walk off the end
+		 * of the current PTE table page.  Stop here; the caller
+		 * faults the remainder on demand from the next PMD.
+		 */
+		if ((sub_addr & PMD_MASK) != start_pmd)
+			break;
+
+		/* Clamp to VMA bounds: skip sub-pages outside the VMA */
+		if (sub_addr < vma->vm_start || sub_addr >= vma->vm_end)
+			continue;
+
+		if (!pte_none(ptep_get(ptep + i)))
+			continue;
+
+		entry = pte_mksub(base, i * MMUPAGE_SIZE);
+		entry = pte_sw_mkyoung(entry);
+
+		set_ptes(vma->vm_mm, sub_addr, ptep + i, entry, 1);
+		nr_set++;
+	}
+
+	if (nr_set) {
+		int j;
+		for (j = 0; j < nr_set; j++)
+			folio_add_file_rmap_ptes(folio, page, 1, vma);
+		update_mmu_cache_range(vmf, vma, addr, ptep, PAGE_MMUCOUNT);
+	}
+	}
+
+	return nr_set;
+}
+#endif /* PAGE_MMUSHIFT > 0 */
+
 /*
  * Map page range [start_page, start_page + nr_pages) of folio.
  * start_page is gotten from start by folio_page(folio, start)
@@ -3754,9 +3842,11 @@ static vm_fault_t filemap_map_folio_range(struct vm_fault *vmf,
 	unsigned int ref_from_caller = 1;
 	vm_fault_t ret = 0;
 	struct page *page = folio_page(folio, start);
-	unsigned int count = 0;
 	pte_t *old_ptep = vmf->pte;
 	unsigned long addr0;
+#if PAGE_MMUSHIFT == 0
+	unsigned int count = 0;
+#endif
 
 	/*
 	 * Map the large folio fully where possible:
@@ -3770,12 +3860,42 @@ static vm_fault_t filemap_map_folio_range(struct vm_fault *vmf,
 	if ((file_end >= folio_next_index(folio) || shmem_mapping(mapping)) &&
 	    folio_within_vma(folio, vmf->vma) &&
 	    (addr0 & PMD_MASK) == ((addr0 + folio_size(folio) - 1) & PMD_MASK)) {
-		vmf->pte -= start;
+		vmf->pte -= start << PAGE_MMUSHIFT;
 		page -= start;
 		addr = addr0;
 		nr_pages = folio_nr_pages(folio);
 	}
 
+#if PAGE_MMUSHIFT > 0
+	/*
+	 * PGCL: Map PAGE_MMUCOUNT PTEs per page. Can't batch pages because
+	 * PTEs for consecutive pages are PAGE_MMUCOUNT apart, and set_ptes()
+	 * advances by PAGE_SIZE (not MMUPAGE_SIZE) per PTE.
+	 */
+	do {
+		if (PageHWPoison(page))
+			goto pgcl_skip;
+
+		if (!folio_test_workingset(folio))
+			(*mmap_miss)++;
+
+		{
+			int nr = filemap_set_ptes_cluster(vmf, folio, page,
+							   vmf->pte, addr);
+			if (nr) {
+				folio_ref_add(folio, nr - ref_from_caller);
+				ref_from_caller = 0;
+				(*rss) += nr;
+				if (in_range(vmf->address, addr, PAGE_SIZE))
+					ret = VM_FAULT_NOPAGE;
+			}
+		}
+pgcl_skip:
+		page++;
+		vmf->pte += PAGE_MMUCOUNT;
+		addr += PAGE_SIZE;
+	} while (--nr_pages > 0);
+#else /* PAGE_MMUSHIFT == 0: stock path */
 	do {
 		if (PageHWPoison(page + count))
 			goto skip;
@@ -3825,6 +3945,7 @@ skip:
 		if (in_range(vmf->address, addr, count * PAGE_SIZE))
 			ret = VM_FAULT_NOPAGE;
 	}
+#endif /* PAGE_MMUSHIFT */
 
 	vmf->pte = old_ptep;
 	if (ref_from_caller)
@@ -3848,6 +3969,21 @@ static vm_fault_t filemap_map_order0_folio(struct vm_fault *vmf,
 	if (!folio_test_workingset(folio))
 		(*mmap_miss)++;
 
+#if PAGE_MMUSHIFT > 0
+	{
+		int nr = filemap_set_ptes_cluster(vmf, folio, page,
+						   vmf->pte, addr);
+		if (nr) {
+			if (in_range(vmf->address, addr, PAGE_SIZE))
+				ret = VM_FAULT_NOPAGE;
+			/* nr-1: caller already holds one ref */
+			folio_ref_add(folio, nr - 1);
+			(*rss) += nr;
+			return ret;
+		}
+	}
+	goto out;
+#else
 	/*
 	 * NOTE: If there're PTE markers, we'll leave them to be
 	 * handled in the specific fault path, and it'll prohibit
@@ -3862,6 +3998,7 @@ static vm_fault_t filemap_map_order0_folio(struct vm_fault *vmf,
 	set_pte_range(vmf, folio, page, 1, addr);
 	(*rss)++;
 	return ret;
+#endif
 
 out:
 	/* Locked folios cannot get truncated. */
@@ -3875,9 +4012,8 @@ vm_fault_t filemap_map_pages(struct vm_fault *vmf,
 	struct vm_area_struct *vma = vmf->vma;
 	struct file *file = vma->vm_file;
 	struct address_space *mapping = file->f_mapping;
-	pgoff_t file_end, last_pgoff = start_pgoff;
+	pgoff_t file_end, last_pgoff;
 	unsigned long addr;
-	XA_STATE(xas, &mapping->i_pages, start_pgoff);
 	struct folio *folio;
 	vm_fault_t ret = 0;
 	unsigned long rss = 0;
@@ -3885,15 +4021,25 @@ vm_fault_t filemap_map_pages(struct vm_fault *vmf,
 	unsigned short mmap_miss = 0, mmap_miss_saved;
 
 	/*
-	 * Recalculate end_pgoff based on file_end before calling
+	 * PGCL: start_pgoff/end_pgoff arrive in MMUPAGE units from
+	 * do_fault_around().  Convert to PAGE-unit page cache indices
+	 * for xarray lookup.  The xarray, file_end, last_pgoff, and
+	 * folio indices are all in PAGE units.
+	 *
+	 * Recalculate end based on file_end before calling
 	 * next_uptodate_folio() to avoid races with concurrent
 	 * truncation.
 	 */
+	pgoff_t start_cache = pgoff_mmu_to_page(start_pgoff);
+	pgoff_t end_cache = pgoff_mmu_to_page(end_pgoff);
+	XA_STATE(xas, &mapping->i_pages, start_cache);
+
+	last_pgoff = start_cache;
 	file_end = DIV_ROUND_UP(i_size_read(mapping->host), PAGE_SIZE) - 1;
-	end_pgoff = min(end_pgoff, file_end);
+	end_cache = min(end_cache, file_end);
 
 	rcu_read_lock();
-	folio = next_uptodate_folio(&xas, mapping, end_pgoff);
+	folio = next_uptodate_folio(&xas, mapping, end_cache);
 	if (!folio)
 		goto out;
 
@@ -3905,12 +4051,46 @@ vm_fault_t filemap_map_pages(struct vm_fault *vmf,
 	 * intentionally mapped with PMDs across i_size.
 	 */
 	if ((file_end >= folio_next_index(folio) || shmem_mapping(mapping)) &&
-	    filemap_map_pmd(vmf, folio, start_pgoff)) {
+	    filemap_map_pmd(vmf, folio, start_cache)) {
 		ret = VM_FAULT_NOPAGE;
 		goto out;
 	}
 
-	addr = vma->vm_start + ((start_pgoff - vma->vm_pgoff) << PAGE_SHIFT);
+	/*
+	 * Compute the virtual address for start_cache (PAGE-unit index).
+	 * pgoff_to_vma_addr handles the MMUPAGE/PAGE unit mismatch between
+	 * vm_pgoff (MMUPAGE units) and page cache indices (PAGE units).
+	 */
+	addr = pgoff_to_vma_addr(vma, start_cache);
+
+	/*
+	 * vmf->pmd was set up for vmf->address.  pte_offset_map_lock only
+	 * walks that PMD's PTE table.  If start_cache's addr is in a
+	 * different PMD than vmf->address, pte_offset_map_lock would index
+	 * vmf->pmd's table with the wrong pte_index() and silently write
+	 * into PTEs that don't belong to addr's PMD.  Clamp start_cache
+	 * forward to the first PAGE that's in the same PMD as vmf->address.
+	 */
+	{
+		unsigned long vmf_pmd_start = vmf->address & PMD_MASK;
+		while (start_cache < end_cache && (addr & PMD_MASK) != vmf_pmd_start) {
+			start_cache++;
+			xas_set(&xas, start_cache);
+			folio_unlock(folio);
+			folio_put(folio);
+			folio = next_uptodate_folio(&xas, mapping, end_cache);
+			if (!folio)
+				goto out;
+			last_pgoff = start_cache;
+			addr = pgoff_to_vma_addr(vma, start_cache);
+		}
+		if ((addr & PMD_MASK) != vmf_pmd_start) {
+			folio_unlock(folio);
+			folio_put(folio);
+			goto out;
+		}
+	}
+
 	vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd, addr, &vmf->ptl);
 	if (!vmf->pte) {
 		folio_unlock(folio);
@@ -3919,14 +4099,33 @@ vm_fault_t filemap_map_pages(struct vm_fault *vmf,
 	}
 
 	folio_type = mm_counter_file(folio);
+	{
+	unsigned long start_pmd_addr = addr & PMD_MASK;
 	do {
 		unsigned long end;
+		unsigned long next_addr;
 
-		addr += (xas.xa_index - last_pgoff) << PAGE_SHIFT;
-		vmf->pte += xas.xa_index - last_pgoff;
+		/*
+		 * Advance addr and PTE pointer to the current xarray
+		 * position.  Each PAGE-unit step = PAGE_MMUCOUNT PTEs.
+		 *
+		 * Stop if the iteration would cross a PMD boundary: vmf->pte
+		 * was obtained from one pte_offset_map_lock and indexes one
+		 * PTE table only.  ptep += pages*PAGE_MMUCOUNT runs off the
+		 * end of that table at the PMD boundary.  The remaining
+		 * folios will fault on demand from their own PMDs.
+		 */
+		next_addr = addr + ((xas.xa_index - last_pgoff) << PAGE_SHIFT);
+		if ((next_addr & PMD_MASK) != start_pmd_addr) {
+			folio_unlock(folio);
+			folio_put(folio);
+			break;
+		}
+		addr = next_addr;
+		vmf->pte += (xas.xa_index - last_pgoff) << PAGE_MMUSHIFT;
 		last_pgoff = xas.xa_index;
 		end = folio_next_index(folio) - 1;
-		nr_pages = min(end, end_pgoff) - xas.xa_index + 1;
+		nr_pages = min(end, end_cache) - xas.xa_index + 1;
 
 		if (!folio_test_large(folio))
 			ret |= filemap_map_order0_folio(vmf,
@@ -3937,10 +4136,11 @@ vm_fault_t filemap_map_pages(struct vm_fault *vmf,
 					nr_pages, &rss, &mmap_miss, file_end);
 
 		folio_unlock(folio);
-	} while ((folio = next_uptodate_folio(&xas, mapping, end_pgoff)) != NULL);
+	} while ((folio = next_uptodate_folio(&xas, mapping, end_cache)) != NULL);
+	}
 	add_mm_counter(vma->vm_mm, folio_type, rss);
 	pte_unmap_unlock(vmf->pte, vmf->ptl);
-	trace_mm_filemap_map_pages(mapping, start_pgoff, end_pgoff);
+	trace_mm_filemap_map_pages(mapping, start_cache, end_cache);
 out:
 	rcu_read_unlock();
 
