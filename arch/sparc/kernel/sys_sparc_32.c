@@ -53,7 +53,7 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr, unsi
 		 * cache aliasing constraints.
 		 */
 		if (!file_hugepage && (flags & MAP_SHARED) &&
-		    ((addr - (pgoff << PAGE_SHIFT)) & (SHMLBA - 1)))
+		    ((addr - (pgoff << MMUPAGE_SHIFT)) & (SHMLBA - 1)))
 			return -EINVAL;
 		return addr;
 	}
@@ -68,9 +68,12 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr, unsi
 	info.low_limit = addr;
 	info.high_limit = TASK_SIZE;
 	if (!file_hugepage) {
+		/* Colour bits live between MMUPAGE_SHIFT and SHMLBA; under page
+		 * clustering PAGE_SIZE can exceed SHMLBA so PAGE_MASK would
+		 * collapse the mask. pgoff is MMUPAGE-granular. */
 		info.align_mask = (flags & MAP_SHARED) ?
-			(PAGE_MASK & (SHMLBA - 1)) : 0;
-		info.align_offset = pgoff << PAGE_SHIFT;
+			(MMUPAGE_MASK & (SHMLBA - 1)) : 0;
+		info.align_offset = pgoff << MMUPAGE_SHIFT;
 	} else {
 		info.align_mask = huge_page_mask_align(filp);
 	}
