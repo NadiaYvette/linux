@@ -229,6 +229,15 @@ static inline bool page_range_contiguous(const struct page *page,
 /* test whether an address (unsigned long or pointer) is aligned to PAGE_SIZE */
 #define PAGE_ALIGNED(addr)	IS_ALIGNED((unsigned long)(addr), PAGE_SIZE)
 
+/* to align the pointer to the (next) MMUPAGE boundary */
+#define MMUPAGE_ALIGN(addr) ALIGN(addr, MMUPAGE_SIZE)
+
+/* to align the pointer to the (prev) MMUPAGE boundary */
+#define MMUPAGE_ALIGN_DOWN(addr) ALIGN_DOWN(addr, MMUPAGE_SIZE)
+
+/* test whether an address is aligned to MMUPAGE_SIZE */
+#define MMUPAGE_ALIGNED(addr)	IS_ALIGNED((unsigned long)(addr), MMUPAGE_SIZE)
+
 /**
  * folio_page_idx - Return the number of a page in a folio.
  * @folio: The folio.
@@ -759,6 +768,62 @@ struct vm_fault {
 };
 
 struct vm_uffd_ops;
+
+/*
+ * vma_suboffset - compute the byte offset of a virtual address within
+ * its kernel page, based on the VMA's file offset alignment.
+ *
+ * When PAGE_MMUSHIFT == 0, always returns 0 (no sub-pages).
+ *
+ * When PAGE_MMUSHIFT > 0, the kernel page containing a given virtual
+ * address depends on the alignment of vm_pgoff.  Two addresses in the
+ * same VMA that are PAGE_SIZE apart always land in different kernel pages,
+ * but the boundary between kernel pages is shifted by the VMA's file
+ * offset modulo PAGE_MMUCOUNT.
+ */
+static inline unsigned long vma_suboffset(struct vm_area_struct *vma,
+					  unsigned long address)
+{
+#if PAGE_MMUSHIFT
+	return (((address >> MMUPAGE_SHIFT) - vma->vm_pgoff) &
+		(PAGE_MMUCOUNT - 1)) << MMUPAGE_SHIFT;
+#else
+	return 0;
+#endif
+}
+
+/*
+ * Page cache pgoff conversion helpers for PGCL.
+ *
+ * In PGCL, vma->vm_pgoff is in MMUPAGE-sized units (to support sub-PAGE
+ * mmap offsets), while the page cache indexes folios in PAGE-sized units.
+ * These helpers convert between the two.
+ *
+ * When PAGE_MMUSHIFT == 0, these are identity operations.
+ */
+
+/* Convert page cache index (PAGE-unit) to VMA pgoff (MMUPAGE-unit) */
+static inline pgoff_t pgoff_page_to_mmu(pgoff_t page_pgoff)
+{
+	return page_pgoff << PAGE_MMUSHIFT;
+}
+
+/* Convert VMA pgoff (MMUPAGE-unit) to page cache index (PAGE-unit) */
+static inline pgoff_t pgoff_mmu_to_page(pgoff_t mmu_pgoff)
+{
+	return mmu_pgoff >> PAGE_MMUSHIFT;
+}
+
+/*
+ * Compute the virtual address in a VMA for a page cache pgoff.
+ * Handles the unit mismatch: pgoff is in PAGE units, vm_pgoff is MMUPAGE.
+ */
+static inline unsigned long pgoff_to_vma_addr(
+		const struct vm_area_struct *vma, pgoff_t pgoff)
+{
+	return vma->vm_start +
+		((pgoff << PAGE_SHIFT) - ((loff_t)vma->vm_pgoff << MMUPAGE_SHIFT));
+}
 
 /*
  * These are the virtual MM functions - opening of an area, closing and
@@ -3687,6 +3752,24 @@ static inline void pagetable_free(struct ptdesc *pt)
 }
 
 #if defined(CONFIG_SPLIT_PTE_PTLOCKS)
+/*
+ * PTE_PACK_ORDER: log2 of how many MMUPAGE-sized PTE tables share one
+ * PAGE_SIZE ptdesc.  Default 0 (no packing).  Architectures that opt
+ * into PTE table packing (CONFIG_PACK_PTE_PTLOCKS) override this in
+ * <asm/page.h>.  At order 0, pte_pack_index() is constant 0 and the
+ * spinlock array degenerates to a single lock — the historical
+ * behaviour, preserved bit-for-bit for non-packing arches.
+ */
+#ifndef PTE_PACK_ORDER
+#define PTE_PACK_ORDER 0
+#endif
+#define PTE_PACK_NR (1U << PTE_PACK_ORDER)
+
+static inline unsigned int pte_pack_index(unsigned long addr)
+{
+	return (addr >> MMUPAGE_SHIFT) & (PTE_PACK_NR - 1);
+}
+
 #if ALLOC_SPLIT_PTLOCKS
 void __init ptlock_cache_init(void);
 bool ptlock_alloc(struct ptdesc *ptdesc);
@@ -3718,18 +3801,23 @@ static inline spinlock_t *ptlock_ptr(struct ptdesc *ptdesc)
 
 static inline spinlock_t *pte_lockptr(struct mm_struct *mm, pmd_t *pmd)
 {
-	return ptlock_ptr(page_ptdesc(pmd_page(*pmd)));
+	struct ptdesc *pt = page_ptdesc(pmd_page(*pmd));
+	unsigned long pmdv = (unsigned long)pmd_page_vaddr(*pmd);
+
+	return &ptlock_ptr(pt)[pte_pack_index(pmdv)];
 }
 
 static inline spinlock_t *ptep_lockptr(struct mm_struct *mm, pte_t *pte)
 {
 	BUILD_BUG_ON(IS_ENABLED(CONFIG_HIGHPTE));
 	BUILD_BUG_ON(MAX_PTRS_PER_PTE * sizeof(pte_t) > PAGE_SIZE);
-	return ptlock_ptr(virt_to_ptdesc(pte));
+	return &ptlock_ptr(virt_to_ptdesc(pte))[pte_pack_index((unsigned long)pte)];
 }
 
 static inline bool ptlock_init(struct ptdesc *ptdesc)
 {
+	unsigned int i;
+
 	/*
 	 * prep_new_page() initialize page->private (and therefore page->ptl)
 	 * with 0. Make sure nobody took it in use in between.
@@ -3740,7 +3828,8 @@ static inline bool ptlock_init(struct ptdesc *ptdesc)
 	VM_BUG_ON_PAGE(*(unsigned long *)&ptdesc->ptl, ptdesc_page(ptdesc));
 	if (!ptlock_alloc(ptdesc))
 		return false;
-	spin_lock_init(ptlock_ptr(ptdesc));
+	for (i = 0; i < PTE_PACK_NR; i++)
+		spin_lock_init(&ptlock_ptr(ptdesc)[i]);
 	return true;
 }
 
@@ -4234,14 +4323,14 @@ static inline unsigned long vm_end_gap(const struct vm_area_struct *vma)
 	if (vma->vm_flags & VM_GROWSUP) {
 		vm_end += stack_guard_gap;
 		if (vm_end < vma->vm_end)
-			vm_end = -PAGE_SIZE;
+			vm_end = -MMUPAGE_SIZE;
 	}
 	return vm_end;
 }
 
 static inline unsigned long vma_pages(const struct vm_area_struct *vma)
 {
-	return (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
+	return (vma->vm_end - vma->vm_start) >> MMUPAGE_SHIFT;
 }
 
 static inline unsigned long vma_last_pgoff(struct vm_area_struct *vma)
@@ -4256,7 +4345,7 @@ static inline unsigned long vma_desc_size(const struct vm_area_desc *desc)
 
 static inline unsigned long vma_desc_pages(const struct vm_area_desc *desc)
 {
-	return vma_desc_size(desc) >> PAGE_SHIFT;
+	return vma_desc_size(desc) >> MMUPAGE_SHIFT;
 }
 
 /**
