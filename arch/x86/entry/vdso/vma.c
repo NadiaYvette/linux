@@ -94,8 +94,9 @@ static vm_fault_t vvar_vclock_fault(const struct vm_special_mapping *sm,
 			pvclock_get_pvti_cpu0_va();
 
 		if (pvti && vclock_was_used(VDSO_CLOCKMODE_PVCLOCK))
+			/* vmf_insert_pfn_prot() takes an MMUPAGE-granular PFN. */
 			return vmf_insert_pfn_prot(vma, vmf->address,
-					__pa(pvti) >> PAGE_SHIFT,
+					__pa(pvti) >> MMUPAGE_SHIFT,
 					pgprot_decrypted(vma->vm_page_prot));
 		break;
 	}
@@ -103,7 +104,9 @@ static vm_fault_t vvar_vclock_fault(const struct vm_special_mapping *sm,
 	{
 		unsigned long pfn = hv_get_tsc_pfn();
 		if (pfn && vclock_was_used(VDSO_CLOCKMODE_HVCLOCK))
-			return vmf_insert_pfn(vma, vmf->address, pfn);
+			/* hv_get_tsc_pfn() is PAGE-granular; vmf_insert_pfn() takes MMUPAGE. */
+			return vmf_insert_pfn(vma, vmf->address,
+					      pfn << PAGE_MMUSHIFT);
 		break;
 	}
 	}

@@ -55,7 +55,8 @@ static int __sgx_vepc_fault(struct sgx_vepc *vepc,
 	if (ret)
 		goto err_free;
 
-	pfn = PFN_DOWN(sgx_get_epc_phys_addr(epc_page));
+	/* vmf_insert_pfn() takes an MMUPAGE-granular PFN. */
+	pfn = sgx_get_epc_phys_addr(epc_page) >> MMUPAGE_SHIFT;
 
 	ret = vmf_insert_pfn(vma, addr, pfn);
 	if (ret != VM_FAULT_NOPAGE) {

@@ -1639,12 +1639,16 @@ static unsigned long xe_ttm_io_mem_pfn(struct ttm_buffer_object *ttm_bo,
 	struct xe_res_cursor cursor;
 	struct xe_vram_region *vram;
 
+	/*
+	 * page_offset is in MMUPAGE units and the TTM io_mem path feeds the
+	 * result straight to vmf_insert_pfn_prot(), so return an MMUPAGE PFN.
+	 */
 	if (ttm_bo->resource->mem_type == XE_PL_STOLEN)
-		return xe_ttm_stolen_io_offset(bo, page_offset << PAGE_SHIFT) >> PAGE_SHIFT;
+		return xe_ttm_stolen_io_offset(bo, page_offset << MMUPAGE_SHIFT) >> MMUPAGE_SHIFT;
 
 	vram = res_to_mem_region(ttm_bo->resource);
-	xe_res_first(ttm_bo->resource, (u64)page_offset << PAGE_SHIFT, 0, &cursor);
-	return (vram->io_start + cursor.start) >> PAGE_SHIFT;
+	xe_res_first(ttm_bo->resource, (u64)page_offset << MMUPAGE_SHIFT, 0, &cursor);
+	return (vram->io_start + cursor.start) >> MMUPAGE_SHIFT;
 }
 
 static void __xe_bo_vunmap(struct xe_bo *bo);
