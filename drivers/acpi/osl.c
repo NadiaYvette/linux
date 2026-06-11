@@ -282,16 +282,23 @@ acpi_map_lookup_virt(void __iomem *virt, acpi_size size)
 	return NULL;
 }
 
-#if defined(CONFIG_ARM64) || defined(CONFIG_RISCV) || defined(CONFIG_LOONGARCH)
+#if defined(CONFIG_ARM64) || defined(CONFIG_RISCV) || defined(CONFIG_LOONGARCH) || CONFIG_PAGE_MMUSHIFT > 0
 /*
  * ioremap will take care of cache attributes (LoongArch uses the DMW
  * direct-mapped window, ioremap is essentially free there).
  *
- * The kmap path is also unsafe under PGCL (PAGE_MMUSHIFT > 0): each
- * struct page covers PAGE_SIZE bytes which spans multiple MMUPAGEs, so
- * pfn_to_page(pg_off >> MMUPAGE_SHIFT) and the per-MMUPAGE offset
- * arithmetic in acpi_os_map_iomem() would read from a wrong physical
- * region.  Routing LoongArch through ioremap dodges that.
+ * The kmap path is unsafe under PGCL (PAGE_MMUSHIFT > 0) on EVERY arch,
+ * not just the three above: struct page is PAGE-granular (one per
+ * PAGE_SIZE cluster), but acpi_map() derives an MMUPAGE-granular pfn
+ * (pg_off >> MMUPAGE_SHIFT) and feeds it to page_is_ram()/pfn_to_page()/
+ * kmap(), which all expect a PAGE pfn (pg_off >> PAGE_SHIFT).  The pfn is
+ * then PAGE_MMUCOUNT times too large, so page_is_ram() probes the wrong
+ * address (e.g. table at phys P is tested at P << PAGE_MMUSHIFT) and, when
+ * that happens to land in RAM on a large-memory machine, kmap() maps the
+ * wrong physical page and ACPI reads garbage (e.g. a bogus MCFG length ->
+ * runaway entry loop).  Small-RAM/QEMU configs dodge it by accident
+ * because P << PAGE_MMUSHIFT lands above RAM.  Route through ioremap under
+ * PGCL on all arches.  Identity (page_is_ram) when PAGE_MMUSHIFT == 0.
  */
 #define should_use_kmap(pfn)   0
 #else
