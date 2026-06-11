@@ -264,7 +264,7 @@ static inline pte_t pte_mkwrite_novma(pte_t pte)
 		((__pgprot((pgprot_val(prot) & ~_PAGE_CA_MASK) | \
 			   _PAGE_CA_BYPASS)))
 
-#define PFN_PTE_SHIFT		PAGE_SHIFT
+#define PFN_PTE_SHIFT		MMUPAGE_SHIFT
 #define pte_pfn(pte)		(pte_val(pte) >> PAGE_SHIFT)
 #define pte_same(a,b)		(pte_val(a) == pte_val(b))
 #define pte_page(x)		pfn_to_page(pte_pfn(x))

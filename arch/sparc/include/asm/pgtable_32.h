@@ -246,7 +246,7 @@ static inline pte_t pte_mkyoung(pte_t pte)
 	return __pte(pte_val(pte) | SRMMU_REF);
 }
 
-#define PFN_PTE_SHIFT			(PAGE_SHIFT - 4)
+#define PFN_PTE_SHIFT			(MMUPAGE_SHIFT - 4)
 
 static inline pte_t pfn_pte(unsigned long pfn, pgprot_t pgprot)
 {
