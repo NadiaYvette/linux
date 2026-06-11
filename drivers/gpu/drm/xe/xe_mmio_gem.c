@@ -178,10 +178,11 @@ static vm_fault_t xe_mmio_gem_vm_fault_dummy_page(struct vm_area_struct *vma)
 	if (drmm_add_action_or_reset(dev, xe_mmio_gem_release_dummy_page, page))
 		return VM_FAULT_OOM;
 
-	pfn = page_to_pfn(page);
+	/* vmf_insert_pfn() maps one MMUPAGE and takes an MMUPAGE-granular PFN. */
+	pfn = page_to_pfn(page) << PAGE_MMUSHIFT;
 
 	/* Map the entire VMA to the same dummy page */
-	for (i = 0; i < base->size; i += PAGE_SIZE) {
+	for (i = 0; i < base->size; i += MMUPAGE_SIZE) {
 		unsigned long addr = vma->vm_start + i;
 
 		ret = vmf_insert_pfn(vma, addr, pfn);
@@ -212,11 +213,12 @@ static vm_fault_t xe_mmio_gem_vm_fault(struct vm_fault *vmf)
 		return xe_mmio_gem_vm_fault_dummy_page(vma);
 	}
 
-	for (i = 0; i < base->size; i += PAGE_SIZE) {
+	/* vmf_insert_pfn() maps one MMUPAGE and takes an MMUPAGE-granular PFN. */
+	for (i = 0; i < base->size; i += MMUPAGE_SIZE) {
 		unsigned long addr = vma->vm_start + i;
 		unsigned long phys_addr = obj->phys_addr + i;
 
-		ret = vmf_insert_pfn(vma, addr, PHYS_PFN(phys_addr));
+		ret = vmf_insert_pfn(vma, addr, phys_addr >> MMUPAGE_SHIFT);
 		if (ret & VM_FAULT_ERROR)
 			break;
 	}

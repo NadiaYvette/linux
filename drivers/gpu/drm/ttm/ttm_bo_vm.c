@@ -257,7 +257,12 @@ vm_fault_t ttm_bo_vm_fault_reserved(struct vm_fault *vmf,
 			} else if (unlikely(!page)) {
 				break;
 			}
-			pfn = page_to_pfn(page) +
+			/*
+			 * vmf_insert_pfn_prot() takes an MMUPAGE-granular PFN:
+			 * the kernel-page PFN shifted up by PAGE_MMUSHIFT, plus
+			 * the sub-page (MMU page) index within the kernel page.
+			 */
+			pfn = (page_to_pfn(page) << PAGE_MMUSHIFT) +
 			      (page_offset & (PAGE_MMUCOUNT - 1));
 		}
 
@@ -313,7 +318,8 @@ vm_fault_t ttm_bo_vm_dummy_page(struct vm_fault *vmf, pgprot_t prot)
 				     page))
 		return VM_FAULT_OOM;
 
-	pfn = page_to_pfn(page);
+	/* vmf_insert_pfn_prot() takes an MMUPAGE-granular PFN (sub-page 0). */
+	pfn = page_to_pfn(page) << PAGE_MMUSHIFT;
 
 	/* Prefault the entire VMA range right away to avoid further faults */
 	for (address = vma->vm_start; address < vma->vm_end;
