@@ -161,11 +161,17 @@ next:
 
 		/*
 		 * Don't bother remapping if the current entry header and the
-		 * next one end on the same page.
+		 * next one end within the same early_memremap window.  That
+		 * window is fixmap-backed and therefore MMUPAGE_SIZE-granular,
+		 * so the "still mapped" test must use MMUPAGE_MASK, not
+		 * PAGE_MASK: under page clustering PAGE_SIZE spans several
+		 * MMUPAGEs, and two entries in the same PAGE but different
+		 * MMUPAGEs would otherwise skip the remap and fault on the
+		 * unmapped MMUPAGE.  Identity when PAGE_MMUSHIFT == 0.
 		 */
 		next_entry = (void *)((unsigned long)mokvar_entry + size);
 		if (((((unsigned long)(mokvar_entry + 1) - 1) ^
-		      ((unsigned long)(next_entry + 1) - 1)) & PAGE_MASK) == 0) {
+		      ((unsigned long)(next_entry + 1) - 1)) & MMUPAGE_MASK) == 0) {
 			mokvar_entry = next_entry;
 			goto next;
 		}
