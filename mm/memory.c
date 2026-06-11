@@ -2832,6 +2832,14 @@ static vm_fault_t insert_pfn(struct vm_area_struct *vma, unsigned long addr,
 	struct mm_struct *mm = vma->vm_mm;
 	pte_t *pte, entry;
 	spinlock_t *ptl;
+	/*
+	 * Under PGCL @pfn is MMUPAGE-granular (phys >> MMUPAGE_SHIFT): the high
+	 * bits select the kernel page (struct-page PFN) and the low PAGE_MMUSHIFT
+	 * bits select the sub-page (hardware MMU page) within it.  pgpfn is the
+	 * PAGE-granular PFN used by struct-page / memtype helpers.  Identity at
+	 * PAGE_MMUSHIFT == 0.
+	 */
+	unsigned long pgpfn = pfn >> PAGE_MMUSHIFT;
 
 	pte = get_locked_pte(mm, addr, &ptl);
 	if (!pte)
@@ -2849,7 +2857,7 @@ static vm_fault_t insert_pfn(struct vm_area_struct *vma, unsigned long addr,
 			 * allocation and mapping invalidation so just skip the
 			 * update.
 			 */
-			if (pte_pfn(entry) != pfn) {
+			if (pte_pfn(entry) != pgpfn) {
 				WARN_ON_ONCE(!is_zero_pfn(pte_pfn(entry)));
 				goto out_unlock;
 			}
@@ -2862,7 +2870,10 @@ static vm_fault_t insert_pfn(struct vm_area_struct *vma, unsigned long addr,
 	}
 
 	/* Ok, finally just insert the thing.. */
-	entry = pte_mkspecial(pfn_pte(pfn, prot));
+	entry = pfn_pte(pgpfn, prot);
+	if (PAGE_MMUSHIFT > 0)
+		entry = pte_mksub(entry, (pfn & (PAGE_MMUCOUNT - 1)) << MMUPAGE_SHIFT);
+	entry = pte_mkspecial(entry);
 
 	if (mkwrite) {
 		entry = pte_mkyoung(entry);
@@ -2919,19 +2930,25 @@ vm_fault_t vmf_insert_pfn_prot(struct vm_area_struct *vma, unsigned long addr,
 	 * consistency in testing and feature parity among all, so we should
 	 * try to keep these invariants in place for everybody.
 	 */
+	/*
+	 * Under PGCL @pfn is MMUPAGE-granular; the struct-page / memtype helpers
+	 * below operate on PAGE-granular PFNs.  Identity at PAGE_MMUSHIFT == 0.
+	 */
+	unsigned long pgpfn = pfn >> PAGE_MMUSHIFT;
+
 	BUG_ON(!(vma->vm_flags & (VM_PFNMAP|VM_MIXEDMAP)));
 	BUG_ON((vma->vm_flags & (VM_PFNMAP|VM_MIXEDMAP)) ==
 						(VM_PFNMAP|VM_MIXEDMAP));
 	BUG_ON((vma->vm_flags & VM_PFNMAP) && is_cow_mapping(vma->vm_flags));
-	BUG_ON((vma->vm_flags & VM_MIXEDMAP) && pfn_valid(pfn));
+	BUG_ON((vma->vm_flags & VM_MIXEDMAP) && pfn_valid(pgpfn));
 
 	if (addr < vma->vm_start || addr >= vma->vm_end)
 		return VM_FAULT_SIGBUS;
 
-	if (!pfn_modify_allowed(pfn, pgprot))
+	if (!pfn_modify_allowed(pgpfn, pgprot))
 		return VM_FAULT_SIGBUS;
 
-	pfnmap_setup_cachemode_pfn(pfn, &pgprot);
+	pfnmap_setup_cachemode_pfn(pgpfn, &pgprot);
 
 	return insert_pfn(vma, addr, pfn, pgprot, false);
 }
@@ -2982,17 +2999,19 @@ static vm_fault_t __vm_insert_mixed(struct vm_area_struct *vma,
 		unsigned long addr, unsigned long pfn, bool mkwrite)
 {
 	pgprot_t pgprot = vma->vm_page_prot;
+	/* @pfn is MMUPAGE-granular under PGCL; pgpfn is PAGE-granular. */
+	unsigned long pgpfn = pfn >> PAGE_MMUSHIFT;
 	int err;
 
-	if (!vm_mixed_ok(vma, pfn, mkwrite))
+	if (!vm_mixed_ok(vma, pgpfn, mkwrite))
 		return VM_FAULT_SIGBUS;
 
 	if (addr < vma->vm_start || addr >= vma->vm_end)
 		return VM_FAULT_SIGBUS;
 
-	pfnmap_setup_cachemode_pfn(pfn, &pgprot);
+	pfnmap_setup_cachemode_pfn(pgpfn, &pgprot);
 
-	if (!pfn_modify_allowed(pfn, pgprot))
+	if (!pfn_modify_allowed(pgpfn, pgprot))
 		return VM_FAULT_SIGBUS;
 
 	/*
@@ -3002,15 +3021,20 @@ static vm_fault_t __vm_insert_mixed(struct vm_area_struct *vma,
 	 * than insert_pfn).  If a zero_pfn were inserted into a VM_MIXEDMAP
 	 * without pte special, it would there be refcounted as a normal page.
 	 */
-	if (!IS_ENABLED(CONFIG_ARCH_HAS_PTE_SPECIAL) && pfn_valid(pfn)) {
+	if (!IS_ENABLED(CONFIG_ARCH_HAS_PTE_SPECIAL) && pfn_valid(pgpfn)) {
 		struct page *page;
 
 		/*
 		 * At this point we are committed to insert_page()
 		 * regardless of whether the caller specified flags that
 		 * result in pfn_t_has_page() == false.
+		 *
+		 * NB: this !ARCH_HAS_PTE_SPECIAL fallback maps a whole kernel
+		 * page (sub-page 0); it cannot honour a non-zero sub-page from
+		 * an MMUPAGE-granular @pfn.  All PGCL arches that drive
+		 * VM_MIXEDMAP with sub-page offsets select ARCH_HAS_PTE_SPECIAL.
 		 */
-		page = pfn_to_page(pfn);
+		page = pfn_to_page(pgpfn);
 		err = insert_page(vma, addr, page, pgprot, mkwrite);
 	} else {
 		return insert_pfn(vma, addr, pfn, pgprot, mkwrite);
