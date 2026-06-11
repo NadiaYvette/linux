@@ -251,7 +251,18 @@ static inline int pte_special(pte_t pte)
 
 static inline u64 protnone_mask(u64 val);
 
-#define PFN_PTE_SHIFT	PAGE_SHIFT
+/*
+ * Stride between consecutive hardware PTEs.  The x86 PTE physical-address
+ * field is fixed at bit MMUPAGE_SHIFT (4 KiB), independent of the kernel's
+ * PAGE_SIZE.  Under page clustering (PAGE_MMUSHIFT > 0) PAGE_SHIFT exceeds
+ * MMUPAGE_SHIFT, so using PAGE_SHIFT here makes pte_advance_pfn() add
+ * nr << PAGE_SHIFT to the PTE value (unmasked) -- striding the physical
+ * field 16x too far at PAGE_MMUSHIFT=4 and walking into reserved bits, which
+ * faults (error 0x0b) once it overflows the platform's physical-address
+ * width on large-memory systems.  Must be MMUPAGE_SHIFT; identity when
+ * PAGE_MMUSHIFT == 0.
+ */
+#define PFN_PTE_SHIFT	MMUPAGE_SHIFT
 
 static inline unsigned long pte_pfn(pte_t pte)
 {
