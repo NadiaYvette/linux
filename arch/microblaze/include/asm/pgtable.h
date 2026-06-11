@@ -224,7 +224,7 @@ extern pte_t *va_to_pte(unsigned long address);
  */
 #define pte_page(x)		(mem_map + (unsigned long) \
 				(((pte_val(x) & MMUPAGE_MASK) - memory_start) >> PAGE_SHIFT))
-#define PFN_PTE_SHIFT		PAGE_SHIFT
+#define PFN_PTE_SHIFT		MMUPAGE_SHIFT
 
 #define pte_pfn(x)		(pte_val(x) >> PFN_PTE_SHIFT)
 

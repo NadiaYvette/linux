@@ -313,7 +313,7 @@ static inline void set_pte(pte_t *ptep, pte_t pte)
  */
 #define set_pmd(pmdptr, pmdval) (*(pmdptr) = pmdval)
 
-#define PFN_PTE_SHIFT	PAGE_SHIFT
+#define PFN_PTE_SHIFT	MMUPAGE_SHIFT
 #define pfn_pte(pfn, prot) \
 	__pte(((unsigned long long)(pfn) << PAGE_SHIFT) | pgprot_val(prot))
 #define pfn_pmd(pfn, prot) \
