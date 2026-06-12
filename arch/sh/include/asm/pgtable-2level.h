@@ -12,8 +12,8 @@
 /* PTE bits */
 #define PTE_MAGNITUDE		2	/* 32-bit PTEs */
 
-#define PTE_SHIFT		PAGE_SHIFT
-#define PTE_BITS		(PTE_SHIFT - PTE_MAGNITUDE)
+#define PTE_SHIFT		MMUPAGE_SHIFT
+#define PTE_BITS		(PAGE_SHIFT - PTE_MAGNITUDE)
 
 /* PGD bits */
 #define PGDIR_SHIFT		(PTE_SHIFT + PTE_BITS)
