@@ -39,7 +39,7 @@ extern int elf_check_arch(const struct elf32_hdr *);
 
 #define CORE_DUMP_USE_REGSET
 
-#define ELF_EXEC_PAGESIZE	PAGE_SIZE
+#define ELF_EXEC_PAGESIZE	MMUPAGE_SIZE
 
 /*
  * This is the location that an ET_DYN program is loaded if exec'ed.  Typical
