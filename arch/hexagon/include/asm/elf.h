@@ -183,8 +183,8 @@ do {					\
 
 #define CORE_DUMP_USE_REGSET
 
-/* Hrm is this going to cause problems for changing PAGE_SIZE?  */
-#define ELF_EXEC_PAGESIZE	PAGE_SIZE
+/* AT_PAGESZ is the hardware page userspace sees: MMUPAGE_SIZE under PGCL. */
+#define ELF_EXEC_PAGESIZE	MMUPAGE_SIZE
 
 /*
  * This is the location that an ET_DYN program is loaded if exec'ed.  Typical
