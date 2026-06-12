@@ -119,7 +119,8 @@ extern int arm_elf_read_implies_exec(int);
 #define elf_read_implies_exec(ex,stk) arm_elf_read_implies_exec(stk)
 
 #define CORE_DUMP_USE_REGSET
-#define ELF_EXEC_PAGESIZE	4096
+/* AT_PAGESZ = hardware page = MMUPAGE_SIZE under PGCL (4096 on arm). */
+#define ELF_EXEC_PAGESIZE	MMUPAGE_SIZE
 
 /* This is the base location for PIE (ET_DYN with INTERP) loads. */
 #define ELF_ET_DYN_BASE		0x400000UL
