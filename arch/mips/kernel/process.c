@@ -685,8 +685,13 @@ unsigned long mips_stack_top(void)
 	unsigned long top = TASK_SIZE & PAGE_MASK;
 
 	if (IS_ENABLED(CONFIG_MIPS_FP_SUPPORT)) {
-		/* One page for branch delay slot "emulation" */
-		top -= PAGE_SIZE;
+		/*
+		 * One hardware page for branch delay slot "emulation".
+		 * Reserve MMUPAGE_SIZE to match vdso_base()'s skip and the
+		 * actual mapping in arch_setup_additional_pages().  Identity
+		 * at PAGE_MMUSHIFT==0.
+		 */
+		top -= MMUPAGE_SIZE;
 	}
 
 	/* Space for the VDSO, data page & GIC user page */
@@ -705,16 +710,16 @@ unsigned long mips_stack_top(void)
 		top -= shm_align_mask + 1;
 
 	/*
-	 * Under PGCL the intermediate subtractions above are MMUPAGE-sized
-	 * (e.g. 16 KB at PAGE_MMUSHIFT=6), so `top` may end up MMUPAGE-aligned
-	 * but not PAGE-aligned.  arch_setup_additional_pages later does
-	 * do_mmap(STACK_TOP, PAGE_SIZE, MAP_FIXED) for the FP-emu delay-slot
-	 * page; with a non-PAGE-aligned start that mapping clobbers the
-	 * kernel-page that holds the upper end of the user stack — exactly
-	 * where copy_strings just placed argv/env.  Round down so STACK_TOP
-	 * is always PAGE-aligned.
+	 * STACK_TOP is MMUPAGE-granular: every subtraction above is an
+	 * MMUPAGE multiple, and arch_setup_additional_pages() maps the
+	 * FP-emu delay-slot page at MMUPAGE_SIZE, so no MAP_FIXED mapping
+	 * overlaps the user stack's top kernel-page.  (Previously this was
+	 * rounded down with `& PAGE_MASK` to work around a PAGE_SIZE-length
+	 * delay-slot mapping that clobbered argv/env; that root cause is now
+	 * fixed, so the coarser rounding — which wasted up to PAGE_SIZE -
+	 * MMUPAGE_SIZE of VA per mm — is no longer needed.)
 	 */
-	return top & PAGE_MASK;
+	return top;
 }
 
 /*
