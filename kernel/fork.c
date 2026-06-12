@@ -391,7 +391,7 @@ static void free_thread_stack(struct task_struct *tsk)
  * Allocate pages if THREAD_SIZE is >= PAGE_SIZE, otherwise use a
  * kmemcache based allocator.
  */
-#if THREAD_SIZE >= MMUPAGE_SIZE
+#if THREAD_SIZE >= PAGE_SIZE
 
 static void thread_stack_free_rcu(struct rcu_head *rh)
 {
@@ -423,7 +423,7 @@ static void free_thread_stack(struct task_struct *tsk)
 	tsk->stack = NULL;
 }
 
-#else /* !(THREAD_SIZE >= MMUPAGE_SIZE) */
+#else /* !(THREAD_SIZE >= PAGE_SIZE) */
 
 static struct kmem_cache *thread_stack_cache;
 
@@ -462,7 +462,7 @@ void thread_stack_cache_init(void)
 	BUG_ON(thread_stack_cache == NULL);
 }
 
-#endif /* THREAD_SIZE >= MMUPAGE_SIZE */
+#endif /* THREAD_SIZE >= PAGE_SIZE */
 #endif /* CONFIG_VMAP_STACK */
 
 /* SLAB cache for signal_struct structures (tsk->signal) */
