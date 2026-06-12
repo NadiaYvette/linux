@@ -1273,8 +1273,16 @@ remove_pagetable(unsigned long start, unsigned long end, bool direct,
 void __ref vmemmap_free(unsigned long start, unsigned long end,
 		struct vmem_altmap *altmap)
 {
-	VM_BUG_ON(!PAGE_ALIGNED(start));
-	VM_BUG_ON(!PAGE_ALIGNED(end));
+	/*
+	 * PGCL: the vmemmap range is MMUPAGE-granular — basepages map it at
+	 * PTE/MMUPAGE granularity, and at PAGE_MMUSHIFT>0 the per-section
+	 * vmemmap chunk (PAGES_PER_SECTION * sizeof(struct page)) is MMUPAGE-
+	 * but not PAGE-aligned.  PAGE_ALIGNED is over-strict here; require only
+	 * MMUPAGE alignment (identity at shift 0).  Mirrors the s390x vmem
+	 * assertion relaxation.
+	 */
+	VM_BUG_ON(!IS_ALIGNED(start, MMUPAGE_SIZE));
+	VM_BUG_ON(!IS_ALIGNED(end, MMUPAGE_SIZE));
 
 	remove_pagetable(start, end, false, altmap);
 }
@@ -1560,8 +1568,16 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
 {
 	int err;
 
-	VM_BUG_ON(!PAGE_ALIGNED(start));
-	VM_BUG_ON(!PAGE_ALIGNED(end));
+	/*
+	 * PGCL: the vmemmap range is MMUPAGE-granular — basepages map it at
+	 * PTE/MMUPAGE granularity, and at PAGE_MMUSHIFT>0 the per-section
+	 * vmemmap chunk (PAGES_PER_SECTION * sizeof(struct page)) is MMUPAGE-
+	 * but not PAGE-aligned.  PAGE_ALIGNED is over-strict here; require only
+	 * MMUPAGE alignment (identity at shift 0).  Mirrors the s390x vmem
+	 * assertion relaxation.
+	 */
+	VM_BUG_ON(!IS_ALIGNED(start, MMUPAGE_SIZE));
+	VM_BUG_ON(!IS_ALIGNED(end, MMUPAGE_SIZE));
 
 	if (end - start < PAGES_PER_SECTION * sizeof(struct page))
 		err = vmemmap_populate_basepages(start, end, node, NULL);
