@@ -77,16 +77,6 @@ static void __page_cache_release(struct folio *folio, struct lruvec **lruvecp,
 		folio_lruvec_relock_irqsave(folio, lruvecp, flagsp);
 		lruvec_del_folio(*lruvecp, folio);
 		__folio_clear_lru_flags(folio);
-	} else {
-		/*
-		 * MGLRU may isolate a folio (clearing PG_lru) and set
-		 * PG_active before the folio is freed.  Clear these flags
-		 * unconditionally to prevent free_page_is_bad() from firing.
-		 */
-		if (folio_test_active(folio))
-			__folio_clear_active(folio);
-		if (folio_test_unevictable(folio))
-			__folio_clear_unevictable(folio);
 	}
 }
 
