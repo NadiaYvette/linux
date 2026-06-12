@@ -1756,8 +1756,12 @@ static __always_inline void zap_present_folio_ptes(struct mmu_gather *tlb,
 		*any_skipped = zap_install_uffd_wp_if_needed(vma, addr, pte,
 							     nr, details, ptent);
 
-	if (!delay_rmap)
+	if (!delay_rmap) {
 		folio_remove_rmap_ptes(folio, page, nr, vma);
+
+		if (unlikely(folio_mapcount(folio) < 0))
+			print_bad_pte(vma, addr, ptent, page);
+	}
 	if (unlikely(__tlb_remove_folio_pages(tlb, page, nr, delay_rmap))) {
 		*force_flush = true;
 		*force_break = true;
