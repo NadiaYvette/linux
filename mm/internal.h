@@ -506,6 +506,64 @@ static inline unsigned int pgcl_pte_batch(pte_t pte, pte_t *ptep,
 	}
 	return nr;
 }
+
+/**
+ * pgcl_rmap_fire_kpage_event - should the single per-kernel-page rmap event
+ * fire for this run?  Decides by PHYSICAL sub-index, matching pte_pfn==@kpfn,
+ * bounded to the current pte table (so a kernel page that straddles the
+ * pte-table / PMD boundary is owned by exactly one side and counted once).
+ *
+ * @ptep:	the run's first PTE pointer.
+ * @address:	the run's virtual address.
+ * @kpfn:	this kernel page's PFN (page_to_pfn of the rmap'd page).
+ * @psub:	physical sub-index of the run's first PTE, read from the PTE
+ *		value: the OLD (pre-clear) value for a remove, or the value
+ *		being installed for an add.
+ * @want_first:	true  = add/dup edge  — fire on the FIRST present fragment;
+ *		false = remove edge  — fire on the LAST present fragment, and
+ *		        the caller must have already cleared/converted this
+ *		        run's PTEs before calling.
+ *
+ * For aligned mappings vsub==psub and this is exactly the zap/fork edge logic;
+ * the psub anchor additionally tolerates MMUPAGE-misaligned mappings
+ * (mremap/relocate_vma_down keep the old vm_pgoff).  Non-PGCL collapses to a
+ * single-slot window that always fires.
+ */
+static inline bool pgcl_rmap_fire_kpage_event(pte_t *ptep, unsigned long address,
+					      unsigned long kpfn, unsigned int psub,
+					      bool want_first)
+{
+	unsigned int idx = (address >> MMUPAGE_SHIFT) & (PTRS_PER_PTE - 1);
+	long base_idx = (long)idx - (long)psub;
+	int j;
+
+	if (want_first) {
+		/* straddle: sub-0 lives in the prior (already-done) table */
+		if (psub > idx)
+			return false;
+		for (j = 0; j < (int)psub; j++) {
+			pte_t pj = ptep_get(ptep - psub + j);
+
+			if (pte_present(pj) && pte_pfn(pj) == kpfn)
+				return false;
+		}
+		return true;
+	}
+	/* remove: page extends into the next table -> that side owns it */
+	if (base_idx + PAGE_MMUCOUNT > PTRS_PER_PTE)
+		return false;
+	for (j = 0; j < PAGE_MMUCOUNT; j++) {
+		long t = base_idx + j;
+		pte_t pj;
+
+		if (t < 0 || t >= PTRS_PER_PTE)
+			continue;
+		pj = ptep_get(ptep - psub + j);
+		if (pte_present(pj) && pte_pfn(pj) == kpfn)
+			return false;
+	}
+	return true;
+}
 #endif /* PAGE_MMUSHIFT */
 
 /**
