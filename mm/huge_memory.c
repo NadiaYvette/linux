@@ -3201,23 +3201,14 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 
 			folio_add_anon_rmap_ptes(folio, page, HPAGE_PMD_NR,
 						 vma, haddr, rmap_flags);
-#if PAGE_MMUSHIFT
 			/*
-			 * PGCL rmap fixup: folio_add_anon_rmap_ptes added 1
-			 * mapcount per kernel page, but set_ptes will write
-			 * PAGE_MMUCOUNT PTEs per kernel page.  Each PTE zap
-			 * decrements mapcount by 1, so bump each page's
-			 * _mapcount by (PAGE_MMUCOUNT - 1).
+			 * PGCL Contract A (large folios): mapcount stays in
+			 * kernel-page units, so folio_add_anon_rmap_ptes(..,
+			 * HPAGE_PMD_NR, ..) recorded the right count and the
+			 * post-split PTE-mapped folio is zapped one rmap event
+			 * per kernel page.  The HPAGE_PMD_MMUNR MMUPAGE PTE
+			 * references were taken via folio_ref_add above.
 			 */
-			{
-				int pgcl_i;
-				for (pgcl_i = 0; pgcl_i < HPAGE_PMD_NR; pgcl_i++)
-					atomic_add(PAGE_MMUCOUNT - 1,
-						   &(page + pgcl_i)->_mapcount);
-				folio_add_large_mapcount(folio,
-					HPAGE_PMD_MMUNR - HPAGE_PMD_NR, vma);
-			}
-#endif
 		}
 	} else {
 		/*
@@ -3285,19 +3276,11 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 				rmap_flags |= RMAP_EXCLUSIVE;
 			folio_add_anon_rmap_ptes(folio, page, HPAGE_PMD_NR,
 						 vma, haddr, rmap_flags);
-#if PAGE_MMUSHIFT
 			/*
-			 * PGCL rmap fixup: same as device private case above.
+			 * PGCL Contract A (large folios): kernel-page-unit
+			 * mapcount; no per-PTE fixup (refs taken per-PTE via
+			 * folio_ref_add above).  See the !freeze branch.
 			 */
-			{
-				int pgcl_i;
-				for (pgcl_i = 0; pgcl_i < HPAGE_PMD_NR; pgcl_i++)
-					atomic_add(PAGE_MMUCOUNT - 1,
-						   &(page + pgcl_i)->_mapcount);
-				folio_add_large_mapcount(folio,
-					HPAGE_PMD_MMUNR - HPAGE_PMD_NR, vma);
-			}
-#endif
 		}
 	}
 

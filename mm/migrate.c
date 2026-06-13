@@ -451,19 +451,60 @@ static bool remove_migration_pte(struct folio *folio,
 #endif
 		{
 			/*
-			 * PGCL Option A: one rmap event per PTE.  Loop the
-			 * add nr_pages times to match the nr_pages PTEs about
-			 * to be installed (set_ptes / set_pte_at loop below).
-			 * For non-PGCL nr_pages == 1.
+			 * PGCL: rmap counts mappings.  Large folios use
+			 * Contract A (kernel-page granularity): one rmap add
+			 * event per kernel page.  A gapped cluster is restored
+			 * across several PVMW yields, so fire the add only on the
+			 * FIRST restored fragment of each kernel page — the mirror
+			 * of the zap last-present edge.  At this point (before the
+			 * set_ptes below) the not-yet-restored fragments are still
+			 * migration entries (non-present); fragments restored by an
+			 * earlier yield are present, so "any sub-PTE already
+			 * present" means a prior yield already issued the add.
+			 * order-0 folios keep per-PTE counting (loop nr_pages):
+			 * __split_folio_to_order flips the folio non-large before
+			 * remap_page() runs, so rebuilt order-0 sub-folios get
+			 * per-PTE mapcount automatically.  For non-PGCL nr_pages ==
+			 * 1 and first_frag is always true (single call either way).
 			 */
-			if (folio_test_anon(folio)) {
-				for (i = 0; i < nr_pages; i++)
-					folio_add_anon_rmap_pte(folio, new, vma,
-								pvmw.address + (unsigned long)i * MMUPAGE_SIZE,
-								rmap_flags);
-			} else {
-				for (i = 0; i < nr_pages; i++)
-					folio_add_file_rmap_pte(folio, new, vma);
+			{
+#if PAGE_MMUSHIFT
+				/*
+				 * Migration restore re-aligns via set_ptes (which
+				 * strides from the kernel page's sub-0), so the
+				 * restored mapping is kernel-page-aligned: vsub ==
+				 * psub and a migrated folio never straddles a pte
+				 * table.  Use the shared physical-sub edge helper for
+				 * same-pfn precision; its boundary guard is inert here.
+				 */
+				bool first_frag = !folio_test_large(folio) ||
+					pgcl_rmap_fire_kpage_event(pvmw.pte,
+						pvmw.address, page_to_pfn(new),
+						(unsigned int)((pvmw.address >>
+							MMUPAGE_SHIFT) &
+							(PAGE_MMUCOUNT - 1)),
+						true);
+#else
+				bool first_frag = true;
+#endif
+				if (folio_test_anon(folio)) {
+					if (folio_test_large(folio)) {
+						if (first_frag)
+							folio_add_anon_rmap_pte(folio, new, vma,
+										pvmw.address, rmap_flags);
+					} else
+						for (i = 0; i < nr_pages; i++)
+							folio_add_anon_rmap_pte(folio, new, vma,
+										pvmw.address + (unsigned long)i * MMUPAGE_SIZE,
+										rmap_flags);
+				} else {
+					if (folio_test_large(folio)) {
+						if (first_frag)
+							folio_add_file_rmap_pte(folio, new, vma);
+					} else
+						for (i = 0; i < nr_pages; i++)
+							folio_add_file_rmap_pte(folio, new, vma);
+				}
 			}
 			if (unlikely(is_device_private_page(new))) {
 				/*
