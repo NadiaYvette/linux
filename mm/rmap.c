@@ -2439,14 +2439,45 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 discard:
 		if (unlikely(folio_test_hugetlb(folio))) {
 			hugetlb_remove_rmap(folio);
+		} else if (folio_test_large(folio)) {
+			/*
+			 * PGCL Contract A (large folios): mapcount counts
+			 * mappings at kernel-page granularity — one rmap event
+			 * per kernel page.  A gapped cluster has its
+			 * PAGE_MMUCOUNT sub-PTEs split across several PVMW yields;
+			 * firing per yield would over-remove and underflow the
+			 * folio counters (and a migration src/dst asymmetry then
+			 * leaves a stale large_mapcount).  Fire only when this
+			 * yield cleared the LAST present sub-PTE of the kernel
+			 * page: this yield's PTEs are already cleared above, so
+			 * scan the full window and emit the event iff none remain
+			 * present.  Mirror of the zap last-present edge.  Non-PGCL:
+			 * one PTE per kernel page so the window has a single slot.
+			 */
+#if PAGE_MMUSHIFT
+			/*
+			 * Anchor on the physical sub-index of the cleared run
+			 * (pteval holds the old PTE for the present case), match
+			 * pte_pfn, and bound to this pte table — robust to
+			 * MMUPAGE-misaligned mappings and PMD-boundary straddles.
+			 */
+			unsigned int psub = (unsigned int)((pte_val(pteval) /
+				__phys_to_pte_val(MMUPAGE_SIZE)) &
+				(PAGE_MMUCOUNT - 1));
+
+			if (pgcl_rmap_fire_kpage_event(pvmw.pte, address,
+						       page_to_pfn(subpage),
+						       psub, false))
+				folio_remove_rmap_pte(folio, subpage, vma);
+#else
+			folio_remove_rmap_pte(folio, subpage, vma);
+#endif
 		} else {
 			/*
-			 * PGCL Option A: one rmap event per PTE.  This yield
-			 * cleared nr_pages MMUPAGE PTEs, so drop nr_pages
-			 * mapcounts.  __folio_remove_rmap on a non-large folio
-			 * always decrements by 1 regardless of nr_pages, so
-			 * loop.  For non-PGCL (nr_pages always 1) this is the
-			 * legacy single call.
+			 * order-0: per-PTE mapcount.  This yield cleared
+			 * nr_pages MMUPAGE PTEs of the (single) kernel page;
+			 * __folio_remove_rmap decrements by 1 per call, so loop.
+			 * For non-PGCL (nr_pages == 1) this is one call.
 			 */
 			unsigned int i;
 			for (i = 0; i < nr_pages; i++)
@@ -2867,11 +2898,41 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 
 		if (unlikely(folio_test_hugetlb(folio))) {
 			hugetlb_remove_rmap(folio);
+		} else if (folio_test_large(folio)) {
+			/*
+			 * PGCL Contract A (large folios): one rmap event per
+			 * kernel page.  A gapped cluster's PAGE_MMUCOUNT sub-PTEs
+			 * are split across several PVMW yields; firing per yield
+			 * over-removes.  Because migration on a gapped folio
+			 * removes from the src folio here but re-adds to the dst
+			 * folio in remove_migration_pte, the per-yield error does
+			 * not self-cancel and leaks a nonzero large_mapcount.  This
+			 * yield's PTEs are now migration entries (non-present), so
+			 * fire only when no sub-PTE of the kernel page remains
+			 * present — the last-present edge, mirroring zap and
+			 * try_to_unmap_one.  Non-PGCL: a single-slot window.
+			 */
+#if PAGE_MMUSHIFT
+			/*
+			 * Physical-sub-index anchor (pteval is the old PTE; the
+			 * migration entry lives in swp_pte), pte_pfn match, pte
+			 * table bounded — handles misaligned/straddling pages.
+			 */
+			unsigned int psub = (unsigned int)((pte_val(pteval) /
+				__phys_to_pte_val(MMUPAGE_SIZE)) &
+				(PAGE_MMUCOUNT - 1));
+
+			if (pgcl_rmap_fire_kpage_event(pvmw.pte, address,
+						       page_to_pfn(subpage),
+						       psub, false))
+				folio_remove_rmap_pte(folio, subpage, vma);
+#else
+			folio_remove_rmap_pte(folio, subpage, vma);
+#endif
 		} else {
 			/*
-			 * PGCL Option A: one rmap event per PTE.  This yield
-			 * cleared nr_pages MMUPAGE PTEs; loop the rmap drop
-			 * (non-large folios decrement only by 1 per call).
+			 * order-0: per-PTE mapcount; loop the rmap drop
+			 * (decrements by 1 per call).  Non-PGCL: one call.
 			 */
 			unsigned int i;
 			for (i = 0; i < nr_pages; i++)
