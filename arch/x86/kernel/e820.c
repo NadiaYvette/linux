@@ -1376,5 +1376,32 @@ __init void e820__memblock_setup(void)
 	/* Throw away partial pages: */
 	memblock_trim_memory(PAGE_SIZE);
 
+#if PAGE_MMUSHIFT
+	/*
+	 * Under page clustering PAGE_SIZE is large (e.g. 256K), so the trim
+	 * above discards sub-PAGE low (<1M) RAM -- including the memory
+	 * reserve_real_mode() needs for the real-mode trampoline (see the KHO
+	 * scratch marking above).  The low 1M is reserved wholesale before the
+	 * buddy handover and never becomes buddy pages, so re-add the <1M e820
+	 * RAM at MMUPAGE granularity to keep it available to the early sub-1M
+	 * trampoline allocation.  Identity at PAGE_MMUSHIFT == 0 (the trim is
+	 * already PAGE==MMUPAGE granular, so nothing was thrown away to re-add).
+	 */
+	for (idx = 0; idx < e820_table->nr_entries; idx++) {
+		struct e820_entry *entry = &e820_table->entries[idx];
+		u64 start = entry->addr;
+
+		end = entry->addr + entry->size;
+		if (entry->type != E820_TYPE_RAM || start >= SZ_1M)
+			continue;
+		if (end > SZ_1M)
+			end = SZ_1M;
+		start = round_up(start, MMUPAGE_SIZE);
+		end = round_down(end, MMUPAGE_SIZE);
+		if (start < end)
+			memblock_add(start, end - start);
+	}
+#endif
+
 	memblock_dump_all();
 }
