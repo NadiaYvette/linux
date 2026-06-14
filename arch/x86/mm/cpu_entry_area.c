@@ -70,7 +70,15 @@ static inline void init_cea_offsets(void) { }
 noinstr struct cpu_entry_area *get_cpu_entry_area(int cpu)
 {
 	unsigned long va = CPU_ENTRY_AREA_PER_CPU + cea_offset(cpu) * CPU_ENTRY_AREA_SIZE;
-	BUILD_BUG_ON(sizeof(struct cpu_entry_area) % PAGE_SIZE != 0);
+	/*
+	 * The cpu_entry_area is built and mapped at hardware-page (MMUPAGE)
+	 * granularity (see cea_set_pte()/cea_map_percpu_pages()), so each CPU's
+	 * area need only be an MMUPAGE multiple, not a full kernel PAGE multiple.
+	 * Asserting PAGE_SIZE here would force every sub-structure (e.g. the DS
+	 * area and its buffers) up to a full PAGE under page clustering.  Identity
+	 * at PAGE_MMUSHIFT == 0 (MMUPAGE_SIZE == PAGE_SIZE).
+	 */
+	BUILD_BUG_ON(sizeof(struct cpu_entry_area) % MMUPAGE_SIZE != 0);
 
 	return (struct cpu_entry_area *) va;
 }
