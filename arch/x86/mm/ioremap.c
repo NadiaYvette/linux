@@ -904,7 +904,7 @@ void __init __early_set_fixmap(enum fixed_addresses idx,
 	pgprot_val(flags) &= __supported_pte_mask;
 
 	if (pgprot_val(flags))
-		set_pte(pte, __pte((phys & MMUPAGE_MASK) | pgprot_val(flags)));
+		set_pte(pte, __pte((phys & PHYSICAL_PAGE_MASK) | pgprot_val(flags)));
 	else
 		pte_clear(&init_mm, addr, pte);
 	flush_tlb_one_kernel(addr);

@@ -473,7 +473,7 @@ static void __init pti_clone_user_shared(void)
 		if (WARN_ON(!target_pte))
 			return;
 
-		*target_pte = __pte((pa & MMUPAGE_MASK) | pgprot_val(PAGE_KERNEL));
+		*target_pte = __pte((pa & PHYSICAL_PAGE_MASK) | pgprot_val(PAGE_KERNEL));
 	}
 }
 

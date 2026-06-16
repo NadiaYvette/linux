@@ -505,7 +505,20 @@ phys_pte_init(pte_t *pte_page, unsigned long paddr, unsigned long paddr_end,
 		}
 
 		pages++;
-		set_pte_init(pte, __pte((paddr & MMUPAGE_MASK) | pgprot_val(prot)), init);
+		/*
+		 * #106 diagnostic + Newton fix: the 4K leaf is reached only for
+		 * sub-2MB RAM fragments (laptop's fragmented UEFI map; never on
+		 * QEMU's contiguous map).  PHYSICAL_PAGE_MASK (== MMUPAGE_MASK &
+		 * __PHYSICAL_MASK) restores the MAXPHYADDR clamp that pfn_pte()
+		 * applies in mainline and that the hand-rolled PGCL PTE dropped;
+		 * identity at PAGE_MMUSHIFT==0.  The WARN_ONCE fires iff paddr
+		 * carries bits above MAXPHYADDR before we build the PTE — i.e. the
+		 * suspected #106 trigger actually reaches this leaf.
+		 */
+		WARN_ONCE(paddr & ~PHYSICAL_PAGE_MASK & ~(MMUPAGE_SIZE - 1),
+			  "PGCL #106: phys_pte_init paddr %lx above MAXPHYADDR (prot %lx)\n",
+			  paddr, (unsigned long)pgprot_val(prot));
+		set_pte_init(pte, __pte((paddr & PHYSICAL_PAGE_MASK) | pgprot_val(prot)), init);
 		paddr_last = (paddr & MMUPAGE_MASK) + MMUPAGE_SIZE;
 	}
 

@@ -588,7 +588,7 @@ void native_set_fixmap(unsigned /* enum fixed_addresses */ idx,
 	/* Sanitize 'prot' against any unsupported bits: */
 	pgprot_val(flags) &= __default_kernel_pte_mask;
 
-	__native_set_fixmap(idx, __pte((phys & MMUPAGE_MASK) | pgprot_val(flags)));
+	__native_set_fixmap(idx, __pte((phys & PHYSICAL_PAGE_MASK) | pgprot_val(flags)));
 }
 
 #ifdef CONFIG_HAVE_ARCH_HUGE_VMAP

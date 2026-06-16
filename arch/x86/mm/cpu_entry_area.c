@@ -87,7 +87,7 @@ EXPORT_SYMBOL(get_cpu_entry_area);
 void cea_set_pte(void *cea_vaddr, phys_addr_t pa, pgprot_t flags)
 {
 	unsigned long va = (unsigned long) cea_vaddr;
-	pte_t pte = __pte((pa & MMUPAGE_MASK) | pgprot_val(flags));
+	pte_t pte = __pte((pa & PHYSICAL_PAGE_MASK) | pgprot_val(flags));
 
 	/*
 	 * The cpu_entry_area is shared between the user and kernel
