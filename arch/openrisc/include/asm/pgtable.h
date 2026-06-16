@@ -53,7 +53,15 @@ extern void paging_init(void);
  */
 #define set_pmd(pmdptr, pmdval) (*(pmdptr) = pmdval)
 
-#define PGDIR_SHIFT	(PAGE_SHIFT + (PAGE_SHIFT-2))
+/*
+ * Page-table geometry tracks the HARDWARE page (MMUPAGE), not the clustered
+ * PAGE: the folded 2-level walk and the software TLB refill are MMUPAGE
+ * (8 KiB)-granular.  Using PAGE_SHIFT here overflows on 32-bit under page
+ * clustering -- at PAGE_MMUSHIFT=4 PGDIR_SHIFT would be 32, so PGDIR_SIZE
+ * (1<<32) wraps to 0 and USER_PTRS_PER_PGD divides by zero.  MMUPAGE_SHIFT
+ * == PAGE_SHIFT at PGCL=0, so this is identity for the non-clustered build.
+ */
+#define PGDIR_SHIFT	(MMUPAGE_SHIFT + (MMUPAGE_SHIFT-2))
 #define PGDIR_SIZE	(1UL << PGDIR_SHIFT)
 #define PGDIR_MASK	(~(PGDIR_SIZE-1))
 
@@ -63,7 +71,9 @@ extern void paging_init(void);
  * pointers are 4 bytes so we can use the page size and
  * divide it by 4 (shift by 2).
  */
-#define PTRS_PER_PTE	(1UL << (PAGE_SHIFT-2))
+/* one PTE per HW (MMUPAGE) page; 4-byte entries -> shift by 2. MMUPAGE-granular
+ * so the 8 KiB PTE table layout matches the asm TLB walker. Identity at PGCL=0. */
+#define PTRS_PER_PTE	(1UL << (MMUPAGE_SHIFT-2))
 
 #define PTRS_PER_PGD	(1UL << (32-PGDIR_SHIFT))
 
@@ -334,7 +344,10 @@ static inline unsigned long pmd_page_vaddr(pmd_t pmd)
 #define __pmd_offset(address) \
 	(((address) >> PMD_SHIFT) & (PTRS_PER_PMD-1))
 
-#define PFN_PTE_SHIFT		PAGE_SHIFT
+/* set_ptes() advances one HW (MMUPAGE) page per sub-PTE within a cluster, so
+ * the inter-PTE stride is MMUPAGE_SHIFT; pte_pfn/pfn_pte below stay PAGE_SHIFT
+ * (they convert the cluster-base pfn). MMUPAGE_SHIFT==PAGE_SHIFT at PGCL=0. */
+#define PFN_PTE_SHIFT		MMUPAGE_SHIFT
 #define pte_pfn(x)		((unsigned long)(((x).pte)) >> PAGE_SHIFT)
 #define pfn_pte(pfn, prot)  __pte((((pfn) << PAGE_SHIFT)) | pgprot_val(prot))
 
