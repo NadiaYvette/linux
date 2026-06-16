@@ -779,7 +779,15 @@ secondary_init:
 	LOAD_SYMBOL_2_GPR(r10, secondary_thread_info)
 	tophys	(r30,r10)
 	l.lwz	r10,0(r30)
-	l.addi	r1,r10,THREAD_SIZE
+	/*
+	 * THREAD_SIZE == PAGE_SIZE here; under page clustering
+	 * (PAGE_MMUSHIFT > 0) that exceeds the l.addi 16-bit immediate
+	 * range, so materialise it with movhi/ori then add.  r30 is dead
+	 * here (the next tophys overwrites it).  Identity at PGCL=0.
+	 */
+	l.movhi	r30,hi(THREAD_SIZE)
+	l.ori	r30,r30,lo(THREAD_SIZE)
+	l.add	r1,r10,r30
 	tophys	(r30,r10)
 	l.sw	TI_KSP(r30),r1
 
