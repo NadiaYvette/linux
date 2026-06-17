@@ -53,7 +53,12 @@ extern void paging_init(void);
  */
 #define set_pmd(pmdptr, pmdval) (*(pmdptr) = pmdval)
 
-#define PGDIR_SHIFT	(PAGE_SHIFT + (PAGE_SHIFT-2))
+/*
+ * PGCL: the PTE table is indexed per MMUPAGE (generic pte_index uses
+ * MMUPAGE_SHIFT), so each PGD entry spans PTRS_PER_PTE << MMUPAGE_SHIFT.
+ * Identity at PAGE_MMUSHIFT==0 where MMUPAGE_SHIFT == PAGE_SHIFT.
+ */
+#define PGDIR_SHIFT	(MMUPAGE_SHIFT + (PAGE_SHIFT-2))
 #define PGDIR_SIZE	(1UL << PGDIR_SHIFT)
 #define PGDIR_MASK	(~(PGDIR_SIZE-1))
 
@@ -334,7 +339,7 @@ static inline unsigned long pmd_page_vaddr(pmd_t pmd)
 #define __pmd_offset(address) \
 	(((address) >> PMD_SHIFT) & (PTRS_PER_PMD-1))
 
-#define PFN_PTE_SHIFT		PAGE_SHIFT
+#define PFN_PTE_SHIFT		MMUPAGE_SHIFT	/* PGCL: set_ptes strides per hw page; identity at shift 0 */
 #define pte_pfn(x)		((unsigned long)(((x).pte)) >> PAGE_SHIFT)
 #define pfn_pte(pfn, prot)  __pte((((pfn) << PAGE_SHIFT)) | pgprot_val(prot))
 
