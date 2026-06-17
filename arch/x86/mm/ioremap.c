@@ -497,7 +497,18 @@ void iounmap(volatile void __iomem *addr)
 
 	kmsan_iounmap_page_range((unsigned long)addr,
 		(unsigned long)addr + get_vm_area_size(p));
-	memtype_free(p->phys_addr, p->phys_addr + get_vm_area_size(p));
+	/*
+	 * Free the exact memtype range that __ioremap_caller() reserved, which
+	 * is MMUPAGE-granular (area->requested_size, the unrounded size passed
+	 * to get_vm_area_caller()).  Do NOT use get_vm_area_size(): under PGCL
+	 * (PAGE_SIZE > MMUPAGE_SIZE) it rounds the span up to the cluster
+	 * PAGE_SIZE, so it would hand memtype_free() a larger end than was
+	 * reserved.  memtype_erase() requires an exact [start,end] match, so the
+	 * oversized free fails ("freeing invalid memtype") and leaks the memtype
+	 * rbtree node.  Identity at PAGE_MMUSHIFT==0, where requested_size and
+	 * get_vm_area_size() coincide (size is already PAGE/MMUPAGE-aligned).
+	 */
+	memtype_free(p->phys_addr, p->phys_addr + p->requested_size);
 
 	/* Finally remove it */
 	o = remove_vm_area((void __force *)addr);
