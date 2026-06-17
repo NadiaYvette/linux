@@ -1926,7 +1926,18 @@ repeat:
 			{
 				phys_addr_t phys = pte_val(sub_old);
 
+				/*
+				 * #106: mirror pte_pfn()+pfn_pte() L1TF handling.
+				 * Un-invert the old (maybe not-present) encoding,
+				 * then RE-invert for the new prot, masking only
+				 * after both XORs.  Missing the re-invert made
+				 * set_direct_map_invalid write a non-inverted
+				 * not-present PTE, which set_direct_map_default then
+				 * doubly-inverted into a present PTE with pfn==~pfn
+				 * (reserved-bit fault).  Non-identity at MMUSHIFT==0.
+				 */
 				phys ^= protnone_mask(phys);
+				phys ^= protnone_mask(pgprot_val(new_prot));
 				phys &= PTE_PFN_MASK;
 				new_pte = __pte(phys | pgprot_val(new_prot));
 			}
