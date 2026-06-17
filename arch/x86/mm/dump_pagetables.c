@@ -249,9 +249,20 @@ static void note_wx(struct pg_state *st, unsigned long addr)
 	 * is intentionally W+X.  Suppress the warning.
 	 */
 	if (PAGE_MMUSHIFT > 0 && real_mode_header) {
-		unsigned long rm_base = (unsigned long)real_mode_header;
-		unsigned long rm_end = rm_base +
-			PAGE_ALIGN(real_mode_blob_end - real_mode_blob);
+		/*
+		 * The trampoline is only MMUPAGE-aligned (a PAGE_SIZE alignment
+		 * is unsatisfiable in a fragmented sub-1M e820), but
+		 * set_real_mode_permissions() clears NX on the whole PAGE_SIZE
+		 * page(s) containing it via set_memory_x(PAGE_ALIGN_DOWN(...)).
+		 * The resulting W+X run therefore begins at the PAGE boundary
+		 * *below* real_mode_header, so the suppression range must be
+		 * PAGE-aligned to actually cover it.
+		 */
+		unsigned long rm_base =
+			PAGE_ALIGN_DOWN((unsigned long)real_mode_header);
+		unsigned long rm_end =
+			PAGE_ALIGN((unsigned long)real_mode_header +
+				   (real_mode_blob_end - real_mode_blob));
 
 		if (st->start_address >= rm_base &&
 		    addr <= rm_end) {
