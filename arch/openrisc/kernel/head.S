@@ -1170,7 +1170,7 @@ ENTRY(dtlb_miss_handler)
 	 * pmd = (pmd_t *)(current_pgd + pgd_index(daddr));
 	 */
 	GET_CURRENT_PGD(r3,r4)		// r3 is current_pgd, r4 is temp
-	l.srli	r4,r2,0x18		// >> PAGE_SHIFT + (PAGE_SHIFT - 2)
+	l.srli	r4,r2,(MMUPAGE_SHIFT+(PAGE_SHIFT-2))	// >> PGDIR_SHIFT (PGCL)
 	l.slli	r4,r4,0x2		// to get address << 2
 	l.add	r3,r4,r3		// r4 is pgd_index(daddr)
 	/*
@@ -1181,16 +1181,17 @@ ENTRY(dtlb_miss_handler)
 	l.lwz	r3,0x0(r4)		// get *pmd value
 	l.sfne	r3,r0
 	l.bnf	d_pmd_none
-	 l.addi	r3,r0,0xffffe000	// PAGE_MASK
+	 l.nop				// PGCL: PAGE_MASK too wide for l.addi imm16
 
 d_pmd_good:
+	LOAD_SYMBOL_2_GPR(r3,PAGE_MASK)	// PGCL: load wide PAGE_MASK (movhi+ori)
 	/*
 	 * pte = *pte_offset(pmd, daddr);
 	 */
 	l.lwz	r4,0x0(r4)		// get **pmd value
 	l.and	r4,r4,r3		// & PAGE_MASK
 	l.srli	r2,r2,0xd		// >> PAGE_SHIFT, r2 == EEAR
-	l.andi	r3,r2,0x7ff		// (1UL << PAGE_SHIFT - 2) - 1
+	l.andi	r3,r2,((1<<(PAGE_SHIFT-2))-1)	// & (PTRS_PER_PTE-1) (PGCL)
 	l.slli	r3,r3,0x2		// to get address << 2
 	l.add	r3,r3,r4
 	l.lwz	r3,0x0(r3)		// this is pte at last
@@ -1200,10 +1201,11 @@ d_pmd_good:
 	l.andi	r4,r3,0x1
 	l.sfne	r4,r0			// is pte present
 	l.bnf	d_pte_not_present
-	l.addi	r4,r0,0xffffe3fa	// PAGE_MASK | DTLB_UP_CONVERT_MASK
+	 l.nop				// PGCL: wide mask too big for l.addi imm16
 	/*
 	 * fill DTLB TR register
 	 */
+	LOAD_SYMBOL_2_GPR(r4,(PAGE_MASK | 0x3fa))	// PAGE_MASK | DTLB_UP_CONVERT_MASK
 	l.and	r4,r3,r4		// apply the mask
 	// Determine number of DMMU sets
 	l.mfspr r2, r0, SPR_DMMUCFGR
@@ -1250,7 +1252,7 @@ ENTRY(itlb_miss_handler)
 	 *
 	 */
 	GET_CURRENT_PGD(r3,r4)		// r3 is current_pgd, r5 is temp
-	l.srli	r4,r2,0x18		// >> PAGE_SHIFT + (PAGE_SHIFT - 2)
+	l.srli	r4,r2,(MMUPAGE_SHIFT+(PAGE_SHIFT-2))	// >> PGDIR_SHIFT (PGCL)
 	l.slli	r4,r4,0x2		// to get address << 2
 	l.add	r3,r4,r3		// r4 is pgd_index(daddr)
 	/*
@@ -1261,9 +1263,10 @@ ENTRY(itlb_miss_handler)
 	l.lwz	r3,0x0(r4)		// get *pmd value
 	l.sfne	r3,r0
 	l.bnf	i_pmd_none
-	 l.addi	r3,r0,0xffffe000	// PAGE_MASK
+	 l.nop				// PGCL: PAGE_MASK too wide for l.addi imm16
 
 i_pmd_good:
+	LOAD_SYMBOL_2_GPR(r3,PAGE_MASK)	// PGCL: load wide PAGE_MASK (movhi+ori)
 	/*
 	 * pte = *pte_offset(pmd, iaddr);
 	 *
@@ -1271,7 +1274,7 @@ i_pmd_good:
 	l.lwz	r4,0x0(r4)		// get **pmd value
 	l.and	r4,r4,r3		// & PAGE_MASK
 	l.srli	r2,r2,0xd		// >> PAGE_SHIFT, r2 == EEAR
-	l.andi	r3,r2,0x7ff		// (1UL << PAGE_SHIFT - 2) - 1
+	l.andi	r3,r2,((1<<(PAGE_SHIFT-2))-1)	// & (PTRS_PER_PTE-1) (PGCL)
 	l.slli	r3,r3,0x2		// to get address << 2
 	l.add	r3,r3,r4
 	l.lwz	r3,0x0(r3)		// this is pte at last
@@ -1282,10 +1285,11 @@ i_pmd_good:
 	l.andi	r4,r3,0x1
 	l.sfne	r4,r0			// is pte present
 	l.bnf	i_pte_not_present
-	 l.addi	r4,r0,0xffffe03a	// PAGE_MASK | ITLB_UP_CONVERT_MASK
+	 l.nop				// PGCL: wide mask too big for l.addi imm16
 	/*
 	 * fill ITLB TR register
 	 */
+	LOAD_SYMBOL_2_GPR(r4,(PAGE_MASK | 0x3a))	// PAGE_MASK | ITLB_UP_CONVERT_MASK
 	l.and	r4,r3,r4		// apply the mask
 	l.andi	r3,r3,0x7c0		// _PAGE_EXEC | _PAGE_SRE | _PAGE_SWE |  _PAGE_URE | _PAGE_UWE
 	l.sfeq	r3,r0
