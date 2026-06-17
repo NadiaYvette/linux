@@ -911,7 +911,12 @@ unsigned long vm_commit_limit(void)
 		allowed = (((totalram_pages() - hugetlb_total_pages())
 			    << PAGE_MMUSHIFT)
 			   * sysctl_overcommit_ratio / 100);
-	allowed += total_swap_pages;
+	/*
+	 * total_swap_pages counts swap slots, which are PAGE (cluster) sized;
+	 * the rest of this limit is in MMUPAGE units, so scale swap up too.
+	 * Identity at PAGE_MMUSHIFT == 0.
+	 */
+	allowed += total_swap_pages << PAGE_MMUSHIFT;
 
 	return allowed;
 }
@@ -971,7 +976,8 @@ int __vm_enough_memory(const struct mm_struct *mm, long pages, int cap_sys_admin
 		return 0;
 
 	if (sysctl_overcommit_memory == OVERCOMMIT_GUESS) {
-		if (pages > (totalram_pages() << PAGE_MMUSHIFT) + total_swap_pages)
+		if (pages > (totalram_pages() << PAGE_MMUSHIFT) +
+			    (total_swap_pages << PAGE_MMUSHIFT))
 			goto error;
 		return 0;
 	}
