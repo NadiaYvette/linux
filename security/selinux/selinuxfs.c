@@ -246,8 +246,16 @@ static int sel_mmap_handle_status(struct file *filp,
 
 	BUG_ON(!status);
 
-	/* only allows one page from the head */
-	if (vma->vm_pgoff > 0 || size != PAGE_SIZE)
+	/*
+	 * Only allows one page from the head.  Userspace (libselinux
+	 * selinux_status_open()) maps getpagesize() bytes, i.e. one MMU page
+	 * (MMUPAGE_SIZE), which under page clustering is smaller than the
+	 * kernel PAGE_SIZE.  Gate on MMUPAGE_SIZE so the status struct (which
+	 * lives at the head of the page) can be mapped; remap_pfn_range() below
+	 * maps the first MMU page of the cluster.  MMUPAGE_SIZE == PAGE_SIZE
+	 * when PAGE_MMUSHIFT == 0, so non-clustered behaviour is unchanged.
+	 */
+	if (vma->vm_pgoff > 0 || size != MMUPAGE_SIZE)
 		return -EIO;
 	/* disallow writable mapping */
 	if (vma->vm_flags & VM_WRITE)
