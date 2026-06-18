@@ -1960,8 +1960,20 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 			 * event iff none remain mapped.  order-0 folios have no
 			 * _large_mapcount and keep per-PTE counting.
 			 */
-			if (folio_test_large(folio)) {
+			if (folio_test_large(folio) && !folio_test_anon(folio)) {
 				/*
+				 * FILE large folio: MMUPAGE-uniform mapcount --
+				 * remove this batch's nr sub-PTEs from the cluster
+				 * page's _mapcount (pgcl_pte_batch groups by kpfn).
+				 * Straddle / partial / non-cluster-aligned all balance
+				 * naturally on the per-page counter, matching
+				 * set_pte_range's folio_add_rmap_subptes() add side.
+				 */
+				folio_remove_rmap_subptes(folio, page, nr, vma);
+			} else if (folio_test_large(folio)) {
+				/*
+				 * ANON large folio: Contract-A cluster-site path,
+				 * converted to MMUPAGE-uniform in a following commit.
 				 * Edge-detect by PHYSICAL sub-index, not virtual:
 				 * a MMUPAGE- (not kernel-page-) aligned mapping
 				 * (vsub != psub) makes the virtual window straddle
@@ -6440,60 +6452,28 @@ void set_pte_range(struct vm_fault *vmf, struct folio *folio,
 	} else {
 #if PAGE_MMUSHIFT
 		/*
-		 * PGCL Contract A: a large folio's mapcount is kept in
-		 * kernel-page units (one kernel page == one mapping).  This is
-		 * the single-sub-PTE (fallback) fault of a large *file* folio —
-		 * a kernel page that may already have sibling sub-PTEs mapped
-		 * from earlier faults.  Fire the rmap add only when this is the
-		 * FIRST present sub-PTE of the kernel page (symmetric mirror of
-		 * the last-present scan in zap_present_ptes), so the count is
-		 * one-per-kernel-page however many of its PAGE_MMUCOUNT sub-PTEs
-		 * fault in.  Our own slot is not yet set (set_ptes is below) so
-		 * it reads not-present and is naturally excluded.  Edge-detect
-		 * by PHYSICAL sub-index so a MMUPAGE-aligned (not kernel-page-
-		 * aligned) mapping anchors on the kernel page's physical sub-0.
-		 * The eager nr>1 path and order-0 folios keep their existing
-		 * (already-consistent) counting via folio_add_file_rmap_ptes().
+		 * MMUPAGE-uniform contract: file rmap mapcount is kept in
+		 * MMUPAGE (sub-PTE) units.  set_ptes() below installs nr_ptes
+		 * hardware PTEs -- PAGE_MMUCOUNT per kernel page for an eager
+		 * large-folio fault (nr>1, full clusters), or a single sub-PTE
+		 * for the nr==1 fallback.  folio_add_rmap_subptes() advances the
+		 * cluster page's _mapcount by that sub-PTE count; straddle,
+		 * partial and repeated single-sub-PTE faults all balance on the
+		 * per-page counter with no scan, because the zap removes the
+		 * same way.
 		 */
-		if (nr == 1 && folio_test_large(folio)) {
-			unsigned long mmu_step = __phys_to_pte_val(MMUPAGE_SIZE);
-			unsigned int psub = (unsigned int)((pte_val(entry) / mmu_step) &
-							   (PAGE_MMUCOUNT - 1));
-			unsigned int slot = (addr >> MMUPAGE_SHIFT) &
-					    (PTRS_PER_PTE - 1);
-			long base_idx = (long)slot - (long)psub;
-			bool straddles = base_idx < 0 ||
-					 base_idx + PAGE_MMUCOUNT > PTRS_PER_PTE;
-			unsigned long kpfn = pte_pfn(entry);
-			pte_t *base = vmf->pte - psub;
-			bool any_present = false;
-			int j;
+		if (nr == 1) {
+			folio_add_rmap_subptes(folio, page, 1, vma);
+		} else {
+			unsigned int c;
 
-			for (j = 0; j < PAGE_MMUCOUNT; j++) {
-				long t = base_idx + j;
-				pte_t pj;
-
-				if (t < 0 || t >= PTRS_PER_PTE)
-					continue;
-				pj = ptep_get(base + j);
-				if (pte_present(pj) && pte_pfn(pj) == kpfn) {
-					any_present = true;
-					break;
-				}
-			}
-			/*
-			 * Non-straddle: fire iff first present sub-PTE.  Straddle
-			 * (rare: a non-cluster-aligned mmap whose kernel page
-			 * crosses a PMD): fail SAFE — fire per sub-PTE (may
-			 * over-count -> page leak, never under-count -> premature
-			 * free); the cross-table anchor lands with the symmetric
-			 * zap straddle fix.
-			 */
-			if (straddles || !any_present)
-				folio_add_file_rmap_pte(folio, page, vma);
-		} else
+			for (c = 0; c < nr; c++)
+				folio_add_rmap_subptes(folio, page + c,
+						       PAGE_MMUCOUNT, vma);
+		}
+#else
+		folio_add_file_rmap_ptes(folio, page, nr, vma);
 #endif
-			folio_add_file_rmap_ptes(folio, page, nr, vma);
 	}
 	set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr_ptes);
 
@@ -6623,7 +6603,25 @@ fallback:
 			 * PAGE boundary then back up to folio start.
 			 */
 			addr = (vmf->address & PAGE_MASK) - idx * PAGE_SIZE;
-			page = &folio->page;
+			/*
+			 * PGCL: the PAGE (cluster) round-down can land before
+			 * vm_start when vm_start is MMUPAGE- but not cluster-
+			 * aligned, so the eager folio span would map sub-PTEs
+			 * outside the VMA -- never zapped by munmap (leak) and
+			 * clobbering the neighbouring mapping (corruption).
+			 * Bounds-check the cluster-aligned span; fall back to
+			 * per-sub-PTE (nr_pages == 1, mapped within the VMA) when
+			 * it does not fit.
+			 */
+			if (PAGE_MMUSHIFT &&
+			    (addr < vma->vm_start ||
+			     addr + (unsigned long)nr_pages * PAGE_SIZE >
+				vma->vm_end)) {
+				nr_pages = 1;
+				addr = vmf->address;
+			} else {
+				page = &folio->page;
+			}
 		}
 	}
 
