@@ -421,6 +421,13 @@ void folio_remove_rmap_ptes(struct folio *, struct page *, int nr_pages,
 		struct vm_area_struct *);
 #define folio_remove_rmap_pte(folio, page, vma) \
 	folio_remove_rmap_ptes(folio, page, 1, vma)
+#if PAGE_MMUSHIFT
+/* PGCL: add/remove @count MMUPAGE sub-PTE mappings of ONE kernel page (cluster) */
+void folio_add_rmap_subptes(struct folio *, struct page *, int count,
+		struct vm_area_struct *);
+void folio_remove_rmap_subptes(struct folio *, struct page *, int count,
+		struct vm_area_struct *);
+#endif
 void folio_remove_rmap_pmd(struct folio *, struct page *,
 		struct vm_area_struct *);
 void folio_remove_rmap_pud(struct folio *, struct page *,

@@ -1804,6 +1804,63 @@ void folio_add_file_rmap_ptes(struct folio *folio, struct page *page,
 	__folio_add_file_rmap(folio, page, nr_pages, vma, PGTABLE_LEVEL_PTE);
 }
 
+#if PAGE_MMUSHIFT
+/**
+ * folio_add_rmap_subptes - add @count MMUPAGE sub-PTE mappings of one kernel
+ *			    page (cluster) of @folio  [PGCL]
+ * @folio: the folio
+ * @page:  the kernel page (cluster) within @folio taking the sub-PTEs
+ * @count: number of MMUPAGE sub-PTEs being mapped (1..PAGE_MMUCOUNT)
+ * @vma:   the VM area the mappings are added to
+ *
+ * MMUPAGE-uniform mapcount contract (anon and file alike): mapcount counts
+ * hardware (MMUPAGE) PTEs.  @page's _mapcount and the folio _large_mapcount
+ * advance by @count; _nr_pages_mapped (kernel pages with >=1 sub-PTE) is bumped
+ * once, when @page takes its first sub-PTE (_mapcount -1 -> >=0).  The
+ * NR_{ANON,FILE}_MAPPED stat is MMUPAGE-granular, matching rss.  PTE level only
+ * (folios mapped at PTE level here are never PMD/entire-mapped, so the
+ * ENTIRELY_MAPPED interaction does not arise).
+ *
+ * The caller needs to hold the page table lock.
+ */
+void folio_add_rmap_subptes(struct folio *folio, struct page *page,
+		int count, struct vm_area_struct *vma)
+{
+	__folio_rmap_sanity_checks(folio, page, 1, PGTABLE_LEVEL_PTE);
+
+	if (!folio_test_large(folio)) {
+		atomic_add(count, &folio->_mapcount);
+	} else {
+		if (atomic_fetch_add(count, &page->_mapcount) == -1)
+			atomic_inc(&folio->_nr_pages_mapped);
+		folio_add_large_mapcount(folio, count, vma);
+	}
+	__folio_mod_stat(folio, count, 0);
+}
+
+/**
+ * folio_remove_rmap_subptes - remove @count MMUPAGE sub-PTE mappings of one
+ *			       kernel page (cluster) of @folio  [PGCL]
+ *
+ * Symmetric inverse of folio_add_rmap_subptes(); _nr_pages_mapped is
+ * decremented once, when @page loses its last sub-PTE (_mapcount -> -1).
+ */
+void folio_remove_rmap_subptes(struct folio *folio, struct page *page,
+		int count, struct vm_area_struct *vma)
+{
+	__folio_rmap_sanity_checks(folio, page, 1, PGTABLE_LEVEL_PTE);
+
+	if (!folio_test_large(folio)) {
+		atomic_sub(count, &folio->_mapcount);
+	} else {
+		folio_sub_large_mapcount(folio, count, vma);
+		if (atomic_sub_return(count, &page->_mapcount) == -1)
+			atomic_dec(&folio->_nr_pages_mapped);
+	}
+	__folio_mod_stat(folio, -count, 0);
+}
+#endif /* PAGE_MMUSHIFT */
+
 /**
  * folio_add_file_rmap_pmd - add a PMD mapping to a page range of a folio
  * @folio:	The folio to add the mapping to
