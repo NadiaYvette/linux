@@ -1905,7 +1905,7 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 	 * by keeping the batching logic separate.
 	 */
 	if (unlikely(folio_test_large(folio) && max_nr != 1) &&
-	    !(PAGE_MMUSHIFT && folio_test_anon(folio))) {
+	    !(PAGE_MMUSHIFT && (folio_test_anon(folio) || folio_test_large(folio)))) {
 		nr = folio_pte_batch(folio, pte, ptent, max_nr);
 		zap_present_folio_ptes(tlb, vma, folio, page, pte, ptent, nr,
 				       addr, details, rss, force_flush,
@@ -1916,11 +1916,15 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 	/*
 	 * PGCL batch: clear+TLB+rmap a run of contiguous sub-page PTEs
 	 * within one kernel page.  order-0 pages are not compound so
-	 * folio_pte_batch can't see them; large (mTHP/THP) anon folios are
-	 * routed here too (the upstream folio_pte_batch fast path above is
-	 * disabled for PGCL anon) so the rmap unit matches the map side.
+	 * folio_pte_batch can't see them; large (mTHP/THP) folios — anon AND
+	 * file — are routed here (the upstream folio_pte_batch fast path above
+	 * is disabled for PGCL large folios) so the rmap unit matches the map
+	 * side: one kernel page == one mapping (Contract A).  order-0 anon with
+	 * a multi-sub-PTE run also lands here for per-sub-PTE counting; order-0
+	 * file keeps the nr==1 fast path below (per-sub-PTE, self-consistent).
 	 */
-	if ((max_nr > 1 || folio_test_large(folio)) && folio_test_anon(folio)) {
+	if (folio_test_large(folio) ||
+	    (folio_test_anon(folio) && max_nr > 1)) {
 		nr = pgcl_pte_batch(ptent, pte, max_nr);
 		/*
 		 * Large anon folios MUST take this kernel-page-edge path even for
@@ -1936,7 +1940,7 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 			int i;
 
 			clear_full_ptes(mm, addr, pte, nr, tlb->fullmm);
-			rss[MM_ANONPAGES] -= nr;
+			rss[mm_counter(folio)] -= nr;
 			arch_check_zapped_pte(vma, ptent);
 			tlb_remove_tlb_entries(tlb, pte, nr, addr);
 
@@ -1971,34 +1975,52 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 				unsigned int idx = (addr >> MMUPAGE_SHIFT) &
 						   (PTRS_PER_PTE - 1);
 				long base_idx = (long)idx - (long)psub;
-				bool extends_fwd =
+				bool straddles = base_idx < 0 ||
 					base_idx + PAGE_MMUCOUNT > PTRS_PER_PTE;
 				pte_t *base = pte - psub;
 				bool any_present = false;
 				int j;
 
 				/*
-				 * Straddle case: if this kernel page extends past this
-				 * pte table into the next, its tail sub-PTEs (and hence
-				 * the single remove) belong to the next table's run, so
-				 * skip firing here.  Scan only this table's slots — the
-				 * page's sub-0 may sit in the previous (now-unmapped)
-				 * table when base_idx < 0.
+				 * A straddling kernel page (its PAGE_MMUCOUNT sub-PTEs
+				 * span two pte tables) can only arise for file folios
+				 * with a non-cluster-aligned pgoff; anon (pgoff 0)
+				 * never straddles since PAGE_MMUCOUNT divides
+				 * PTRS_PER_PTE.  A single per-cluster (Contract A)
+				 * remove cannot be anchored within one table for such a
+				 * page, so fall back to Option A — one rmap event per
+				 * sub-PTE.  This matches set_pte_range's add side, which
+				 * likewise uses per-sub-PTE counting on straddle, so
+				 * each straddling cluster stays self-consistent
+				 * (+1/-1 per PTE).
 				 */
-				for (j = 0; j < PAGE_MMUCOUNT; j++) {
-					long t = base_idx + j;
-					pte_t pj;
+				if (straddles) {
+					for (i = 0; i < nr; i++)
+						folio_remove_rmap_pte(folio, page, vma);
+				} else {
+					/*
+					 * Non-straddle (common): the kernel page's full
+					 * window is in this table.  Fire one rmap event
+					 * iff this run cleared the LAST present sub-PTE
+					 * (the run is already cleared above, so cleared
+					 * slots read not-present).
+					 */
+					for (j = 0; j < PAGE_MMUCOUNT; j++) {
+						long t = base_idx + j;
+						pte_t pj;
 
-					if (t < 0 || t >= PTRS_PER_PTE)
-						continue;
-					pj = ptep_get(base + j);
-					if (pte_present(pj) && pte_pfn(pj) == kpfn) {
-						any_present = true;
-						break;
+						if (t < 0 || t >= PTRS_PER_PTE)
+							continue;
+						pj = ptep_get(base + j);
+						if (pte_present(pj) &&
+						    pte_pfn(pj) == kpfn) {
+							any_present = true;
+							break;
+						}
 					}
+					if (!any_present)
+						folio_remove_rmap_pte(folio, page, vma);
 				}
-				if (!extends_fwd && !any_present)
-					folio_remove_rmap_pte(folio, page, vma);
 			} else {
 				for (i = 0; i < nr; i++)
 					folio_remove_rmap_pte(folio, page, vma);
@@ -6416,7 +6438,62 @@ void set_pte_range(struct vm_fault *vmf, struct folio *folio,
 		folio_add_new_anon_rmap(folio, vma, addr, RMAP_EXCLUSIVE);
 		folio_add_lru_vma(folio, vma);
 	} else {
-		folio_add_file_rmap_ptes(folio, page, nr, vma);
+#if PAGE_MMUSHIFT
+		/*
+		 * PGCL Contract A: a large folio's mapcount is kept in
+		 * kernel-page units (one kernel page == one mapping).  This is
+		 * the single-sub-PTE (fallback) fault of a large *file* folio —
+		 * a kernel page that may already have sibling sub-PTEs mapped
+		 * from earlier faults.  Fire the rmap add only when this is the
+		 * FIRST present sub-PTE of the kernel page (symmetric mirror of
+		 * the last-present scan in zap_present_ptes), so the count is
+		 * one-per-kernel-page however many of its PAGE_MMUCOUNT sub-PTEs
+		 * fault in.  Our own slot is not yet set (set_ptes is below) so
+		 * it reads not-present and is naturally excluded.  Edge-detect
+		 * by PHYSICAL sub-index so a MMUPAGE-aligned (not kernel-page-
+		 * aligned) mapping anchors on the kernel page's physical sub-0.
+		 * The eager nr>1 path and order-0 folios keep their existing
+		 * (already-consistent) counting via folio_add_file_rmap_ptes().
+		 */
+		if (nr == 1 && folio_test_large(folio)) {
+			unsigned long mmu_step = __phys_to_pte_val(MMUPAGE_SIZE);
+			unsigned int psub = (unsigned int)((pte_val(entry) / mmu_step) &
+							   (PAGE_MMUCOUNT - 1));
+			unsigned int slot = (addr >> MMUPAGE_SHIFT) &
+					    (PTRS_PER_PTE - 1);
+			long base_idx = (long)slot - (long)psub;
+			bool straddles = base_idx < 0 ||
+					 base_idx + PAGE_MMUCOUNT > PTRS_PER_PTE;
+			unsigned long kpfn = pte_pfn(entry);
+			pte_t *base = vmf->pte - psub;
+			bool any_present = false;
+			int j;
+
+			for (j = 0; j < PAGE_MMUCOUNT; j++) {
+				long t = base_idx + j;
+				pte_t pj;
+
+				if (t < 0 || t >= PTRS_PER_PTE)
+					continue;
+				pj = ptep_get(base + j);
+				if (pte_present(pj) && pte_pfn(pj) == kpfn) {
+					any_present = true;
+					break;
+				}
+			}
+			/*
+			 * Non-straddle: fire iff first present sub-PTE.  Straddle
+			 * (rare: a non-cluster-aligned mmap whose kernel page
+			 * crosses a PMD): fail SAFE — fire per sub-PTE (may
+			 * over-count -> page leak, never under-count -> premature
+			 * free); the cross-table anchor lands with the symmetric
+			 * zap straddle fix.
+			 */
+			if (straddles || !any_present)
+				folio_add_file_rmap_pte(folio, page, vma);
+		} else
+#endif
+			folio_add_file_rmap_ptes(folio, page, nr, vma);
 	}
 	set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr_ptes);
 
