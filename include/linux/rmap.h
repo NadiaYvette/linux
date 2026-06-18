@@ -144,9 +144,16 @@ static inline void __folio_large_mapcount_sanity_checks(const struct folio *foli
 	 * folio in a single MM as "exclusively mapped". This is primarily
 	 * a check on 32bit, where we currently reduce the size of the per-MM
 	 * mapcount to a short.
+	 *
+	 * PGCL: mapcount counts hardware (MMUPAGE) PTEs, so a fully PTE-mapped
+	 * folio has folio_large_nr_pages() * PAGE_MMUCOUNT mappings and a
+	 * single add may carry up to one cluster's PAGE_MMUCOUNT sub-PTEs.
+	 * PAGE_MMUCOUNT == 1 at PAGE_MMUSHIFT == 0, so this is the mainline
+	 * bound there (Newton limit).
 	 */
-	VM_WARN_ON_ONCE(diff > folio_large_nr_pages(folio));
-	VM_WARN_ON_ONCE(folio_large_nr_pages(folio) - 1 > MM_ID_MAPCOUNT_MAX);
+	VM_WARN_ON_ONCE(diff > folio_large_nr_pages(folio) * PAGE_MMUCOUNT);
+	VM_WARN_ON_ONCE(folio_large_nr_pages(folio) * PAGE_MMUCOUNT - 1 >
+			MM_ID_MAPCOUNT_MAX);
 
 	VM_WARN_ON_ONCE(folio_mm_id(folio, 0) == MM_ID_DUMMY &&
 			folio->_mm_id_mapcount[0] != -1);

@@ -484,14 +484,32 @@ static bool remove_migration_pte(struct folio *folio,
 							MMUPAGE_SHIFT) &
 							(PAGE_MMUCOUNT - 1)),
 						true);
-#else
-				bool first_frag = true;
 #endif
 				if (folio_test_anon(folio)) {
 					if (folio_test_large(folio)) {
-						if (first_frag)
-							folio_add_anon_rmap_pte(folio, new, vma,
+#if PAGE_MMUSHIFT
+							/*
+							 * MMUPAGE: restore nr_pages sub-PTE counts for this
+							 * yield.  On the first restored fragment of the kernel
+							 * page, folio_add_anon_rmap_pte sets the per-cluster
+							 * PageAnonExclusive flag and accounts one sub-PTE; the
+							 * rest go through the bare count helper (the per-page -1
+							 * sentinel keeps _nr_pages_mapped right).  A later
+							 * fragment is defensive: migration restore is normally
+							 * single-yield per cluster.
+							 */
+							if (first_frag) {
+								folio_add_anon_rmap_pte(folio, new, vma,
 										pvmw.address, rmap_flags);
+								if (nr_pages > 1)
+									folio_add_rmap_subptes(folio, new,
+											nr_pages - 1, vma);
+							} else
+								folio_add_rmap_subptes(folio, new, nr_pages, vma);
+#else
+							folio_add_anon_rmap_pte(folio, new, vma,
+									pvmw.address, rmap_flags);
+#endif
 					} else
 						for (i = 0; i < nr_pages; i++)
 							folio_add_anon_rmap_pte(folio, new, vma,
@@ -499,8 +517,12 @@ static bool remove_migration_pte(struct folio *folio,
 										rmap_flags);
 				} else {
 					if (folio_test_large(folio)) {
-						if (first_frag)
+#if PAGE_MMUSHIFT
+							/* MMUPAGE: restore nr_pages file sub-PTEs. */
+							folio_add_rmap_subptes(folio, new, nr_pages, vma);
+#else
 							folio_add_file_rmap_pte(folio, new, vma);
+#endif
 					} else
 						for (i = 0; i < nr_pages; i++)
 							folio_add_file_rmap_pte(folio, new, vma);

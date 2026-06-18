@@ -2498,34 +2498,20 @@ discard:
 			hugetlb_remove_rmap(folio);
 		} else if (folio_test_large(folio)) {
 			/*
-			 * PGCL Contract A (large folios): mapcount counts
-			 * mappings at kernel-page granularity — one rmap event
-			 * per kernel page.  A gapped cluster has its
-			 * PAGE_MMUCOUNT sub-PTEs split across several PVMW yields;
-			 * firing per yield would over-remove and underflow the
-			 * folio counters (and a migration src/dst asymmetry then
-			 * leaves a stale large_mapcount).  Fire only when this
-			 * yield cleared the LAST present sub-PTE of the kernel
-			 * page: this yield's PTEs are already cleared above, so
-			 * scan the full window and emit the event iff none remain
-			 * present.  Mirror of the zap last-present edge.  Non-PGCL:
-			 * one PTE per kernel page so the window has a single slot.
+			 * PGCL MMUPAGE: mapcount counts mappings at hardware
+			 * (MMUPAGE) granularity — one count per sub-PTE.  This
+			 * yield cleared nr_pages (== pvmw.nr_mmupages) sub-PTEs
+			 * of one cluster page, so remove exactly that many
+			 * sub-PTE mappings.  A gapped cluster whose sub-PTEs are
+			 * split across several PVMW yields removes its present
+			 * sub-PTEs per yield, summing to the correct total; the
+			 * helper's per-page -1 sentinel detects first/last
+			 * (_nr_pages_mapped) across partial yields, so no
+			 * last-present scan is needed.  Non-PGCL: one PTE per
+			 * kernel page, nr_pages == 1, so this is one removal.
 			 */
 #if PAGE_MMUSHIFT
-			/*
-			 * Anchor on the physical sub-index of the cleared run
-			 * (pteval holds the old PTE for the present case), match
-			 * pte_pfn, and bound to this pte table — robust to
-			 * MMUPAGE-misaligned mappings and PMD-boundary straddles.
-			 */
-			unsigned int psub = (unsigned int)((pte_val(pteval) /
-				__phys_to_pte_val(MMUPAGE_SIZE)) &
-				(PAGE_MMUCOUNT - 1));
-
-			if (pgcl_rmap_fire_kpage_event(pvmw.pte, address,
-						       page_to_pfn(subpage),
-						       psub, false))
-				folio_remove_rmap_pte(folio, subpage, vma);
+			folio_remove_rmap_subptes(folio, subpage, nr_pages, vma);
 #else
 			folio_remove_rmap_pte(folio, subpage, vma);
 #endif
@@ -2957,32 +2943,18 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 			hugetlb_remove_rmap(folio);
 		} else if (folio_test_large(folio)) {
 			/*
-			 * PGCL Contract A (large folios): one rmap event per
-			 * kernel page.  A gapped cluster's PAGE_MMUCOUNT sub-PTEs
-			 * are split across several PVMW yields; firing per yield
-			 * over-removes.  Because migration on a gapped folio
-			 * removes from the src folio here but re-adds to the dst
-			 * folio in remove_migration_pte, the per-yield error does
-			 * not self-cancel and leaks a nonzero large_mapcount.  This
-			 * yield's PTEs are now migration entries (non-present), so
-			 * fire only when no sub-PTE of the kernel page remains
-			 * present — the last-present edge, mirroring zap and
-			 * try_to_unmap_one.  Non-PGCL: a single-slot window.
+			 * PGCL MMUPAGE: one count per sub-PTE.  This yield turned
+			 * nr_pages (== pvmw.nr_mmupages) sub-PTEs of one cluster
+			 * page into migration entries, so remove exactly that many
+			 * sub-PTE mappings from the src folio.  remove_migration_pte
+			 * re-adds the same per-yield count to the dst folio, so the
+			 * src/dst accounting matches even for a gapped cluster whose
+			 * sub-PTEs span several yields; the helper's per-page -1
+			 * sentinel handles first/last (_nr_pages_mapped).  Non-PGCL:
+			 * nr_pages == 1, one removal.
 			 */
 #if PAGE_MMUSHIFT
-			/*
-			 * Physical-sub-index anchor (pteval is the old PTE; the
-			 * migration entry lives in swp_pte), pte_pfn match, pte
-			 * table bounded — handles misaligned/straddling pages.
-			 */
-			unsigned int psub = (unsigned int)((pte_val(pteval) /
-				__phys_to_pte_val(MMUPAGE_SIZE)) &
-				(PAGE_MMUCOUNT - 1));
-
-			if (pgcl_rmap_fire_kpage_event(pvmw.pte, address,
-						       page_to_pfn(subpage),
-						       psub, false))
-				folio_remove_rmap_pte(folio, subpage, vma);
+			folio_remove_rmap_subptes(folio, subpage, nr_pages, vma);
 #else
 			folio_remove_rmap_pte(folio, subpage, vma);
 #endif

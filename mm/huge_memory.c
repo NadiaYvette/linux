@@ -3201,14 +3201,25 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 
 			folio_add_anon_rmap_ptes(folio, page, HPAGE_PMD_NR,
 						 vma, haddr, rmap_flags);
+#if PAGE_MMUSHIFT
 			/*
-			 * PGCL Contract A (large folios): mapcount stays in
-			 * kernel-page units, so folio_add_anon_rmap_ptes(..,
-			 * HPAGE_PMD_NR, ..) recorded the right count and the
-			 * post-split PTE-mapped folio is zapped one rmap event
-			 * per kernel page.  The HPAGE_PMD_MMUNR MMUPAGE PTE
-			 * references were taken via folio_ref_add above.
+			 * PGCL MMUPAGE: the PMD->PTE split maps each of the
+			 * HPAGE_PMD_NR clusters by PAGE_MMUCOUNT sub-PTEs.
+			 * folio_add_anon_rmap_ptes() accounted one sub-PTE per
+			 * cluster (and propagated PageAnonExclusive); add the
+			 * remaining PAGE_MMUCOUNT-1 per cluster so the mapcount
+			 * matches the MMUPAGE zap/reclaim/migrate removal.  The
+			 * HPAGE_PMD_MMUNR PTE references were taken via
+			 * folio_ref_add above.
 			 */
+			{
+				int c;
+
+				for (c = 0; c < HPAGE_PMD_NR; c++)
+					folio_add_rmap_subptes(folio, page + c,
+							PAGE_MMUCOUNT - 1, vma);
+			}
+#endif
 		}
 	} else {
 		/*
@@ -3276,11 +3287,22 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 				rmap_flags |= RMAP_EXCLUSIVE;
 			folio_add_anon_rmap_ptes(folio, page, HPAGE_PMD_NR,
 						 vma, haddr, rmap_flags);
+#if PAGE_MMUSHIFT
 			/*
-			 * PGCL Contract A (large folios): kernel-page-unit
-			 * mapcount; no per-PTE fixup (refs taken per-PTE via
-			 * folio_ref_add above).  See the !freeze branch.
+			 * PGCL MMUPAGE: folio_add_anon_rmap_ptes() accounted one
+			 * sub-PTE per cluster; add the remaining PAGE_MMUCOUNT-1
+			 * per cluster so the PTE-mapped folio's mapcount matches
+			 * the MMUPAGE zap/reclaim/migrate removal (mirror of the
+			 * device-private !freeze branch above).
 			 */
+			{
+				int c;
+
+				for (c = 0; c < HPAGE_PMD_NR; c++)
+					folio_add_rmap_subptes(folio, page + c,
+							PAGE_MMUCOUNT - 1, vma);
+			}
+#endif
 		}
 	}
 
