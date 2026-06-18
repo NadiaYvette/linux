@@ -3457,7 +3457,7 @@ void btrfs_calculate_block_csum_folio(struct btrfs_fs_info *fs_info,
 	const u32 blocksize = fs_info->sectorsize;
 	const u32 step = min(blocksize, PAGE_SIZE);
 	const u32 nr_steps = blocksize / step;
-	phys_addr_t paddrs[BTRFS_MAX_BLOCKSIZE / PAGE_SIZE];
+	phys_addr_t paddrs[DIV_ROUND_UP(BTRFS_MAX_BLOCKSIZE, PAGE_SIZE)];
 
 	/* The full block must be inside the folio. */
 	ASSERT(offset_in_folio(folio, paddr) + blocksize <= folio_size(folio));

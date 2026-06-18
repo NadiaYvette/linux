@@ -178,7 +178,7 @@ static int btrfs_repair_eb_io_failure(const struct extent_buffer *eb,
 	struct btrfs_fs_info *fs_info = eb->fs_info;
 	const u32 step = min(fs_info->nodesize, PAGE_SIZE);
 	const u32 nr_steps = eb->len / step;
-	phys_addr_t paddrs[BTRFS_MAX_BLOCKSIZE / PAGE_SIZE];
+	phys_addr_t paddrs[DIV_ROUND_UP(BTRFS_MAX_BLOCKSIZE, PAGE_SIZE)];
 
 	if (sb_rdonly(fs_info->sb))
 		return -EROFS;

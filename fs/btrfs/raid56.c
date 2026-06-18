@@ -1656,7 +1656,7 @@ static void verify_bio_data_sectors(struct btrfs_raid_bio *rbio,
 	const u32 nr_steps = rbio->sector_nsteps;
 	int total_sector_nr = get_bio_sector_nr(rbio, bio);
 	u32 offset = 0;
-	phys_addr_t paddrs[BTRFS_MAX_BLOCKSIZE / PAGE_SIZE];
+	phys_addr_t paddrs[DIV_ROUND_UP(BTRFS_MAX_BLOCKSIZE, PAGE_SIZE)];
 	phys_addr_t paddr;
 
 	/* No data csum for the whole stripe, no need to verify. */

@@ -82,7 +82,7 @@ enum {
 int __init extent_buffer_init_cachep(void);
 void __cold extent_buffer_free_cachep(void);
 
-#define INLINE_EXTENT_BUFFER_PAGES     (BTRFS_MAX_METADATA_BLOCKSIZE / PAGE_SIZE)
+#define INLINE_EXTENT_BUFFER_PAGES     DIV_ROUND_UP(BTRFS_MAX_METADATA_BLOCKSIZE, PAGE_SIZE)
 struct extent_buffer {
 	u64 start;
 	u32 len;

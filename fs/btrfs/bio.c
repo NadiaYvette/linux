@@ -189,7 +189,7 @@ static void btrfs_end_repair_bio(struct btrfs_bio *repair_bbio,
 	const u64 logical = repair_bbio->saved_iter.bi_sector << SECTOR_SHIFT;
 	const u32 nr_steps = repair_bbio->saved_iter.bi_size / step;
 	int mirror = repair_bbio->mirror_num;
-	phys_addr_t paddrs[BTRFS_MAX_BLOCKSIZE / PAGE_SIZE];
+	phys_addr_t paddrs[DIV_ROUND_UP(BTRFS_MAX_BLOCKSIZE, PAGE_SIZE)];
 	phys_addr_t paddr;
 	unsigned int slot = 0;
 
@@ -310,7 +310,7 @@ static void btrfs_check_read_bio(struct btrfs_bio *bbio, struct btrfs_device *de
 	struct bvec_iter *iter = &bbio->saved_iter;
 	blk_status_t status = bbio->bio.bi_status;
 	struct btrfs_failed_bio *fbio = NULL;
-	phys_addr_t paddrs[BTRFS_MAX_BLOCKSIZE / PAGE_SIZE];
+	phys_addr_t paddrs[DIV_ROUND_UP(BTRFS_MAX_BLOCKSIZE, PAGE_SIZE)];
 	phys_addr_t paddr;
 	u32 offset = 0;
 
