@@ -10,7 +10,16 @@
 
 #include <vdso/page.h>
 
-#define PTE_MASK	PAGE_MASK
+/*
+ * Mask of the physical-frame bits in a PTE.  These are MMU-page granular,
+ * not PAGE granular: under page clustering a PAGE spans PAGE_MMUCOUNT MMU
+ * pages and a sub-PTE's frame number carries the sub-page offset in bits
+ * [PAGE_SHIFT-1 : MMUPAGE_SHIFT].  Using PAGE_MASK here would drop that
+ * offset across a pte_modify() (e.g. mprotect), collapsing every sub-PTE
+ * in a cluster onto the cluster base.  Collapses to PAGE_MASK at
+ * PAGE_MMUSHIFT=0.
+ */
+#define PTE_MASK	MMUPAGE_MASK
 
 #if defined(CONFIG_HUGETLB_PAGE_SIZE_64K)
 #define HPAGE_SHIFT	16
