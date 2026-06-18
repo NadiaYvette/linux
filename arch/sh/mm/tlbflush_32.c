@@ -22,7 +22,16 @@ void local_flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
 		unsigned long saved_asid = MMU_NO_ASID;
 
 		asid = cpu_asid(cpu, vma->vm_mm);
-		page &= PAGE_MASK;
+		/*
+		 * Each SH-4 UTLB entry maps one MMU page, so mask to
+		 * MMUPAGE_MASK rather than PAGE_MASK: under page clustering a
+		 * PAGE spans PAGE_MMUCOUNT MMU pages, and rounding down to the
+		 * cluster base would flush a sibling sub-page's entry instead
+		 * of this one.  The stale entry would then alias a freshly
+		 * loaded entry for the same VPN and trip a TLB multiple-hit (a
+		 * reset-class exception on SH-4).
+		 */
+		page &= MMUPAGE_MASK;
 
 		local_irq_save(flags);
 		if (vma->vm_mm != current->mm) {
@@ -47,7 +56,8 @@ void local_flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 		int size;
 
 		local_irq_save(flags);
-		size = (end - start + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
+		/* Count/iterate in MMU pages: one UTLB entry per MMU page. */
+		size = (end - start + (MMUPAGE_SIZE - 1)) >> MMUPAGE_SHIFT;
 		if (size > (MMU_NTLB_ENTRIES/4)) { /* Too many TLB to flush */
 			cpu_context(cpu, mm) = NO_CONTEXT;
 			if (mm == current->mm)
@@ -57,16 +67,16 @@ void local_flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 			unsigned long saved_asid = MMU_NO_ASID;
 
 			asid = cpu_asid(cpu, mm);
-			start &= PAGE_MASK;
-			end += (PAGE_SIZE - 1);
-			end &= PAGE_MASK;
+			start &= MMUPAGE_MASK;
+			end += (MMUPAGE_SIZE - 1);
+			end &= MMUPAGE_MASK;
 			if (mm != current->mm) {
 				saved_asid = get_asid();
 				set_asid(asid);
 			}
 			while (start < end) {
 				local_flush_tlb_one(asid, start);
-				start += PAGE_SIZE;
+				start += MMUPAGE_SIZE;
 			}
 			if (saved_asid != MMU_NO_ASID)
 				set_asid(saved_asid);
@@ -82,7 +92,8 @@ void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
 	int size;
 
 	local_irq_save(flags);
-	size = (end - start + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
+	/* Count/iterate in MMU pages: one UTLB entry per MMU page. */
+	size = (end - start + (MMUPAGE_SIZE - 1)) >> MMUPAGE_SHIFT;
 	if (size > (MMU_NTLB_ENTRIES/4)) { /* Too many TLB to flush */
 		local_flush_tlb_all();
 	} else {
@@ -90,13 +101,13 @@ void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
 		unsigned long saved_asid = get_asid();
 
 		asid = cpu_asid(cpu, &init_mm);
-		start &= PAGE_MASK;
-		end += (PAGE_SIZE - 1);
-		end &= PAGE_MASK;
+		start &= MMUPAGE_MASK;
+		end += (MMUPAGE_SIZE - 1);
+		end &= MMUPAGE_MASK;
 		set_asid(asid);
 		while (start < end) {
 			local_flush_tlb_one(asid, start);
-			start += PAGE_SIZE;
+			start += MMUPAGE_SIZE;
 		}
 		set_asid(saved_asid);
 	}
