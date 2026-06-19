@@ -3235,8 +3235,16 @@ static void rmap_walk_anon(struct folio *folio,
 
 	pgoff_start = folio_pgoff(folio);
 	pgoff_end = pgoff_start + folio_nr_pages(folio) - 1;
+	/*
+	 * Like the file case: the anon_vma interval tree is keyed in MMUPAGE
+	 * units (avc_*_pgoff -> vma_*_pgoff), but folio_pgoff()/folio_nr_pages()
+	 * count PAGE-sized clusters.  Query the folio's MMUPAGE span so the tree
+	 * returns exactly the VMAs vma_address() can resolve.  Identity at
+	 * PAGE_MMUSHIFT==0.
+	 */
 	anon_vma_interval_tree_foreach(avc, &anon_vma->rb_root,
-			pgoff_start, pgoff_end) {
+			pgoff_page_to_mmu(pgoff_start),
+			pgoff_page_to_mmu(pgoff_end + 1) - 1) {
 		struct vm_area_struct *vma = avc->vma;
 		unsigned long address = vma_address(vma, pgoff_start,
 				folio_nr_pages(folio));
@@ -3300,8 +3308,19 @@ static void __rmap_walk_file(struct folio *folio, struct address_space *mapping,
 		i_mmap_lock_read(mapping);
 	}
 lookup:
+	/*
+	 * The i_mmap interval tree is keyed in MMUPAGE units (vma_start_pgoff /
+	 * vma_last_pgoff derive from vm_pgoff and vma_pages(), both
+	 * MMUPAGE-granular), whereas pgoff_start/pgoff_end count PAGE-sized
+	 * clusters.  Convert the query to the folio's MMUPAGE span so the
+	 * interval-overlap test selects exactly the VMAs that vma_address() can
+	 * resolve; a cluster-unit key may otherwise spuriously match a VMA that
+	 * does not map the folio, making vma_address() return -EFAULT (BUG).
+	 * pgoff_page_to_mmu() is the identity at PAGE_MMUSHIFT==0.
+	 */
 	vma_interval_tree_foreach(vma, &mapping->i_mmap,
-			pgoff_start, pgoff_end) {
+			pgoff_page_to_mmu(pgoff_start),
+			pgoff_page_to_mmu(pgoff_end + 1) - 1) {
 		unsigned long address = vma_address(vma, pgoff_start, nr_pages);
 
 		VM_BUG_ON_VMA(address == -EFAULT, vma);
