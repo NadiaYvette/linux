@@ -188,6 +188,12 @@ int drm_gem_object_init(struct drm_device *dev, struct drm_gem_object *obj,
 	struct file *filp;
 	const vma_flags_t flags = mk_vma_flags(VMA_NORESERVE_BIT);
 
+	/*
+	 * PGCL: round up to the cluster up-front so the shmem backing below is
+	 * sized to agree with obj->size (see drm_gem_private_object_init).
+	 */
+	size = PAGE_ALIGN(size);
+
 	drm_gem_private_object_init(dev, obj, size);
 
 	huge_mnt = drm_gem_get_huge_mnt(dev);
@@ -219,7 +225,16 @@ EXPORT_SYMBOL(drm_gem_object_init);
 void drm_gem_private_object_init(struct drm_device *dev,
 				 struct drm_gem_object *obj, size_t size)
 {
-	BUG_ON((size & (PAGE_SIZE - 1)) != 0);
+	/*
+	 * PGCL: GEM objects are backed and accounted in PAGE_SIZE (cluster)
+	 * units -- there is one struct page per cluster, and the backing page
+	 * array, the LRU and the shrinker all use obj->size >> PAGE_SHIFT.
+	 * Callers size objects in MMUPAGE (hardware-page) units, which need not
+	 * be cluster-aligned (e.g. i915 internal scratch objects), so round up
+	 * to the cluster to keep those invariants consistent rather than BUG.
+	 * Identity when PAGE_MMUSHIFT == 0 (size is already PAGE-aligned).
+	 */
+	size = PAGE_ALIGN(size);
 
 	obj->dev = dev;
 	obj->filp = NULL;
