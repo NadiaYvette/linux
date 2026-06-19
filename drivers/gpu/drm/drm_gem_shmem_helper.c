@@ -559,14 +559,15 @@ static void drm_gem_shmem_record_mkwrite(struct vm_fault *vmf)
 	struct vm_area_struct *vma = vmf->vma;
 	struct drm_gem_object *obj = vma->vm_private_data;
 	struct drm_gem_shmem_object *shmem = to_drm_gem_shmem_obj(obj);
-	loff_t num_pages = obj->size >> PAGE_SHIFT;
-	pgoff_t page_offset = vmf->pgoff - vma->vm_pgoff; /* page offset within VMA */
+	loff_t num_pages = obj->size >> PAGE_SHIFT;	/* clusters (struct pages) */
+	pgoff_t page_offset = vmf->pgoff - vma->vm_pgoff; /* MMUPAGE offset in VMA */
+	unsigned long cluster = page_offset >> PAGE_MMUSHIFT;
 
-	if (drm_WARN_ON(obj->dev, !shmem->pages || page_offset >= num_pages))
+	if (drm_WARN_ON(obj->dev, !shmem->pages || cluster >= num_pages))
 		return;
 
 	file_update_time(vma->vm_file);
-	folio_mark_dirty(page_folio(shmem->pages[page_offset]));
+	folio_mark_dirty(page_folio(shmem->pages[cluster]));
 }
 
 static vm_fault_t try_insert_pfn(struct vm_fault *vmf, unsigned int order,
@@ -576,6 +577,15 @@ static vm_fault_t try_insert_pfn(struct vm_fault *vmf, unsigned int order,
 		return vmf_insert_pfn(vmf->vma, vmf->address, pfn);
 #ifdef CONFIG_ARCH_SUPPORTS_PMD_PFNMAP
 	} else if (order == PMD_ORDER) {
+#if PAGE_MMUSHIFT
+		/*
+		 * PGCL: pfn is MMUPAGE-granular and the object is cluster-
+		 * backed; the huge-PMD pfnmap math below assumes a 1:1
+		 * page/pfn world.  Fall back to PTE faults, as the TTM fault
+		 * path does under clustering.
+		 */
+		return VM_FAULT_FALLBACK;
+#else
 		unsigned long paddr = pfn << PAGE_SHIFT;
 		bool aligned = (vmf->address & ~PMD_MASK) == (paddr & ~PMD_MASK);
 
@@ -599,6 +609,7 @@ static vm_fault_t try_insert_pfn(struct vm_fault *vmf, unsigned int order,
 
 			return ret;
 		}
+#endif /* PAGE_MMUSHIFT */
 #endif
 	}
 	return VM_FAULT_FALLBACK;
@@ -610,10 +621,11 @@ static vm_fault_t drm_gem_shmem_any_fault(struct vm_fault *vmf, unsigned int ord
 	struct drm_gem_object *obj = vma->vm_private_data;
 	struct drm_device *dev = obj->dev;
 	struct drm_gem_shmem_object *shmem = to_drm_gem_shmem_obj(obj);
-	loff_t num_pages = obj->size >> PAGE_SHIFT;
+	loff_t num_pages = obj->size >> PAGE_SHIFT;	/* clusters (struct pages) */
 	vm_fault_t ret = VM_FAULT_SIGBUS;
 	struct page **pages = shmem->pages;
-	pgoff_t page_offset = vmf->pgoff - vma->vm_pgoff; /* page offset within VMA */
+	pgoff_t page_offset = vmf->pgoff - vma->vm_pgoff; /* MMUPAGE offset in VMA */
+	unsigned long cluster = page_offset >> PAGE_MMUSHIFT;
 	struct page *page;
 	struct folio *folio;
 	unsigned long pfn;
@@ -623,16 +635,21 @@ static vm_fault_t drm_gem_shmem_any_fault(struct vm_fault *vmf, unsigned int ord
 
 	dma_resv_lock(obj->resv, NULL);
 
-	if (page_offset >= num_pages || drm_WARN_ON_ONCE(dev, !shmem->pages) ||
+	if (cluster >= num_pages || drm_WARN_ON_ONCE(dev, !shmem->pages) ||
 	    shmem->madv < 0)
 		goto out;
 
-	page = pages[page_offset];
+	page = pages[cluster];
 	if (drm_WARN_ON_ONCE(dev, !page))
 		goto out;
 	folio = page_folio(page);
 
-	pfn = page_to_pfn(page);
+	/*
+	 * PGCL: one struct page per cluster; vmf_insert_pfn() takes an
+	 * MMUPAGE-granular pfn, so shift the cluster pfn up and add the
+	 * sub-page (MMU page) index within the cluster (see ttm_bo_vm.c).
+	 */
+	pfn = (page_to_pfn(page) << PAGE_MMUSHIFT) + (page_offset & (PAGE_MMUCOUNT - 1));
 
 	ret = try_insert_pfn(vmf, order, pfn);
 	if (ret == VM_FAULT_NOPAGE)
