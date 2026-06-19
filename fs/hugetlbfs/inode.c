@@ -126,8 +126,8 @@ static int hugetlbfs_file_mmap(struct file *file, struct vm_area_struct *vma)
 			return -EINVAL;
 	}
 
-	/* must be huge page aligned */
-	if (vma->vm_pgoff & (~huge_page_mask(h) >> PAGE_SHIFT))
+	/* must be huge page aligned (vm_pgoff is in MMUPAGE units under PGCL) */
+	if (vma->vm_pgoff & (~huge_page_mask(h) >> MMUPAGE_SHIFT))
 		return -EINVAL;
 
 	vma_len = (loff_t)(vma->vm_end - vma->vm_start);

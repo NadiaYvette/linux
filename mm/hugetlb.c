@@ -1012,7 +1012,7 @@ static pgoff_t vma_hugecache_offset(struct hstate *h,
 			struct vm_area_struct *vma, unsigned long address)
 {
 	return ((address - vma->vm_start) >> huge_page_shift(h)) +
-			(vma->vm_pgoff >> huge_page_order(h));
+			(vma->vm_pgoff >> (huge_page_shift(h) - MMUPAGE_SHIFT));
 }
 
 /*
@@ -5367,11 +5367,13 @@ static void unmap_ref_private(struct mm_struct *mm, struct vm_area_struct *vma,
 	pgoff_t pgoff;
 
 	/*
-	 * vm_pgoff is in PAGE_SIZE units, hence the different calculation
-	 * from page cache lookup which is in HPAGE_SIZE units.
+	 * vm_pgoff is in MMUPAGE_SIZE units under page clustering (it keys the
+	 * MMUPAGE-granular i_mmap interval tree we walk below), hence the
+	 * MMUPAGE_SHIFT; this differs from the page cache lookup, which is in
+	 * HPAGE_SIZE units.  Identity at PAGE_MMUSHIFT==0.
 	 */
 	address = address & huge_page_mask(h);
-	pgoff = ((address - vma->vm_start) >> PAGE_SHIFT) +
+	pgoff = ((address - vma->vm_start) >> MMUPAGE_SHIFT) +
 			vma->vm_pgoff;
 	mapping = vma->vm_file->f_mapping;
 
@@ -5614,7 +5616,8 @@ bool hugetlbfs_pagecache_present(struct hstate *h,
 				 struct vm_area_struct *vma, unsigned long address)
 {
 	struct address_space *mapping = vma->vm_file->f_mapping;
-	pgoff_t idx = linear_page_index(vma, address);
+	/* page cache is cluster (PAGE)-indexed; linear_page_index is MMUPAGE */
+	pgoff_t idx = pgoff_mmu_to_page(linear_page_index(vma, address));
 	struct folio *folio;
 
 	folio = filemap_get_folio(mapping, idx);
@@ -6770,7 +6773,7 @@ static unsigned long page_table_shareable(struct vm_area_struct *svma,
 				struct vm_area_struct *vma,
 				unsigned long addr, pgoff_t idx)
 {
-	unsigned long saddr = ((idx - svma->vm_pgoff) << PAGE_SHIFT) +
+	unsigned long saddr = ((idx - svma->vm_pgoff) << MMUPAGE_SHIFT) +
 				svma->vm_start;
 	unsigned long sbase = saddr & PUD_MASK;
 	unsigned long s_end = sbase + PUD_SIZE;
@@ -6855,7 +6858,7 @@ pte_t *huge_pmd_share(struct mm_struct *mm, struct vm_area_struct *vma,
 		      unsigned long addr, pud_t *pud)
 {
 	struct address_space *mapping = vma->vm_file->f_mapping;
-	pgoff_t idx = ((addr - vma->vm_start) >> PAGE_SHIFT) +
+	pgoff_t idx = ((addr - vma->vm_start) >> MMUPAGE_SHIFT) +
 			vma->vm_pgoff;
 	struct vm_area_struct *svma;
 	unsigned long saddr;
