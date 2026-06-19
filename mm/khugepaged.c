@@ -1911,6 +1911,20 @@ static enum scan_result collapse_file(struct mm_struct *mm, unsigned long addr,
 	int nr_none = 0;
 	bool is_shmem = shmem_file(file);
 
+#if PAGE_MMUSHIFT
+	/*
+	 * See comment in hpage_collapse_scan_pmd(): file/shmem THP collapse is
+	 * not yet ported to sub-PAGE (MMUPAGE) granularity.  Under PGCL the page
+	 * cache xarray is cluster (PAGE)-indexed and rmap mapcount + MM_FILEPAGES
+	 * rss are MMUPAGE-granular, but this collapser counts in HPAGE_PMD_NR /
+	 * PAGE_SIZE units -- corrupting the file folio mapcount/refcount and
+	 * leaking MM_FILEPAGES rss (observed: "Bad page map" mapcount underflow
+	 * and "Bad rss-counter state").  The HPAGE_PMD_NR-alignment VM_BUG_ON
+	 * below is itself the file-collapse #121 crash.  Disable until ported.
+	 */
+	return SCAN_FAIL;
+#endif
+
 	VM_BUG_ON(!IS_ENABLED(CONFIG_READ_ONLY_THP_FOR_FS) && !is_shmem);
 	VM_BUG_ON(start & (HPAGE_PMD_NR - 1));
 
