@@ -1358,7 +1358,7 @@ unsigned long drm_gem_get_unmapped_area(struct file *filp, unsigned long uaddr,
 	struct drm_gem_object *obj;
 	unsigned long ret;
 
-	obj = drm_gem_object_lookup_at_offset(filp, pgoff, len >> PAGE_SHIFT);
+	obj = drm_gem_object_lookup_at_offset(filp, pgoff, len >> MMUPAGE_SHIFT);
 	if (IS_ERR(obj))
 		obj = NULL;
 
@@ -1400,7 +1400,7 @@ int drm_gem_mmap(struct file *filp, struct vm_area_struct *vma)
 		return PTR_ERR(obj);
 
 	ret = drm_gem_mmap_obj(obj,
-			       drm_vma_node_size(&obj->vma_node) << PAGE_SHIFT,
+			       drm_vma_node_size(&obj->vma_node) << MMUPAGE_SHIFT,
 			       vma);
 
 	drm_gem_object_put(obj);

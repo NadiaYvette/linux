@@ -223,7 +223,7 @@ static inline void drm_vma_node_unmap(struct drm_vma_offset_node *node,
 	if (drm_mm_node_allocated(&node->vm_node))
 		unmap_mapping_range(file_mapping,
 				    drm_vma_node_offset_addr(node),
-				    drm_vma_node_size(node) << PAGE_SHIFT, 1);
+				    drm_vma_node_size(node) << MMUPAGE_SHIFT, 1);
 }
 
 /**
