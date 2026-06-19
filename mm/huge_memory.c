@@ -3133,7 +3133,14 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 			if (!folio_test_referenced(folio) && pmd_young(old_pmd))
 				folio_set_referenced(folio);
 			folio_remove_rmap_pmd(folio, page, vma);
-			add_mm_counter(mm, mm_counter_file(folio), -HPAGE_PMD_NR);
+			/*
+			 * PGCL: MM_FILEPAGES rss is MMUPAGE-granular and the
+			 * file-PMD-THP fault adds +HPAGE_PMD_MMUNR, so tear-down
+			 * must subtract HPAGE_PMD_MMUNR, not the cluster-count
+			 * HPAGE_PMD_NR (which leaks the rest of the PMD per split).
+			 * Matches the migration path below + zap_huge_pmd().
+			 */
+			add_mm_counter(mm, mm_counter_file(folio), -HPAGE_PMD_MMUNR);
 			folio_put(folio);
 			return;
 		}
