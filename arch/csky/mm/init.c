@@ -69,8 +69,29 @@ void __init mmu_init(unsigned long min_pfn, unsigned long max_pfn)
 	for (i = 0; i < PTRS_KERN_TABLE; i++)
 		set_pte(&kernel_pte_tables[i], __pte(_PAGE_GLOBAL));
 
-	for (i = min_pfn; i < max_pfn; i++)
-		set_pte(&kernel_pte_tables[i - PFN_DOWN(va_pa_offset)], pfn_pte(i, PAGE_KERNEL));
+	/*
+	 * Build the kernel direct map in the static kernel_pte_tables.
+	 *
+	 * The C-SKY MMU always maps MMUPAGE_SIZE (4KB) hardware pages, so the
+	 * page tables hold one entry per MMUPAGE.  Under page clustering
+	 * (PAGE_MMUSHIFT > 0) min_pfn/max_pfn and va_pa_offset count PAGE_SIZE
+	 * clusters, so iterate the corresponding MMUPAGE frames and emit one PTE
+	 * for each.  kernel_pte_tables is indexed in MMUPAGE units (entry j maps
+	 * the virtual page at PAGE_OFFSET + j * MMUPAGE_SIZE), so the index must
+	 * be the MMUPAGE distance from the direct-map base.  When PAGE_MMUSHIFT
+	 * == 0 this reduces to the original one-entry-per-PAGE loop.
+	 */
+	{
+		unsigned long base_mmupfn = va_pa_offset >> MMUPAGE_SHIFT;
+		unsigned long start_mmupfn = (unsigned long)min_pfn << PAGE_MMUSHIFT;
+		unsigned long end_mmupfn = (unsigned long)max_pfn << PAGE_MMUSHIFT;
+		unsigned long m;
+
+		for (m = start_mmupfn; m < end_mmupfn; m++)
+			set_pte(&kernel_pte_tables[m - base_mmupfn],
+				__pte(((unsigned long long)m << MMUPAGE_SHIFT) |
+				      pgprot_val(PAGE_KERNEL)));
+	}
 
 	flush_tlb_all();
 	local_icache_inv_all(NULL);

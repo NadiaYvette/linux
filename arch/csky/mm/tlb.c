@@ -12,9 +12,15 @@
 /*
  * One C-SKY MMU TLB entry contain two PFN/page entry, ie:
  * 1VPN -> 2PFN
+ *
+ * The hardware page (PFN) is always MMUPAGE_SIZE; under page clustering
+ * (PAGE_MMUSHIFT > 0) the kernel PAGE_SIZE is larger, but the TLB still maps
+ * two MMUPAGE-sized hardware pages per entry.  Size the TLB stride/mask in
+ * MMUPAGE units so the flush loops walk real TLB entries.  Reduces to
+ * (PAGE_SIZE * 2)/(PAGE_MASK << 1) when PAGE_MMUSHIFT == 0.
  */
-#define TLB_ENTRY_SIZE		(PAGE_SIZE * 2)
-#define TLB_ENTRY_SIZE_MASK	(PAGE_MASK << 1)
+#define TLB_ENTRY_SIZE		(MMUPAGE_SIZE * 2)
+#define TLB_ENTRY_SIZE_MASK	(MMUPAGE_MASK << 1)
 
 void flush_tlb_all(void)
 {
@@ -67,7 +73,7 @@ void flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 			: "r" (start | newpid)
 			: "memory");
 
-		start += 2*PAGE_SIZE;
+		start += TLB_ENTRY_SIZE;
 	}
 	asm volatile("sync.i\n");
 #else
@@ -80,7 +86,7 @@ void flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 		int idx;
 
 		write_mmu_entryhi(start | newpid);
-		start += 2*PAGE_SIZE;
+		start += TLB_ENTRY_SIZE;
 		tlb_probe();
 		idx = read_mmu_index();
 		if (idx >= 0)
@@ -107,7 +113,7 @@ void flush_tlb_kernel_range(unsigned long start, unsigned long end)
 			: "r" (start)
 			: "memory");
 
-		start += 2*PAGE_SIZE;
+		start += TLB_ENTRY_SIZE;
 	}
 	asm volatile("sync.i\n");
 #else
@@ -120,7 +126,7 @@ void flush_tlb_kernel_range(unsigned long start, unsigned long end)
 		int idx;
 
 		write_mmu_entryhi(start | oldpid);
-		start += 2*PAGE_SIZE;
+		start += TLB_ENTRY_SIZE;
 		tlb_probe();
 		idx = read_mmu_index();
 		if (idx >= 0)

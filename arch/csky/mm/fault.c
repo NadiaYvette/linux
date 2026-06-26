@@ -189,7 +189,15 @@ asmlinkage void do_page_fault(struct pt_regs *regs)
 	struct task_struct *tsk;
 	struct vm_area_struct *vma;
 	struct mm_struct *mm;
-	unsigned long addr = read_mmu_entryhi() & PAGE_MASK;
+	/*
+	 * The C-SKY MMU faults on MMUPAGE_SIZE (hardware page) granularity.
+	 * Under page clustering (PAGE_MMUSHIFT > 0) PAGE_MASK rounds to the
+	 * larger clustered PAGE_SIZE and would discard the sub-cluster offset of
+	 * the faulting hardware page, faulting in the wrong address.  Mask to
+	 * MMUPAGE granularity so handle_mm_fault() services the page the MMU
+	 * actually faulted on.  Reduces to PAGE_MASK when PAGE_MMUSHIFT == 0.
+	 */
+	unsigned long addr = read_mmu_entryhi() & MMUPAGE_MASK;
 	unsigned int flags = FAULT_FLAG_DEFAULT;
 	int code = SEGV_MAPERR;
 	vm_fault_t fault;

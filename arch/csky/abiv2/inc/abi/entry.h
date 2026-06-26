@@ -269,7 +269,13 @@
 	mtcr	r6, cr<6, 15> /* Set MPR with 4K page size */
 
 	grs	r6, 1f /* Get current pa by PC */
-	bmaski  r7, (PAGE_SHIFT + 1) /* r7 = 0x1fff */
+	/*
+	 * Align PC down to a dual-page (2 * MMUPAGE_SIZE) TLB-entry boundary.
+	 * The bootstrap entry maps two MMUPAGE-sized hardware pages (MEL0/MEL1
+	 * below) with a 4K MPR, so the mask is MMUPAGE_SHIFT + 1, independent of
+	 * the (possibly clustered) PAGE_SIZE.
+	 */
+	bmaski  r7, (MMUPAGE_SHIFT + 1) /* r7 = 0x1fff */
 	andn    r6, r7
 	mtcr	r6, cr<4, 15> /* Set MEH */
 
