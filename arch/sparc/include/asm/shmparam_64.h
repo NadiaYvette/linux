@@ -6,6 +6,6 @@
 
 #define __ARCH_FORCE_SHMLBA	1
 /* attach addr a multiple of this */
-#define	SHMLBA	((PAGE_SIZE > L1DCACHE_SIZE) ? PAGE_SIZE : L1DCACHE_SIZE)
+#define	SHMLBA	((MMUPAGE_SIZE > L1DCACHE_SIZE) ? MMUPAGE_SIZE : L1DCACHE_SIZE)
 
 #endif /* _ASMSPARC64_SHMPARAM_H */

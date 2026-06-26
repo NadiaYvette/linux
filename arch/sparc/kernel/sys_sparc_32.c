@@ -53,7 +53,7 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr, unsi
 		 * cache aliasing constraints.
 		 */
 		if (!file_hugepage && (flags & MAP_SHARED) &&
-		    ((addr - (pgoff << PAGE_SHIFT)) & (SHMLBA - 1)))
+		    ((addr - (pgoff << MMUPAGE_SHIFT)) & (SHMLBA - 1)))
 			return -EINVAL;
 		return addr;
 	}
@@ -68,9 +68,12 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr, unsi
 	info.low_limit = addr;
 	info.high_limit = TASK_SIZE;
 	if (!file_hugepage) {
+		/* Colour bits live between MMUPAGE_SHIFT and SHMLBA; under page
+		 * clustering PAGE_SIZE can exceed SHMLBA so PAGE_MASK would
+		 * collapse the mask. pgoff is MMUPAGE-granular. */
 		info.align_mask = (flags & MAP_SHARED) ?
-			(PAGE_MASK & (SHMLBA - 1)) : 0;
-		info.align_offset = pgoff << PAGE_SHIFT;
+			(MMUPAGE_MASK & (SHMLBA - 1)) : 0;
+		info.align_offset = pgoff << MMUPAGE_SHIFT;
 	} else {
 		info.align_mask = huge_page_mask_align(filp);
 	}
@@ -113,7 +116,7 @@ SYSCALL_DEFINE6(mmap2, unsigned long, addr, unsigned long, len,
 	/* Make sure the shift for mmap2 is constant (12), no matter what PAGE_SIZE
 	   we have. */
 	return ksys_mmap_pgoff(addr, len, prot, flags, fd,
-			       pgoff >> (PAGE_SHIFT - 12));
+			       pgoff >> (MMUPAGE_SHIFT - 12));
 }
 
 SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
@@ -121,7 +124,7 @@ SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
 	unsigned long, off)
 {
 	/* no alignment check? */
-	return ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> PAGE_SHIFT);
+	return ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> MMUPAGE_SHIFT);
 }
 
 SYSCALL_DEFINE5(sparc_remap_file_pages, unsigned long, start, unsigned long, size,

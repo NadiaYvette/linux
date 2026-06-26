@@ -41,11 +41,11 @@ viking_flush_page:
 	srl	%g3, 12, %g1		! ppage >> 12
 
 	clr	%o1			! set counter, 0 - 127
-	sethi	%hi(PAGE_OFFSET + PAGE_SIZE - 0x80000000), %o3
+	sethi	%hi(PAGE_OFFSET + MMUPAGE_SIZE - 0x80000000), %o3
 	sethi	%hi(0x80000000), %o4
 	sethi	%hi(VIKING_PTAG_VALID), %o5
-	sethi	%hi(2*PAGE_SIZE), %o0
-	sethi	%hi(PAGE_SIZE), %g7
+	sethi	%hi(2*MMUPAGE_SIZE), %o0
+	sethi	%hi(MMUPAGE_SIZE), %g7
 	clr	%o2			! block counter, 0 - 3
 5:
 	sll	%o1, 5, %g4
@@ -61,7 +61,7 @@ viking_flush_page:
 
 	andcc	%g2, %o5, %g0		! ptag VALID?
 	be	7f
-	 add	%g4, %o3, %g2		! (PAGE_OFFSET + PAGE_SIZE) | (set << 5)
+	 add	%g4, %o3, %g2		! (PAGE_OFFSET + MMUPAGE_SIZE) | (set << 5)
 	ld	[%g2], %g3
 	ld	[%g2 + %g7], %g3
 	add	%g2, %o0, %g2
@@ -91,7 +91,7 @@ viking_flush_page:
 viking_mxcc_flush_page:
 	sethi	%hi(PAGE_OFFSET), %g2
 	sub	%o0, %g2, %g3
-	sub	%g3, -PAGE_SIZE, %g3		! ppage + PAGE_SIZE
+	sub	%g3, -MMUPAGE_SIZE, %g3		! ppage + MMUPAGE_SIZE
 	sethi	%hi(MXCC_SRCSTREAM), %o3	! assume %hi(MXCC_SRCSTREAM) == %hi(MXCC_DESTSTREAM)
 	mov	0x10, %g2			! set cacheable bit
 	or	%o3, %lo(MXCC_SRCSTREAM), %o2
