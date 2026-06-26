@@ -17,18 +17,30 @@
 
 /*
  * C-SKY is two-level paging structure:
+ *
+ * Under page clustering (CONFIG_PAGE_MMUSHIFT > 0) the kernel PAGE_SIZE is a
+ * multiple of the hardware MMU page size (MMUPAGE_SIZE).  The C-SKY MMU,
+ * however, always walks the page tables with a fixed 4KB (MMUPAGE) page and a
+ * fixed 4MB (PGDIR_SIZE) per-PGD-entry span: one PGD page and one PTE table
+ * each occupy a single MMUPAGE_SIZE hardware page holding MMUPAGE_SIZE/4 byte
+ * entries.  The table geometry must therefore be expressed in MMUPAGE units,
+ * not in the (clustered) PAGE_SIZE, so that pgd_index()/pte_index() and the
+ * hardware table-walk agree.  A PTE table is still allocated as a full
+ * PAGE_SIZE chunk; only its first MMUPAGE worth of entries is used by the MMU.
+ * When PAGE_MMUSHIFT == 0, MMUPAGE_SIZE == PAGE_SIZE and these reduce to the
+ * stock 1024-entry tables.
  */
 
-#define PTRS_PER_PGD	(PAGE_SIZE / sizeof(pgd_t))
+#define PTRS_PER_PGD	(MMUPAGE_SIZE / sizeof(pgd_t))
 #define PTRS_PER_PMD	1
-#define PTRS_PER_PTE	(PAGE_SIZE / sizeof(pte_t))
+#define PTRS_PER_PTE	(MMUPAGE_SIZE / sizeof(pte_t))
 
 #define pte_ERROR(e) \
 	pr_err("%s:%d: bad pte %08lx.\n", __FILE__, __LINE__, (e).pte_low)
 #define pgd_ERROR(e) \
 	pr_err("%s:%d: bad pgd %08lx.\n", __FILE__, __LINE__, pgd_val(e))
 
-#define PFN_PTE_SHIFT	PAGE_SHIFT
+#define PFN_PTE_SHIFT	MMUPAGE_SHIFT
 #define pmd_pfn(pmd)	(pmd_phys(pmd) >> PAGE_SHIFT)
 #define pmd_page(pmd)	(pfn_to_page(pmd_phys(pmd) >> PAGE_SHIFT))
 #define pte_clear(mm, addr, ptep)	set_pte((ptep), \
