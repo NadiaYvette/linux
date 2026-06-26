@@ -193,7 +193,7 @@ static int swapin_walk_pmd_entry(pmd_t *pmd, unsigned long start,
 	spinlock_t *ptl;
 	unsigned long addr;
 
-	for (addr = start; addr < end; addr += PAGE_SIZE) {
+	for (addr = start; addr < end; addr += MMUPAGE_SIZE) {
 		pte_t pte;
 		softleaf_t entry;
 		struct folio *folio;
@@ -235,8 +235,8 @@ static void shmem_swapin_range(struct vm_area_struct *vma,
 		unsigned long start, unsigned long end,
 		struct address_space *mapping)
 {
-	XA_STATE(xas, &mapping->i_pages, linear_page_index(vma, start));
-	pgoff_t end_index = linear_page_index(vma, end) - 1;
+	XA_STATE(xas, &mapping->i_pages, pgoff_mmu_to_page(linear_page_index(vma, start)));
+	pgoff_t end_index = pgoff_mmu_to_page(linear_page_index(vma, end)) - 1;
 	struct folio *folio;
 	struct swap_iocb *splug = NULL;
 
@@ -252,8 +252,7 @@ static void shmem_swapin_range(struct vm_area_struct *vma,
 		if (!softleaf_is_swap(entry))
 			continue;
 
-		addr = vma->vm_start +
-			((xas.xa_index - vma->vm_pgoff) << PAGE_SHIFT);
+		addr = pgoff_to_vma_addr(vma, xas.xa_index);
 		xas_pause(&xas);
 		rcu_read_unlock();
 
@@ -318,7 +317,7 @@ static long madvise_willneed(struct madvise_behavior *madv_behavior)
 	mark_mmap_lock_dropped(madv_behavior);
 	get_file(file);
 	offset = (loff_t)(start - vma->vm_start)
-			+ ((loff_t)vma->vm_pgoff << PAGE_SHIFT);
+			+ ((loff_t)vma->vm_pgoff << MMUPAGE_SHIFT);
 	mmap_read_unlock(mm);
 	vfs_fadvise(file, offset, end - start, POSIX_FADV_WILLNEED);
 	fput(file);
@@ -345,10 +344,10 @@ static inline int madvise_folio_pte_batch(unsigned long addr, unsigned long end,
 					  struct folio *folio, pte_t *ptep,
 					  pte_t *ptentp)
 {
-	int max_nr = (end - addr) / PAGE_SIZE;
+	int max_nr = (end - addr) / MMUPAGE_SIZE;
 
 	return folio_pte_batch_flags(folio, NULL, ptep, ptentp, max_nr,
-				     FPB_MERGE_YOUNG_DIRTY);
+				     FPB_MERGE_YOUNG_DIRTY).nr;
 }
 
 static int madvise_cold_or_pageout_pte_range(pmd_t *pmd,
@@ -447,14 +446,14 @@ huge_unlock:
 
 regular_folio:
 #endif
-	tlb_change_page_size(tlb, PAGE_SIZE);
+	tlb_change_page_size(tlb, MMUPAGE_SIZE);
 restart:
 	start_pte = pte = pte_offset_map_lock(vma->vm_mm, pmd, addr, &ptl);
 	if (!start_pte)
 		return 0;
 	flush_tlb_batched_pending(mm);
 	lazy_mmu_mode_enable();
-	for (; addr < end; pte += nr, addr += nr * PAGE_SIZE) {
+	for (; addr < end; pte += nr, addr += nr * MMUPAGE_SIZE) {
 		nr = 1;
 		ptent = ptep_get(pte);
 
@@ -670,13 +669,13 @@ static int madvise_free_pte_range(pmd_t *pmd, unsigned long addr,
 		if (madvise_free_huge_pmd(tlb, vma, pmd, addr, next))
 			return 0;
 
-	tlb_change_page_size(tlb, PAGE_SIZE);
+	tlb_change_page_size(tlb, MMUPAGE_SIZE);
 	start_pte = pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
 	if (!start_pte)
 		return 0;
 	flush_tlb_batched_pending(mm);
 	lazy_mmu_mode_enable();
-	for (; addr != end; pte += nr, addr += PAGE_SIZE * nr) {
+	for (; addr != end; pte += nr, addr += MMUPAGE_SIZE * nr) {
 		nr = 1;
 		ptent = ptep_get(pte);
 
@@ -691,7 +690,7 @@ static int madvise_free_pte_range(pmd_t *pmd, unsigned long addr,
 			softleaf_t entry = softleaf_from_pte(ptent);
 
 			if (softleaf_is_swap(entry)) {
-				max_nr = (end - addr) / PAGE_SIZE;
+				max_nr = (end - addr) / MMUPAGE_SIZE;
 				nr = swap_pte_batch(pte, max_nr, ptent);
 				nr_swap -= nr;
 				swap_put_entries_direct(entry, nr);
@@ -989,7 +988,7 @@ static long madvise_populate(struct madvise_behavior *madv_behavior)
 				return -ENOMEM;
 			}
 		}
-		start += pages * PAGE_SIZE;
+		start += pages * MMUPAGE_SIZE;
 	}
 	return 0;
 }
@@ -1023,7 +1022,7 @@ static long madvise_remove(struct madvise_behavior *madv_behavior)
 		return -EACCES;
 
 	offset = (loff_t)(start - vma->vm_start)
-			+ ((loff_t)vma->vm_pgoff << PAGE_SHIFT);
+			+ ((loff_t)vma->vm_pgoff << MMUPAGE_SHIFT);
 
 	/*
 	 * Filesystem's fallocate may need to take i_rwsem.  We need to
@@ -1183,7 +1182,7 @@ static long madvise_guard_install(struct madvise_behavior *madv_behavior)
 
 		if (err == 0) {
 			unsigned long nr_expected_pages =
-				PHYS_PFN(range->end - range->start);
+				(range->end - range->start) >> MMUPAGE_SHIFT;
 
 			VM_WARN_ON(nr_pages != nr_expected_pages);
 			return 0;
@@ -1841,9 +1840,9 @@ static bool is_valid_madvise(unsigned long start, size_t len_in, int behavior)
 	if (!madvise_behavior_valid(behavior))
 		return false;
 
-	if (!PAGE_ALIGNED(start))
+	if (!MMUPAGE_ALIGNED(start))
 		return false;
-	len = PAGE_ALIGN(len_in);
+	len = MMUPAGE_ALIGN(len_in);
 
 	/* Check to see whether len was rounded up from small -ve to zero */
 	if (len_in && !len)
@@ -1873,7 +1872,7 @@ static bool madvise_should_skip(unsigned long start, size_t len_in,
 		*err = -EINVAL;
 		return true;
 	}
-	if (start + PAGE_ALIGN(len_in) == start) {
+	if (start + MMUPAGE_ALIGN(len_in) == start) {
 		*err = 0;
 		return true;
 	}
@@ -1920,7 +1919,7 @@ static int madvise_do_behavior(unsigned long start, size_t len_in,
 	}
 
 	range->start = get_untagged_addr(madv_behavior->mm, start);
-	range->end = range->start + PAGE_ALIGN(len_in);
+	range->end = range->start + MMUPAGE_ALIGN(len_in);
 
 	blk_start_plug(&plug);
 	if (is_madvise_populate(madv_behavior))
@@ -2186,9 +2185,9 @@ static int madvise_set_anon_name(struct mm_struct *mm, unsigned long start,
 		.anon_name = anon_name,
 	};
 
-	if (start & ~PAGE_MASK)
+	if (start & ~MMUPAGE_MASK)
 		return -EINVAL;
-	len = (len_in + ~PAGE_MASK) & PAGE_MASK;
+	len = (len_in + ~MMUPAGE_MASK) & MMUPAGE_MASK;
 
 	/* Check to see whether len was rounded up from small -ve to zero */
 	if (len_in && !len)

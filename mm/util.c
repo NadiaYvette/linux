@@ -348,9 +348,9 @@ unsigned long randomize_stack_top(unsigned long stack_top)
 		random_variable <<= PAGE_SHIFT;
 	}
 #ifdef CONFIG_STACK_GROWSUP
-	return PAGE_ALIGN(stack_top) + random_variable;
+	return MMUPAGE_ALIGN(stack_top) + random_variable;
 #else
-	return PAGE_ALIGN(stack_top) - random_variable;
+	return MMUPAGE_ALIGN(stack_top) - random_variable;
 #endif
 }
 
@@ -370,20 +370,20 @@ unsigned long randomize_stack_top(unsigned long stack_top)
  */
 unsigned long randomize_page(unsigned long start, unsigned long range)
 {
-	if (!PAGE_ALIGNED(start)) {
-		range -= PAGE_ALIGN(start) - start;
-		start = PAGE_ALIGN(start);
+	if (!IS_ALIGNED(start, MMUPAGE_SIZE)) {
+		range -= ALIGN(start, MMUPAGE_SIZE) - start;
+		start = ALIGN(start, MMUPAGE_SIZE);
 	}
 
 	if (start > ULONG_MAX - range)
 		range = ULONG_MAX - start;
 
-	range >>= PAGE_SHIFT;
+	range >>= MMUPAGE_SHIFT;
 
 	if (range == 0)
 		return start;
 
-	return start + (get_random_long() % range << PAGE_SHIFT);
+	return start + (get_random_long() % range << MMUPAGE_SHIFT);
 }
 
 #ifdef CONFIG_ARCH_WANT_DEFAULT_TOPDOWN_MMAP_LAYOUT
@@ -407,7 +407,7 @@ unsigned long arch_mmap_rnd(void)
 #endif /* CONFIG_HAVE_ARCH_MMAP_RND_COMPAT_BITS */
 		rnd = get_random_long() & ((1UL << mmap_rnd_bits) - 1);
 
-	return rnd << PAGE_SHIFT;
+	return rnd << MMUPAGE_SHIFT;
 }
 
 static int mmap_is_legacy(const struct rlimit *rlim_stack)
@@ -566,7 +566,7 @@ unsigned long vm_mmap_pgoff(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
 	unsigned long flag, unsigned long pgoff)
 {
-	loff_t off = (loff_t)pgoff << PAGE_SHIFT;
+	loff_t off = (loff_t)pgoff << MMUPAGE_SHIFT;
 	unsigned long ret;
 	struct mm_struct *mm = current->mm;
 	unsigned long populate;
@@ -609,12 +609,12 @@ unsigned long vm_mmap(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
 	unsigned long flag, unsigned long offset)
 {
-	if (unlikely(offset + PAGE_ALIGN(len) < offset))
+	if (unlikely(offset + MMUPAGE_ALIGN(len) < offset))
 		return -EINVAL;
-	if (unlikely(offset_in_page(offset)))
+	if (unlikely(offset & ~MMUPAGE_MASK))
 		return -EINVAL;
 
-	return vm_mmap_pgoff(file, addr, len, prot, flag, offset >> PAGE_SHIFT);
+	return vm_mmap_pgoff(file, addr, len, prot, flag, offset >> MMUPAGE_SHIFT);
 }
 EXPORT_SYMBOL(vm_mmap);
 
@@ -906,11 +906,17 @@ unsigned long vm_commit_limit(void)
 	unsigned long allowed;
 
 	if (sysctl_overcommit_kbytes)
-		allowed = sysctl_overcommit_kbytes >> (PAGE_SHIFT - 10);
+		allowed = sysctl_overcommit_kbytes >> (MMUPAGE_SHIFT - 10);
 	else
-		allowed = ((totalram_pages() - hugetlb_total_pages())
+		allowed = (((totalram_pages() - hugetlb_total_pages())
+			    << PAGE_MMUSHIFT)
 			   * sysctl_overcommit_ratio / 100);
-	allowed += total_swap_pages;
+	/*
+	 * total_swap_pages counts swap slots, which are PAGE (cluster) sized;
+	 * the rest of this limit is in MMUPAGE units, so scale swap up too.
+	 * Identity at PAGE_MMUSHIFT == 0.
+	 */
+	allowed += total_swap_pages << PAGE_MMUSHIFT;
 
 	return allowed;
 }
@@ -970,7 +976,8 @@ int __vm_enough_memory(const struct mm_struct *mm, long pages, int cap_sys_admin
 		return 0;
 
 	if (sysctl_overcommit_memory == OVERCOMMIT_GUESS) {
-		if (pages > totalram_pages() + total_swap_pages)
+		if (pages > (totalram_pages() << PAGE_MMUSHIFT) +
+			    (total_swap_pages << PAGE_MMUSHIFT))
 			goto error;
 		return 0;
 	}
@@ -980,13 +987,13 @@ int __vm_enough_memory(const struct mm_struct *mm, long pages, int cap_sys_admin
 	 * Reserve some for root
 	 */
 	if (!cap_sys_admin)
-		allowed -= sysctl_admin_reserve_kbytes >> (PAGE_SHIFT - 10);
+		allowed -= sysctl_admin_reserve_kbytes >> (MMUPAGE_SHIFT - 10);
 
 	/*
 	 * Don't let a single process grow so big a user can't recover
 	 */
 	if (mm) {
-		long reserve = sysctl_user_reserve_kbytes >> (PAGE_SHIFT - 10);
+		long reserve = sysctl_user_reserve_kbytes >> (MMUPAGE_SHIFT - 10);
 
 		allowed -= min_t(long, mm->total_vm / 32, reserve);
 	}
@@ -994,7 +1001,7 @@ int __vm_enough_memory(const struct mm_struct *mm, long pages, int cap_sys_admin
 	if (percpu_counter_read_positive(&vm_committed_as) < allowed)
 		return 0;
 error:
-	bytes_failed = pages << PAGE_SHIFT;
+	bytes_failed = pages << MMUPAGE_SHIFT;
 	pr_warn_ratelimited("%s: pid: %d, comm: %s, bytes: %lu not enough memory for the allocation\n",
 			    __func__, current->pid, current->comm, bytes_failed);
 	vm_unacct_memory(pages);
@@ -1555,7 +1562,7 @@ EXPORT_SYMBOL(mmap_action_complete);
 unsigned int folio_pte_batch(struct folio *folio, pte_t *ptep, pte_t pte,
 		unsigned int max_nr)
 {
-	return folio_pte_batch_flags(folio, NULL, ptep, &pte, max_nr, 0);
+	return folio_pte_batch_flags(folio, NULL, ptep, &pte, max_nr, 0).nr;
 }
 #endif /* CONFIG_MMU */
 
