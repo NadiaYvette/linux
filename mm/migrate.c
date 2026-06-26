@@ -296,7 +296,8 @@ bool isolate_folio_to_list(struct folio *folio, struct list_head *list)
 }
 
 static bool try_to_map_unused_to_zeropage(struct page_vma_mapped_walk *pvmw,
-		struct folio *folio, pte_t old_pte, unsigned long idx)
+		struct folio *folio, pte_t old_pte, unsigned long idx,
+		unsigned int nr_pages)
 {
 	struct page *page = folio_page(folio, idx);
 	pte_t newpte;
@@ -329,9 +330,16 @@ static bool try_to_map_unused_to_zeropage(struct page_vma_mapped_walk *pvmw,
 	if (pte_swp_uffd_wp(old_pte))
 		newpte = pte_mkuffd_wp(newpte);
 
-	set_pte_at(pvmw->vma->vm_mm, pvmw->address, pvmw->pte, newpte);
+	/*
+	 * set_ptes auto-strides PFN: under PGCL each of the nr_pages sub-
+	 * PTEs maps a successive sub-page of the shared zero page (all
+	 * sub-pages contain zeros, so this preserves the original
+	 * sub-page topology).  For non-PGCL nr_pages == 1 and this
+	 * collapses to set_pte_at.
+	 */
+	set_ptes(pvmw->vma->vm_mm, pvmw->address, pvmw->pte, newpte, nr_pages);
 
-	dec_mm_counter(pvmw->vma->vm_mm, mm_counter(folio));
+	add_mm_counter(pvmw->vma->vm_mm, mm_counter(folio), -nr_pages);
 	return true;
 }
 
@@ -356,10 +364,11 @@ static bool remove_migration_pte(struct folio *folio,
 		softleaf_t entry;
 		struct page *new;
 		unsigned long idx = 0;
+		unsigned int nr_pages, i;
 
 		/* pgoff is invalid for ksm pages, but they are never large */
 		if (folio_test_large(folio) && !folio_test_hugetlb(folio))
-			idx = linear_page_index(vma, pvmw.address) - pvmw.pgoff;
+			idx = pgoff_mmu_to_page(linear_page_index(vma, pvmw.address)) - pvmw.pgoff;
 		new = folio_page(folio, idx);
 
 #ifdef CONFIG_ARCH_ENABLE_THP_MIGRATION
@@ -371,12 +380,25 @@ static bool remove_migration_pte(struct folio *folio,
 			continue;
 		}
 #endif
+		/*
+		 * Under PGCL the walker batches consecutive migration entries
+		 * encoding the same kernel-page PFN as a single yield of
+		 * pvmw.nr_mmupages PTEs (see page_vma_mapped_walk batching
+		 * extension).  Mirror try_to_migrate_one's symmetry: take
+		 * nr_pages refs, write nr_pages new PTEs, but issue exactly
+		 * one rmap event per yield (one struct page = one _mapcount
+		 * increment).  For non-PGCL nr_mmupages is always 1 and the
+		 * batched calls collapse to legacy per-PTE form.
+		 */
+		nr_pages = pvmw.nr_mmupages;
+
 		old_pte = ptep_get(pvmw.pte);
 		if (rmap_walk_arg->map_unused_to_zeropage &&
-		    try_to_map_unused_to_zeropage(&pvmw, folio, old_pte, idx))
+		    try_to_map_unused_to_zeropage(&pvmw, folio, old_pte, idx,
+						  nr_pages))
 			continue;
 
-		folio_get(folio);
+		folio_ref_add(folio, nr_pages);
 		pte = mk_pte(new, READ_ONCE(vma->vm_page_prot));
 
 		entry = softleaf_from_pte(old_pte);
@@ -428,12 +450,105 @@ static bool remove_migration_pte(struct folio *folio,
 		} else
 #endif
 		{
-			if (folio_test_anon(folio))
-				folio_add_anon_rmap_pte(folio, new, vma,
-							pvmw.address, rmap_flags);
-			else
-				folio_add_file_rmap_pte(folio, new, vma);
-			set_pte_at(vma->vm_mm, pvmw.address, pvmw.pte, pte);
+			/*
+			 * PGCL: rmap counts mappings.  Large folios use
+			 * Contract A (kernel-page granularity): one rmap add
+			 * event per kernel page.  A gapped cluster is restored
+			 * across several PVMW yields, so fire the add only on the
+			 * FIRST restored fragment of each kernel page — the mirror
+			 * of the zap last-present edge.  At this point (before the
+			 * set_ptes below) the not-yet-restored fragments are still
+			 * migration entries (non-present); fragments restored by an
+			 * earlier yield are present, so "any sub-PTE already
+			 * present" means a prior yield already issued the add.
+			 * order-0 folios keep per-PTE counting (loop nr_pages):
+			 * __split_folio_to_order flips the folio non-large before
+			 * remap_page() runs, so rebuilt order-0 sub-folios get
+			 * per-PTE mapcount automatically.  For non-PGCL nr_pages ==
+			 * 1 and first_frag is always true (single call either way).
+			 */
+			{
+#if PAGE_MMUSHIFT
+				/*
+				 * Migration restore re-aligns via set_ptes (which
+				 * strides from the kernel page's sub-0), so the
+				 * restored mapping is kernel-page-aligned: vsub ==
+				 * psub and a migrated folio never straddles a pte
+				 * table.  Use the shared physical-sub edge helper for
+				 * same-pfn precision; its boundary guard is inert here.
+				 */
+				bool first_frag = !folio_test_large(folio) ||
+					pgcl_rmap_fire_kpage_event(pvmw.pte,
+						pvmw.address, page_to_pfn(new),
+						(unsigned int)((pvmw.address >>
+							MMUPAGE_SHIFT) &
+							(PAGE_MMUCOUNT - 1)),
+						true);
+#endif
+				if (folio_test_anon(folio)) {
+					if (folio_test_large(folio)) {
+#if PAGE_MMUSHIFT
+							/*
+							 * MMUPAGE: restore nr_pages sub-PTE counts for this
+							 * yield.  On the first restored fragment of the kernel
+							 * page, folio_add_anon_rmap_pte sets the per-cluster
+							 * PageAnonExclusive flag and accounts one sub-PTE; the
+							 * rest go through the bare count helper (the per-page -1
+							 * sentinel keeps _nr_pages_mapped right).  A later
+							 * fragment is defensive: migration restore is normally
+							 * single-yield per cluster.
+							 */
+							if (first_frag) {
+								folio_add_anon_rmap_pte(folio, new, vma,
+										pvmw.address, rmap_flags);
+								if (nr_pages > 1)
+									folio_add_rmap_subptes(folio, new,
+											nr_pages - 1, vma);
+							} else
+								folio_add_rmap_subptes(folio, new, nr_pages, vma);
+#else
+							folio_add_anon_rmap_pte(folio, new, vma,
+									pvmw.address, rmap_flags);
+#endif
+					} else
+						for (i = 0; i < nr_pages; i++)
+							folio_add_anon_rmap_pte(folio, new, vma,
+										pvmw.address + (unsigned long)i * MMUPAGE_SIZE,
+										rmap_flags);
+				} else {
+					if (folio_test_large(folio)) {
+#if PAGE_MMUSHIFT
+							/* MMUPAGE: restore nr_pages file sub-PTEs. */
+							folio_add_rmap_subptes(folio, new, nr_pages, vma);
+#else
+							folio_add_file_rmap_pte(folio, new, vma);
+#endif
+					} else
+						for (i = 0; i < nr_pages; i++)
+							folio_add_file_rmap_pte(folio, new, vma);
+				}
+			}
+			if (unlikely(is_device_private_page(new))) {
+				/*
+				 * Device-private entries are non-present swap
+				 * PTEs; set_ptes' PFN-stride doesn't apply.
+				 * Loop set_pte_at — every sub-PTE encodes the
+				 * same destination PFN under PGCL.
+				 */
+				for (i = 0; i < nr_pages; i++)
+					set_pte_at(vma->vm_mm,
+						pvmw.address + (unsigned long)i * MMUPAGE_SIZE,
+						pvmw.pte + i, pte);
+			} else {
+				/*
+				 * Present PTEs: set_ptes auto-strides PFN to
+				 * reconstruct the original sub-page topology
+				 * (PTE i maps virtual sub-page i to physical
+				 * sub-page i of `new`).
+				 */
+				set_ptes(vma->vm_mm, pvmw.address, pvmw.pte,
+					 pte, nr_pages);
+			}
 		}
 		if (READ_ONCE(vma->vm_flags) & VM_LOCKED)
 			mlock_drain_local();
@@ -442,7 +557,8 @@ static bool remove_migration_pte(struct folio *folio,
 					   compound_order(new));
 
 		/* No need to invalidate - it was non-present before */
-		update_mmu_cache(vma, pvmw.address, pvmw.pte);
+		update_mmu_cache_range(NULL, vma, pvmw.address, pvmw.pte,
+				       nr_pages);
 	}
 
 	return true;

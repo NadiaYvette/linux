@@ -199,6 +199,7 @@ static int migrate_vma_collect_huge_pmd(pmd_t *pmdp, unsigned long start,
 			.address = start,
 			.pmd = pmdp,
 			.vma = walk->vma,
+			.nr_mmupages = 1,
 		};
 
 		unsigned long pfn = page_to_pfn(folio_page(folio, 0));
@@ -266,9 +267,9 @@ again:
 	if (!ptep)
 		goto again;
 	lazy_mmu_mode_enable();
-	ptep += (addr - start) / PAGE_SIZE;
+	ptep += (addr - start) / MMUPAGE_SIZE;
 
-	for (; addr < end; addr += PAGE_SIZE, ptep++) {
+	for (; addr < end; addr += MMUPAGE_SIZE, ptep++) {
 		struct dev_pagemap *pgmap;
 		unsigned long mpfn = 0, pfn;
 		struct folio *folio;
@@ -866,7 +867,7 @@ static int migrate_vma_insert_huge_pmd_page(struct migrate_vma *migrate,
 	} else if (!pmd_none(*pmdp))
 		goto unlock_abort;
 
-	add_mm_counter(vma->vm_mm, MM_ANONPAGES, HPAGE_PMD_NR);
+	add_mm_counter(vma->vm_mm, MM_ANONPAGES, HPAGE_PMD_MMUNR);
 	folio_add_new_anon_rmap(folio, vma, addr, RMAP_EXCLUSIVE);
 	if (!folio_is_zone_device(folio))
 		folio_add_lru_vma(folio, vma);

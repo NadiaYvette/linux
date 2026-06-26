@@ -927,8 +927,16 @@ static bool folio_referenced_one(struct folio *folio,
 		nr = 1;
 
 		if (vma->vm_flags & VM_LOCKED) {
+			/*
+			 * ptes counts PVMW yields (= kernel-page mapping
+			 * sites visited).  pvmw.nr_pages is folio_nr_pages
+			 * (kernel pages), so this checks "have we seen all
+			 * kernel-page sites of the folio".  pra->mapcount
+			 * under PGCL Option A is in PTE units, so decrement
+			 * by pvmw.nr_mmupages per yield.
+			 */
 			ptes++;
-			pra->mapcount--;
+			pra->mapcount -= pvmw.pte ? pvmw.nr_mmupages : 1;
 
 			/* Only mlock fully mapped pages */
 			if (pvmw.pte && ptes != pvmw.nr_pages)
@@ -967,7 +975,15 @@ static bool folio_referenced_one(struct folio *folio,
 
 		if (pvmw.pte && folio_test_large(folio)) {
 			const unsigned long end_addr = pmd_addr_end(address, vma->vm_end);
-			const unsigned int max_nr = (end_addr - address) >> PAGE_SHIFT;
+			/*
+			 * max_nr is the count of PTEs to PMD/VMA end; PTEs are
+			 * MMUPAGE-granular, so shift by MMUPAGE_SHIFT (under
+			 * non-PGCL MMUPAGE_SHIFT == PAGE_SHIFT and this is the
+			 * legacy form).  folio_pte_batch returns nr in MMUPAGE
+			 * units as well, so the subsequent ptes/address arithmetic
+			 * is consistent.
+			 */
+			const unsigned int max_nr = (end_addr - address) >> MMUPAGE_SHIFT;
 			pte_t pteval = ptep_get(pvmw.pte);
 
 			nr = folio_pte_batch(folio, pvmw.pte, pteval, max_nr);
@@ -993,20 +1009,35 @@ static bool folio_referenced_one(struct folio *folio,
 			WARN_ON_ONCE(1);
 		}
 
+		/*
+		 * PGCL Option A: pra->mapcount is in PTE units (one rmap event
+		 * per PTE).  ptes is the cumulative MMUPAGE PTE count from
+		 * folio_pte_batch (large folio) or 1 (non-large/PMD path).
+		 * Decrement pra->mapcount by the same nr.  For non-PGCL
+		 * (PAGE_MMUCOUNT == 1) this is the legacy form.
+		 */
 		ptes += nr;
 		pra->mapcount -= nr;
 		/*
 		 * If we are sure that we batched the entire folio,
-		 * we can just optimize and stop right here.
+		 * we can just optimize and stop right here.  Both sides in
+		 * MMUPAGE units: ptes is the cumulative MMUPAGE PTE count,
+		 * pvmw.nr_pages * PAGE_MMUCOUNT is the folio's total MMUPAGE
+		 * PTE footprint when fully mapped.
 		 */
-		if (ptes == pvmw.nr_pages) {
+		if (ptes == pvmw.nr_pages * PAGE_MMUCOUNT) {
 			page_vma_mapped_walk_done(&pvmw);
 			break;
 		}
 
-		/* Skip the batched PTEs */
+		/*
+		 * Skip the batched PTEs.  Both arithmetic in MMUPAGE units:
+		 * pvmw.pte advances by (nr-1) PTE slots, pvmw.address advances
+		 * by (nr-1) * MMUPAGE_SIZE.  The previous PAGE_SIZE stride
+		 * desynced address from pte by PAGE_MMUCOUNT under PGCL.
+		 */
 		pvmw.pte += nr - 1;
-		pvmw.address += (nr - 1) * PAGE_SIZE;
+		pvmw.address += (nr - 1) * MMUPAGE_SIZE;
 	}
 
 	if (referenced)
@@ -1122,6 +1153,18 @@ static int page_vma_mkclean_one(struct page_vma_mapped_walk *pvmw)
 		if (pvmw->pte) {
 			pte_t *pte = pvmw->pte;
 			pte_t entry = ptep_get(pte);
+			/*
+			 * Under PGCL the walker yields one kernel page worth
+			 * of consecutive same-PFN PTEs at a time
+			 * (pvmw->nr_mmupages, typically PAGE_MMUCOUNT).  Batch
+			 * the cache+TLB flush, clear, and writeback over the
+			 * whole yielded range; one rmap event per yield.  For
+			 * non-PGCL builds nr_mmupages is always 1 and this
+			 * collapses to the per-PTE legacy form.
+			 */
+			unsigned int nr_pages = pvmw->nr_mmupages, i;
+			unsigned long end_addr;
+			bool any_dirty_or_write = false;
 
 			/*
 			 * PFN swap PTEs, such as device-exclusive ones, that
@@ -1131,14 +1174,39 @@ static int page_vma_mkclean_one(struct page_vma_mapped_walk *pvmw)
 			 */
 			if (!pte_present(entry))
 				continue;
-			if (!pte_dirty(entry) && !pte_write(entry))
+
+			/*
+			 * The early-skip (no work needed if no PTE in the
+			 * batch is dirty or writable) must scan ALL sub-PTEs:
+			 * sub-page mprotect can leave a kernel-page mapping
+			 * with mixed write bits, so checking only the first
+			 * PTE could falsely skip a writable sub-PTE and leave
+			 * it modifiable during writeback (data corruption).
+			 * Loop is O(nr_pages) but typically hits cache.
+			 */
+			for (i = 0; i < nr_pages; i++) {
+				pte_t pe = ptep_get(pte + i);
+
+				if (pte_dirty(pe) || pte_write(pe)) {
+					any_dirty_or_write = true;
+					break;
+				}
+			}
+			if (!any_dirty_or_write)
 				continue;
 
-			flush_cache_page(vma, address, pte_pfn(entry));
-			entry = ptep_clear_flush(vma, address, pte);
+			end_addr = address + nr_pages * MMUPAGE_SIZE;
+			flush_cache_range(vma, address, end_addr);
+			entry = get_and_clear_ptes(vma->vm_mm, address, pte, nr_pages);
+			flush_tlb_range(vma, address, end_addr);
 			entry = pte_wrprotect(entry);
 			entry = pte_mkclean(entry);
-			set_pte_at(vma->vm_mm, address, pte, entry);
+			/*
+			 * set_ptes restores N PTEs with PFN-stride: the OR'd
+			 * pteval keeps the FIRST PTE's PFN; consecutive sub-
+			 * page PFNs are reconstructed by pte_advance_pfn.
+			 */
+			set_ptes(vma->vm_mm, address, pte, entry, nr_pages);
 			ret = 1;
 		} else {
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
@@ -1235,6 +1303,7 @@ static bool mapping_wrprotect_range_one(struct folio *folio,
 	struct page_vma_mapped_walk pvmw = {
 		.pfn		= state->pfn,
 		.nr_pages	= state->nr_pages,
+		.nr_mmupages	= 1,
 		.pgoff		= state->pgoff,
 		.vma		= vma,
 		.address	= address,
@@ -1316,6 +1385,7 @@ int pfn_mkclean_range(unsigned long pfn, unsigned long nr_pages, pgoff_t pgoff,
 		.pgoff		= pgoff,
 		.vma		= vma,
 		.flags		= PVMW_SYNC,
+		.nr_mmupages	= 1,
 	};
 
 	if (invalid_mkclean_vma(vma, NULL))
@@ -1482,7 +1552,7 @@ static void __folio_set_anon(struct folio *folio, struct vm_area_struct *vma,
 	 */
 	anon_vma = (void *) anon_vma + FOLIO_MAPPING_ANON;
 	WRITE_ONCE(folio->mapping, (struct address_space *) anon_vma);
-	folio->index = linear_page_index(vma, address);
+	folio->index = pgoff_mmu_to_page(linear_page_index(vma, address));
 }
 
 /**
@@ -1509,7 +1579,7 @@ static void __page_check_anon_rmap(const struct folio *folio,
 	 */
 	VM_BUG_ON_FOLIO(folio_anon_vma(folio)->root != vma->anon_vma->root,
 			folio);
-	VM_BUG_ON_PAGE(page_pgoff(folio, page) != linear_page_index(vma, address),
+	VM_BUG_ON_PAGE(page_pgoff(folio, page) != pgoff_mmu_to_page(linear_page_index(vma, address)),
 		       page);
 }
 
@@ -1691,7 +1761,9 @@ void folio_add_new_anon_rmap(struct folio *folio, struct vm_area_struct *vma,
 	}
 
 	VM_WARN_ON_ONCE(address < vma->vm_start ||
-			address + (nr << PAGE_SHIFT) > vma->vm_end);
+			address + (nr << (folio_test_large(folio) ?
+					  PAGE_SHIFT : MMUPAGE_SHIFT)) >
+			vma->vm_end);
 
 	__folio_mod_stat(folio, nr, nr_pmdmapped);
 	mod_mthp_stat(folio_order(folio), MTHP_STAT_NR_ANON, 1);
@@ -1731,6 +1803,63 @@ void folio_add_file_rmap_ptes(struct folio *folio, struct page *page,
 {
 	__folio_add_file_rmap(folio, page, nr_pages, vma, PGTABLE_LEVEL_PTE);
 }
+
+#if PAGE_MMUSHIFT
+/**
+ * folio_add_rmap_subptes - add @count MMUPAGE sub-PTE mappings of one kernel
+ *			    page (cluster) of @folio  [PGCL]
+ * @folio: the folio
+ * @page:  the kernel page (cluster) within @folio taking the sub-PTEs
+ * @count: number of MMUPAGE sub-PTEs being mapped (1..PAGE_MMUCOUNT)
+ * @vma:   the VM area the mappings are added to
+ *
+ * MMUPAGE-uniform mapcount contract (anon and file alike): mapcount counts
+ * hardware (MMUPAGE) PTEs.  @page's _mapcount and the folio _large_mapcount
+ * advance by @count; _nr_pages_mapped (kernel pages with >=1 sub-PTE) is bumped
+ * once, when @page takes its first sub-PTE (_mapcount -1 -> >=0).  The
+ * NR_{ANON,FILE}_MAPPED stat is MMUPAGE-granular, matching rss.  PTE level only
+ * (folios mapped at PTE level here are never PMD/entire-mapped, so the
+ * ENTIRELY_MAPPED interaction does not arise).
+ *
+ * The caller needs to hold the page table lock.
+ */
+void folio_add_rmap_subptes(struct folio *folio, struct page *page,
+		int count, struct vm_area_struct *vma)
+{
+	__folio_rmap_sanity_checks(folio, page, 1, PGTABLE_LEVEL_PTE);
+
+	if (!folio_test_large(folio)) {
+		atomic_add(count, &folio->_mapcount);
+	} else {
+		if (atomic_fetch_add(count, &page->_mapcount) == -1)
+			atomic_inc(&folio->_nr_pages_mapped);
+		folio_add_large_mapcount(folio, count, vma);
+	}
+	__folio_mod_stat(folio, count, 0);
+}
+
+/**
+ * folio_remove_rmap_subptes - remove @count MMUPAGE sub-PTE mappings of one
+ *			       kernel page (cluster) of @folio  [PGCL]
+ *
+ * Symmetric inverse of folio_add_rmap_subptes(); _nr_pages_mapped is
+ * decremented once, when @page loses its last sub-PTE (_mapcount -> -1).
+ */
+void folio_remove_rmap_subptes(struct folio *folio, struct page *page,
+		int count, struct vm_area_struct *vma)
+{
+	__folio_rmap_sanity_checks(folio, page, 1, PGTABLE_LEVEL_PTE);
+
+	if (!folio_test_large(folio)) {
+		atomic_sub(count, &folio->_mapcount);
+	} else {
+		folio_sub_large_mapcount(folio, count, vma);
+		if (atomic_sub_return(count, &page->_mapcount) == -1)
+			atomic_dec(&folio->_nr_pages_mapped);
+	}
+	__folio_mod_stat(folio, -count, 0);
+}
+#endif /* PAGE_MMUSHIFT */
 
 /**
  * folio_add_file_rmap_pmd - add a PMD mapping to a page range of a folio
@@ -1956,7 +2085,7 @@ static inline unsigned int folio_unmap_pte_batch(struct folio *folio,
 
 	/* We may only batch within a single VMA and a single page table. */
 	end_addr = pmd_addr_end(addr, vma->vm_end);
-	max_nr = (end_addr - addr) >> PAGE_SHIFT;
+	max_nr = (end_addr - addr) >> MMUPAGE_SHIFT;
 
 	/* We only support lazyfree or file folios batching for now ... */
 	if (folio_test_anon(folio) && folio_test_swapbacked(folio))
@@ -1975,7 +2104,7 @@ static inline unsigned int folio_unmap_pte_batch(struct folio *folio,
 	 * appropriate FPB flags.
 	 */
 	return folio_pte_batch_flags(folio, vma, pvmw->pte, &pte, max_nr,
-				     FPB_RESPECT_WRITE | FPB_RESPECT_SOFT_DIRTY);
+				     FPB_RESPECT_WRITE | FPB_RESPECT_SOFT_DIRTY).nr;
 }
 
 /*
@@ -2166,8 +2295,19 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 			if (pte_dirty(pteval))
 				folio_mark_dirty(folio);
 		} else if (likely(pte_present(pteval))) {
-			nr_pages = folio_unmap_pte_batch(folio, &pvmw, flags, pteval);
-			end_addr = address + nr_pages * PAGE_SIZE;
+			/*
+			 * Under PGCL the walker yields one kernel page worth
+			 * of consecutive same-PFN PTEs at a time
+			 * (pvmw.nr_mmupages, typically PAGE_MMUCOUNT).  Use
+			 * that batch count for PTE-level operations (cache /
+			 * TLB flush, get_and_clear_ptes, set_ptes restore on
+			 * race, RSS accounting, refcount).  Issue a single
+			 * rmap event per yield (one struct page).  For
+			 * non-PGCL builds, nr_mmupages is always 1 so this
+			 * collapses to the per-PTE legacy behavior.
+			 */
+			nr_pages = pvmw.nr_mmupages;
+			end_addr = address + nr_pages * MMUPAGE_SIZE;
 			flush_cache_range(vma, address, end_addr);
 
 			/* Nuke the page table entry. */
@@ -2207,7 +2347,8 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 				set_huge_pte_at(mm, address, pvmw.pte, pteval,
 						hsz);
 			} else {
-				dec_mm_counter(mm, mm_counter(folio));
+				/* PGCL Option A: per-PTE rss accounting */
+				add_mm_counter(mm, mm_counter(folio), -nr_pages);
 				set_pte_at(mm, address, pvmw.pte, pteval);
 			}
 		} else if (likely(pte_present(pteval)) && pte_unused(pteval) &&
@@ -2222,7 +2363,8 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 			 * migration) will not expect userfaults on already
 			 * copied pages.
 			 */
-			dec_mm_counter(mm, mm_counter(folio));
+			/* PGCL Option A: per-PTE rss accounting */
+			add_mm_counter(mm, mm_counter(folio), -nr_pages);
 		} else if (folio_test_anon(folio)) {
 			swp_entry_t entry = page_swap_entry(subpage);
 			pte_t swp_pte;
@@ -2310,7 +2452,17 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 					list_add(&mm->mmlist, &init_mm.mmlist);
 				spin_unlock(&mmlist_lock);
 			}
-			dec_mm_counter(mm, MM_ANONPAGES);
+			/*
+			 * PGCL Option A: nr_pages sub-PTEs were cleared by
+			 * get_and_clear_ptes above, but the swap path below
+			 * only writes ONE swap entry (set_pte_at).  Pending
+			 * proper PGCL swap-entry batching, account that
+			 * asymmetry directly: nr_pages anon pages "removed",
+			 * 1 swap entry installed.  The remaining nr_pages-1
+			 * sub-PTEs will fault as zero pages on next access
+			 * (pre-existing PGCL swap quirk).
+			 */
+			add_mm_counter(mm, MM_ANONPAGES, -nr_pages);
 			inc_mm_counter(mm, MM_SWAPENTS);
 			swp_pte = swp_entry_to_pte(entry);
 			if (anon_exclusive)
@@ -2344,18 +2496,50 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 discard:
 		if (unlikely(folio_test_hugetlb(folio))) {
 			hugetlb_remove_rmap(folio);
+		} else if (folio_test_large(folio)) {
+			/*
+			 * PGCL MMUPAGE: mapcount counts mappings at hardware
+			 * (MMUPAGE) granularity — one count per sub-PTE.  This
+			 * yield cleared nr_pages (== pvmw.nr_mmupages) sub-PTEs
+			 * of one cluster page, so remove exactly that many
+			 * sub-PTE mappings.  A gapped cluster whose sub-PTEs are
+			 * split across several PVMW yields removes its present
+			 * sub-PTEs per yield, summing to the correct total; the
+			 * helper's per-page -1 sentinel detects first/last
+			 * (_nr_pages_mapped) across partial yields, so no
+			 * last-present scan is needed.  Non-PGCL: one PTE per
+			 * kernel page, nr_pages == 1, so this is one removal.
+			 */
+#if PAGE_MMUSHIFT
+			folio_remove_rmap_subptes(folio, subpage, nr_pages, vma);
+#else
+			folio_remove_rmap_pte(folio, subpage, vma);
+#endif
 		} else {
-			folio_remove_rmap_ptes(folio, subpage, nr_pages, vma);
+			/*
+			 * order-0: per-PTE mapcount.  This yield cleared
+			 * nr_pages MMUPAGE PTEs of the (single) kernel page;
+			 * __folio_remove_rmap decrements by 1 per call, so loop.
+			 * For non-PGCL (nr_pages == 1) this is one call.
+			 */
+			unsigned int i;
+			for (i = 0; i < nr_pages; i++)
+				folio_remove_rmap_pte(folio, subpage, vma);
 		}
 		if (vma->vm_flags & VM_LOCKED)
 			mlock_drain_local();
 		folio_put_refs(folio, nr_pages);
 
 		/*
-		 * If we are sure that we batched the entire folio and cleared
-		 * all PTEs, we can just optimize and stop right here.
+		 * If we are sure that this single yield covered the entire
+		 * folio (and therefore cleared all of its PTEs in this VMA),
+		 * we can stop right here.  Both sides of the comparison are
+		 * MMUPAGE-granular: nr_pages is the count of PTEs cleared in
+		 * this yield (== pvmw.nr_mmupages, capped at PAGE_MMUCOUNT
+		 * by the walker), and folio_nr_pages * PAGE_MMUCOUNT is the
+		 * MMUPAGE PTE count of a fully-mapped folio.
 		 */
-		if (nr_pages == folio_nr_pages(folio))
+		if (nr_pages == folio_nr_pages(folio) * PAGE_MMUCOUNT)
 			goto walk_done;
 		continue;
 walk_abort:
@@ -2422,6 +2606,7 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 	struct page *subpage;
 	struct mmu_notifier_range range;
 	enum ttu_flags flags = (enum ttu_flags)(long)arg;
+	unsigned long nr_pages = 1, end_addr;
 	unsigned long pfn;
 	unsigned long hsz = 0;
 
@@ -2459,6 +2644,8 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 	mmu_notifier_invalidate_range_start(&range);
 
 	while (page_vma_mapped_walk(&pvmw)) {
+		nr_pages = 1;
+
 		/* PMD-mapped THP migration entry */
 		if (!pvmw.pte) {
 			__maybe_unused unsigned long pfn;
@@ -2573,23 +2760,35 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 				folio_mark_dirty(folio);
 			writable = pte_write(pteval);
 		} else if (likely(pte_present(pteval))) {
-			flush_cache_page(vma, address, pfn);
-			/* Nuke the page table entry. */
-			if (should_defer_flush(mm, flags)) {
-				/*
-				 * We clear the PTE but do not flush so potentially
-				 * a remote CPU could still be writing to the folio.
-				 * If the entry was previously clean then the
-				 * architecture must guarantee that a clear->dirty
-				 * transition on a cached TLB entry is written through
-				 * and traps if the PTE is unmapped.
-				 */
-				pteval = ptep_get_and_clear(mm, address, pvmw.pte);
+			/*
+			 * Under PGCL the walker yields one kernel page worth
+			 * of consecutive same-PFN PTEs at a time
+			 * (pvmw.nr_mmupages, typically PAGE_MMUCOUNT).  Use
+			 * that batch count for PTE-level operations (cache /
+			 * TLB flush, get_and_clear_ptes, set_pte restore on
+			 * abort, RSS accounting, refcount).  Issue a single
+			 * rmap event per yield (one struct page).  For
+			 * non-PGCL builds, nr_mmupages is always 1 so this
+			 * collapses to the per-PTE legacy behavior.
+			 */
+			nr_pages = pvmw.nr_mmupages;
+			end_addr = address + nr_pages * MMUPAGE_SIZE;
+			flush_cache_range(vma, address, end_addr);
 
-				set_tlb_ubc_flush_pending(mm, pteval, address, address + PAGE_SIZE);
-			} else {
-				pteval = ptep_clear_flush(vma, address, pvmw.pte);
-			}
+			/* Nuke the page table entries. */
+			pteval = get_and_clear_ptes(mm, address, pvmw.pte, nr_pages);
+			/*
+			 * We clear the PTEs but do not flush so potentially
+			 * a remote CPU could still be writing to the folio.
+			 * If the entry was previously clean then the
+			 * architecture must guarantee that a clear->dirty
+			 * transition on a cached TLB entry is written through
+			 * and traps if the PTE is unmapped.
+			 */
+			if (should_defer_flush(mm, flags))
+				set_tlb_ubc_flush_pending(mm, pteval, address, end_addr);
+			else
+				flush_tlb_range(vma, address, end_addr);
 			if (pte_dirty(pteval))
 				folio_mark_dirty(folio);
 			writable = pte_write(pteval);
@@ -2616,8 +2815,21 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 				set_huge_pte_at(mm, address, pvmw.pte, pteval,
 						hsz);
 			} else {
-				dec_mm_counter(mm, mm_counter(folio));
-				set_pte_at(mm, address, pvmw.pte, pteval);
+				unsigned int i;
+
+				add_mm_counter(mm, mm_counter(folio), -nr_pages);
+				/*
+				 * Swap entries don't have a PFN-stride
+				 * semantic, so set_ptes can't be used to
+				 * batch.  Loop one set_pte_at per cleared
+				 * sub-page PTE — same hwpoison entry for
+				 * every PTE within the kernel page (all map
+				 * the same struct page under PGCL).
+				 */
+				for (i = 0; i < nr_pages; i++)
+					set_pte_at(mm,
+						address + (unsigned long)i * MMUPAGE_SIZE,
+						pvmw.pte + i, pteval);
 			}
 		} else if (likely(pte_present(pteval)) && pte_unused(pteval) &&
 			   !userfaultfd_armed(vma)) {
@@ -2631,10 +2843,11 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 			 * migration) will not expect userfaults on already
 			 * copied pages.
 			 */
-			dec_mm_counter(mm, mm_counter(folio));
+			add_mm_counter(mm, mm_counter(folio), -nr_pages);
 		} else {
 			swp_entry_t entry;
 			pte_t swp_pte;
+			unsigned int i;
 
 			/*
 			 * arch_unmap_one() is expected to be a NOP on
@@ -2646,7 +2859,7 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 					set_huge_pte_at(mm, address, pvmw.pte,
 							pteval, hsz);
 				else
-					set_pte_at(mm, address, pvmw.pte, pteval);
+					set_ptes(mm, address, pvmw.pte, pteval, nr_pages);
 				ret = false;
 				page_vma_mapped_walk_done(&pvmw);
 				break;
@@ -2664,7 +2877,7 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 				}
 			} else if (anon_exclusive &&
 				   folio_try_share_anon_rmap_pte(folio, subpage)) {
-				set_pte_at(mm, address, pvmw.pte, pteval);
+				set_ptes(mm, address, pvmw.pte, pteval, nr_pages);
 				ret = false;
 				page_vma_mapped_walk_done(&pvmw);
 				break;
@@ -2705,7 +2918,19 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 				set_huge_pte_at(mm, address, pvmw.pte, swp_pte,
 						hsz);
 			else
-				set_pte_at(mm, address, pvmw.pte, swp_pte);
+				/*
+				 * Migration entries are non-present swap
+				 * PTEs; no PFN-stride semantic so set_ptes
+				 * cannot batch.  Loop one set_pte_at per
+				 * sub-page PTE — same migration entry for
+				 * every PTE within the kernel page (all
+				 * encode the same destination subpage under
+				 * PGCL since pte_pfn drops sub-page bits).
+				 */
+				for (i = 0; i < nr_pages; i++)
+					set_pte_at(mm,
+						address + (unsigned long)i * MMUPAGE_SIZE,
+						pvmw.pte + i, swp_pte);
 			trace_set_migration_pte(address, pte_val(swp_pte),
 						folio_order(folio));
 			/*
@@ -2714,13 +2939,37 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 			 */
 		}
 
-		if (unlikely(folio_test_hugetlb(folio)))
+		if (unlikely(folio_test_hugetlb(folio))) {
 			hugetlb_remove_rmap(folio);
-		else
+		} else if (folio_test_large(folio)) {
+			/*
+			 * PGCL MMUPAGE: one count per sub-PTE.  This yield turned
+			 * nr_pages (== pvmw.nr_mmupages) sub-PTEs of one cluster
+			 * page into migration entries, so remove exactly that many
+			 * sub-PTE mappings from the src folio.  remove_migration_pte
+			 * re-adds the same per-yield count to the dst folio, so the
+			 * src/dst accounting matches even for a gapped cluster whose
+			 * sub-PTEs span several yields; the helper's per-page -1
+			 * sentinel handles first/last (_nr_pages_mapped).  Non-PGCL:
+			 * nr_pages == 1, one removal.
+			 */
+#if PAGE_MMUSHIFT
+			folio_remove_rmap_subptes(folio, subpage, nr_pages, vma);
+#else
 			folio_remove_rmap_pte(folio, subpage, vma);
+#endif
+		} else {
+			/*
+			 * order-0: per-PTE mapcount; loop the rmap drop
+			 * (decrements by 1 per call).  Non-PGCL: one call.
+			 */
+			unsigned int i;
+			for (i = 0; i < nr_pages; i++)
+				folio_remove_rmap_pte(folio, subpage, vma);
+		}
 		if (vma->vm_flags & VM_LOCKED)
 			mlock_drain_local();
-		folio_put(folio);
+		folio_put_refs(folio, nr_pages);
 	}
 
 	mmu_notifier_invalidate_range_end(&range);
@@ -2862,7 +3111,7 @@ retry:
 	 * caller must filter this event out to prevent livelocks.
 	 */
 	mmu_notifier_range_init_owner(&range, MMU_NOTIFY_EXCLUSIVE, 0,
-				      mm, addr, addr + PAGE_SIZE, owner);
+				      mm, addr, addr + MMUPAGE_SIZE, owner);
 	mmu_notifier_invalidate_range_start(&range);
 
 	/*
@@ -2986,8 +3235,16 @@ static void rmap_walk_anon(struct folio *folio,
 
 	pgoff_start = folio_pgoff(folio);
 	pgoff_end = pgoff_start + folio_nr_pages(folio) - 1;
+	/*
+	 * Like the file case: the anon_vma interval tree is keyed in MMUPAGE
+	 * units (avc_*_pgoff -> vma_*_pgoff), but folio_pgoff()/folio_nr_pages()
+	 * count PAGE-sized clusters.  Query the folio's MMUPAGE span so the tree
+	 * returns exactly the VMAs vma_address() can resolve.  Identity at
+	 * PAGE_MMUSHIFT==0.
+	 */
 	anon_vma_interval_tree_foreach(avc, &anon_vma->rb_root,
-			pgoff_start, pgoff_end) {
+			pgoff_page_to_mmu(pgoff_start),
+			pgoff_page_to_mmu(pgoff_end + 1) - 1) {
 		struct vm_area_struct *vma = avc->vma;
 		unsigned long address = vma_address(vma, pgoff_start,
 				folio_nr_pages(folio));
@@ -3051,8 +3308,19 @@ static void __rmap_walk_file(struct folio *folio, struct address_space *mapping,
 		i_mmap_lock_read(mapping);
 	}
 lookup:
+	/*
+	 * The i_mmap interval tree is keyed in MMUPAGE units (vma_start_pgoff /
+	 * vma_last_pgoff derive from vm_pgoff and vma_pages(), both
+	 * MMUPAGE-granular), whereas pgoff_start/pgoff_end count PAGE-sized
+	 * clusters.  Convert the query to the folio's MMUPAGE span so the
+	 * interval-overlap test selects exactly the VMAs that vma_address() can
+	 * resolve; a cluster-unit key may otherwise spuriously match a VMA that
+	 * does not map the folio, making vma_address() return -EFAULT (BUG).
+	 * pgoff_page_to_mmu() is the identity at PAGE_MMUSHIFT==0.
+	 */
 	vma_interval_tree_foreach(vma, &mapping->i_mmap,
-			pgoff_start, pgoff_end) {
+			pgoff_page_to_mmu(pgoff_start),
+			pgoff_page_to_mmu(pgoff_end + 1) - 1) {
 		unsigned long address = vma_address(vma, pgoff_start, nr_pages);
 
 		VM_BUG_ON_VMA(address == -EFAULT, vma);
