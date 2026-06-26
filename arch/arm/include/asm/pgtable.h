@@ -57,7 +57,7 @@ extern void __pgd_error(const char *file, int line, pgd_t);
  * mapping to be mapped at.  This is particularly important for
  * non-high vector CPUs.
  */
-#define FIRST_USER_ADDRESS	(PAGE_SIZE * 2)
+#define FIRST_USER_ADDRESS	(MMUPAGE_SIZE * 2)
 
 /*
  * Use TASK_SIZE as the ceiling argument for free_pgtables() and
@@ -150,7 +150,13 @@ extern pgd_t swapper_pg_dir[PTRS_PER_PGD];
 
 static inline pte_t *pmd_page_vaddr(pmd_t pmd)
 {
-	return __va(pmd_val(pmd) & PHYS_MASK & (s32)PAGE_MASK);
+	/*
+	 * The PTE page base address stored in the PMD is MMUPAGE-aligned
+	 * (after the PTE_HWTABLE_OFF offset). With PGCL, PAGE_MASK would
+	 * truncate the sub-PAGE bits. Use a mask that preserves the full
+	 * PTE table alignment (PTE_HWTABLE_OFF + PTE_HWTABLE_SIZE bytes).
+	 */
+	return __va(pmd_val(pmd) & PHYS_MASK & (s32)MMUPAGE_MASK);
 }
 
 #define pmd_page(pmd)		pfn_to_page(__phys_to_pfn(pmd_val(pmd) & PHYS_MASK))
@@ -198,7 +204,7 @@ static inline void __sync_icache_dcache(pte_t pteval)
 extern void __sync_icache_dcache(pte_t pteval);
 #endif
 
-#define PFN_PTE_SHIFT		PAGE_SHIFT
+#define PFN_PTE_SHIFT		MMUPAGE_SHIFT
 
 void set_ptes(struct mm_struct *mm, unsigned long addr,
 		      pte_t *ptep, pte_t pteval, unsigned int nr);

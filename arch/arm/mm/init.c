@@ -241,8 +241,8 @@ void __init arch_mm_preinit(void)
 #endif
 
 #ifdef CONFIG_HIGHMEM
-	BUILD_BUG_ON(PKMAP_BASE + LAST_PKMAP * PAGE_SIZE > PAGE_OFFSET);
-	BUG_ON(PKMAP_BASE + LAST_PKMAP * PAGE_SIZE	> PAGE_OFFSET);
+	BUILD_BUG_ON(PKMAP_BASE + LAST_PKMAP * MMUPAGE_SIZE > PAGE_OFFSET);
+	BUG_ON(PKMAP_BASE + LAST_PKMAP * MMUPAGE_SIZE	> PAGE_OFFSET);
 #endif
 }
 
@@ -410,24 +410,118 @@ void mark_rodata_ro(void)
 static inline void fix_kernmem_perms(void) { }
 #endif /* CONFIG_STRICT_KERNEL_RWX */
 
+/*
+ * With PGCL (PAGE_SIZE > MMUPAGE_SIZE), a kernel page can contain both
+ * init-section data and critical page table entries.  Early PTE table
+ * allocations from memblock may land within the init section's physical
+ * range.  Freeing such a page destroys the PTE table, corrupting
+ * kernel mappings (e.g., vectors at 0xffff0000).
+ *
+ * Collect all PTE table physical addresses referenced by kernel PMDs,
+ * then skip any init page that contains one.
+ */
 void free_initmem(void)
 {
 	fix_kernmem_perms();
 
-	poison_init_mem(__init_begin, __init_end - __init_begin);
-	if (!machine_is_integrator() && !machine_is_cintegrator())
-		free_initmem_default(-1);
+	if (!machine_is_integrator() && !machine_is_cintegrator()) {
+		{
+			/*
+			 * Scan page table entries to find PTE tables that
+			 * landed in the init section, and skip any init page
+			 * that contains one.  This applies even when
+			 * PAGE_MMUSHIFT == 0: the early memblock allocator
+			 * routinely places PTE tables for kernel mappings
+			 * such as the vectors page (0xffff0000) inside the
+			 * init section, and free_initmem_default() would
+			 * otherwise free them, corrupting later page table
+			 * walks and hanging userspace startup right after
+			 * init_freeable returns.
+			 *
+			 * LPAE: 4 PGD entries × 512 PMD entries (64-bit each).
+			 *   PMD TABLE entry: bits[39:12] = PTE table phys addr.
+			 * Non-LPAE: 4096 L1 entries (32-bit each).
+			 *   Coarse PT entry: bits[31:10] = PTE table phys addr.
+			 */
+			unsigned long pos;
+			unsigned long start = PAGE_ALIGN((unsigned long)__init_begin);
+			unsigned long end = (unsigned long)__init_end & PAGE_MASK;
+			unsigned long freed = 0;
+
+			for (pos = start; pos < end; pos += PAGE_SIZE) {
+				unsigned long page_phys = __pa(pos);
+				unsigned long page_phys_end = page_phys + PAGE_SIZE;
+				bool has_pgtable = false;
+
+#ifdef CONFIG_ARM_LPAE
+				{
+					pgd_t *pgd;
+					pud_t *pud;
+					pmd_t *pmd;
+					int gi, pi;
+
+					for (gi = 0; gi < PTRS_PER_PGD && !has_pgtable; gi++) {
+						pgd = init_mm.pgd + gi;
+						if (pgd_none(*pgd))
+							continue;
+						pud = pud_offset(p4d_offset(pgd, 0), 0);
+						pmd = (pmd_t *)pud_pgtable(*pud);
+						for (pi = 0; pi < PTRS_PER_PMD; pi++) {
+							pmdval_t val = pmd_val(pmd[pi]);
+							unsigned long pte_phys;
+
+							if ((val & PMD_TYPE_MASK) != PMD_TYPE_TABLE)
+								continue;
+							pte_phys = val & PHYS_MASK & MMUPAGE_MASK;
+							if (pte_phys >= page_phys &&
+							    pte_phys < page_phys_end) {
+								has_pgtable = true;
+								break;
+							}
+						}
+					}
+				}
+#else
+				{
+					u32 *l1 = (u32 *)init_mm.pgd;
+					int i;
+
+					for (i = 0; i < 4096; i++) {
+						u32 desc = l1[i];
+						unsigned long pte_phys;
+
+						if ((desc & PMD_TYPE_MASK) != PMD_TYPE_TABLE)
+							continue;
+						pte_phys = (unsigned long)(desc & ~0x3FFU) & PAGE_MASK;
+						if (pte_phys >= page_phys &&
+						    pte_phys < page_phys_end) {
+							has_pgtable = true;
+							break;
+						}
+					}
+				}
+#endif
+				if (has_pgtable)
+					continue;
+				free_reserved_page(virt_to_page((void *)pos));
+				freed++;
+			}
+			if (freed)
+				pr_info("Freeing unused kernel image (initmem) memory: %ldK\n",
+					freed * (PAGE_SIZE / 1024));
+		}
+	}
 }
 
 #ifdef CONFIG_BLK_DEV_INITRD
 void free_initrd_mem(unsigned long start, unsigned long end)
 {
 	if (start == initrd_start)
-		start = round_down(start, PAGE_SIZE);
+		start = round_down(start, MMUPAGE_SIZE);
 	if (end == initrd_end)
-		end = round_up(end, PAGE_SIZE);
+		end = round_up(end, MMUPAGE_SIZE);
 
-	poison_init_mem((void *)start, PAGE_ALIGN(end) - start);
+	poison_init_mem((void *)start, MMUPAGE_ALIGN(end) - start);
 	free_reserved_area((void *)start, (void *)end, -1, "initrd");
 }
 #endif
