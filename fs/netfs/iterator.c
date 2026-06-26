@@ -64,6 +64,8 @@ ssize_t netfs_extract_user_iter(struct iov_iter *orig, size_t orig_len,
 	pages = (void *)bv + bv_size - pg_size;
 
 	while (count && npages < max_pages) {
+		size_t page_off;
+
 		ret = iov_iter_extract_pages(orig, &pages, count,
 					     max_pages - npages, extraction_flags,
 					     &offset);
@@ -79,7 +81,11 @@ ssize_t netfs_extract_user_iter(struct iov_iter *orig, size_t orig_len,
 			break;
 		}
 
-		cur_npages = DIV_ROUND_UP(offset + ret, PAGE_SIZE);
+		/*
+		 * GUP returns one entry per MMUPAGE, not per kernel PAGE.
+		 * Count and bound-check in MMUPAGE units.
+		 */
+		cur_npages = DIV_ROUND_UP(offset + ret, MMUPAGE_SIZE);
 		if (WARN(cur_npages > max_pages - npages,
 			 "%s: extract_pages overrun %u > %u pages\n",
 			 __func__, npages + cur_npages, max_pages)) {
@@ -88,13 +94,22 @@ ssize_t netfs_extract_user_iter(struct iov_iter *orig, size_t orig_len,
 		}
 
 		count -= ret;
-		ret += offset;
 
+		/*
+		 * Set up bvecs with the correct offset within each kernel
+		 * page.  The first entry starts at the kernel-page offset
+		 * of the original address; subsequent entries advance by
+		 * MMUPAGE_SIZE, wrapping at PAGE_SIZE boundaries.
+		 */
+		page_off = offset;
 		for (i = 0; i < cur_npages; i++) {
-			len = ret > PAGE_SIZE ? PAGE_SIZE : ret;
-			bvec_set_page(bv + npages + i, *pages++, len - offset, offset);
+			len = min_t(size_t, ret, MMUPAGE_SIZE);
+			if (i == 0)
+				len = min_t(size_t, len,
+					    MMUPAGE_SIZE - (offset & ~MMUPAGE_MASK));
+			bvec_set_page(bv + npages + i, *pages++, len, page_off);
 			ret -= len;
-			offset = 0;
+			page_off = (page_off + len) & (PAGE_SIZE - 1);
 		}
 
 		npages += cur_npages;
