@@ -83,7 +83,15 @@ static __always_inline size_t real_mode_size_needed(void)
 	if (real_mode_header)
 		return 0;	/* already allocated. */
 
-	return ALIGN(real_mode_blob_end - real_mode_blob, PAGE_SIZE);
+	/*
+	 * Align to MMUPAGE_SIZE, not PAGE_SIZE.  The real-mode trampoline only
+	 * needs hardware-page (MMUPAGE) granularity; under page clustering
+	 * (PAGE_MMUSHIFT > 0) a PAGE_SIZE alignment+size (e.g. 256K) often
+	 * cannot be satisfied in a fragmented sub-1M e820, panicking the boot in
+	 * init_real_mode().  Identity at PAGE_MMUSHIFT == 0 (MMUPAGE_SIZE ==
+	 * PAGE_SIZE).
+	 */
+	return ALIGN(real_mode_blob_end - real_mode_blob, MMUPAGE_SIZE);
 }
 
 static inline void set_real_mode_mem(phys_addr_t mem)

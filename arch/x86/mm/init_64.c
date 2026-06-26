@@ -481,12 +481,12 @@ phys_pte_init(pte_t *pte_page, unsigned long paddr, unsigned long paddr_end,
 	i = pte_index(paddr);
 
 	for (; i < PTRS_PER_PTE; i++, paddr = paddr_next, pte++) {
-		paddr_next = (paddr & PAGE_MASK) + PAGE_SIZE;
+		paddr_next = (paddr & MMUPAGE_MASK) + MMUPAGE_SIZE;
 		if (paddr >= paddr_end) {
 			if (!after_bootmem &&
-			    !e820__mapped_any(paddr & PAGE_MASK, paddr_next,
+			    !e820__mapped_any(paddr & MMUPAGE_MASK, paddr_next,
 					     E820_TYPE_RAM) &&
-			    !e820__mapped_any(paddr & PAGE_MASK, paddr_next,
+			    !e820__mapped_any(paddr & MMUPAGE_MASK, paddr_next,
 					     E820_TYPE_ACPI))
 				set_pte_init(pte, __pte(0), init);
 			continue;
@@ -505,8 +505,21 @@ phys_pte_init(pte_t *pte_page, unsigned long paddr, unsigned long paddr_end,
 		}
 
 		pages++;
-		set_pte_init(pte, pfn_pte(paddr >> PAGE_SHIFT, prot), init);
-		paddr_last = (paddr & PAGE_MASK) + PAGE_SIZE;
+		/*
+		 * #106 diagnostic + Newton fix: the 4K leaf is reached only for
+		 * sub-2MB RAM fragments (laptop's fragmented UEFI map; never on
+		 * QEMU's contiguous map).  PHYSICAL_PAGE_MASK (== MMUPAGE_MASK &
+		 * __PHYSICAL_MASK) restores the MAXPHYADDR clamp that pfn_pte()
+		 * applies in mainline and that the hand-rolled PGCL PTE dropped;
+		 * identity at PAGE_MMUSHIFT==0.  The WARN_ONCE fires iff paddr
+		 * carries bits above MAXPHYADDR before we build the PTE — i.e. the
+		 * suspected #106 trigger actually reaches this leaf.
+		 */
+		WARN_ONCE(paddr & ~PHYSICAL_PAGE_MASK & ~(MMUPAGE_SIZE - 1),
+			  "PGCL #106: phys_pte_init paddr %lx above MAXPHYADDR (prot %lx)\n",
+			  paddr, (unsigned long)pgprot_val(prot));
+		set_pte_init(pte, __pte((paddr & PHYSICAL_PAGE_MASK) | pgprot_val(prot)), init);
+		paddr_last = (paddr & MMUPAGE_MASK) + MMUPAGE_SIZE;
 	}
 
 	update_page_count(PG_LEVEL_4K, pages);
@@ -1273,8 +1286,16 @@ remove_pagetable(unsigned long start, unsigned long end, bool direct,
 void __ref vmemmap_free(unsigned long start, unsigned long end,
 		struct vmem_altmap *altmap)
 {
-	VM_BUG_ON(!PAGE_ALIGNED(start));
-	VM_BUG_ON(!PAGE_ALIGNED(end));
+	/*
+	 * PGCL: the vmemmap range is MMUPAGE-granular — basepages map it at
+	 * PTE/MMUPAGE granularity, and at PAGE_MMUSHIFT>0 the per-section
+	 * vmemmap chunk (PAGES_PER_SECTION * sizeof(struct page)) is MMUPAGE-
+	 * but not PAGE-aligned.  PAGE_ALIGNED is over-strict here; require only
+	 * MMUPAGE alignment (identity at shift 0).  Mirrors the s390x vmem
+	 * assertion relaxation.
+	 */
+	VM_BUG_ON(!IS_ALIGNED(start, MMUPAGE_SIZE));
+	VM_BUG_ON(!IS_ALIGNED(end, MMUPAGE_SIZE));
 
 	remove_pagetable(start, end, false, altmap);
 }
@@ -1560,8 +1581,16 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
 {
 	int err;
 
-	VM_BUG_ON(!PAGE_ALIGNED(start));
-	VM_BUG_ON(!PAGE_ALIGNED(end));
+	/*
+	 * PGCL: the vmemmap range is MMUPAGE-granular — basepages map it at
+	 * PTE/MMUPAGE granularity, and at PAGE_MMUSHIFT>0 the per-section
+	 * vmemmap chunk (PAGES_PER_SECTION * sizeof(struct page)) is MMUPAGE-
+	 * but not PAGE-aligned.  PAGE_ALIGNED is over-strict here; require only
+	 * MMUPAGE alignment (identity at shift 0).  Mirrors the s390x vmem
+	 * assertion relaxation.
+	 */
+	VM_BUG_ON(!IS_ALIGNED(start, MMUPAGE_SIZE));
+	VM_BUG_ON(!IS_ALIGNED(end, MMUPAGE_SIZE));
 
 	if (end - start < PAGES_PER_SECTION * sizeof(struct page))
 		err = vmemmap_populate_basepages(start, end, node, NULL);

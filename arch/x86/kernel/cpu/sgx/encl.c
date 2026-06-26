@@ -15,7 +15,7 @@
 static int sgx_encl_lookup_backing(struct sgx_encl *encl, unsigned long page_index,
 			    struct sgx_backing *backing);
 
-#define PCMDS_PER_PAGE (PAGE_SIZE / sizeof(struct sgx_pcmd))
+#define PCMDS_PER_PAGE (MMUPAGE_SIZE / sizeof(struct sgx_pcmd))
 /*
  * 32 PCMD entries share a PCMD page. PCMD_FIRST_MASK is used to
  * determine the page index associated with the first PCMD entry
@@ -405,7 +405,8 @@ static vm_fault_t sgx_encl_eaug_page(struct vm_area_struct *vma,
 	 * Do not undo everything when creating PTE entry fails - next #PF
 	 * would find page ready for a PTE.
 	 */
-	vmret = vmf_insert_pfn(vma, addr, PFN_DOWN(phys_addr));
+	/* vmf_insert_pfn() takes an MMUPAGE-granular PFN. */
+	vmret = vmf_insert_pfn(vma, addr, phys_addr >> MMUPAGE_SHIFT);
 	if (vmret != VM_FAULT_NOPAGE) {
 		mutex_unlock(&encl->lock);
 		return VM_FAULT_SIGBUS;
@@ -471,7 +472,8 @@ static vm_fault_t sgx_vma_fault(struct vm_fault *vmf)
 
 	phys_addr = sgx_get_epc_phys_addr(entry->epc_page);
 
-	ret = vmf_insert_pfn(vma, addr, PFN_DOWN(phys_addr));
+	/* vmf_insert_pfn() takes an MMUPAGE-granular PFN. */
+	ret = vmf_insert_pfn(vma, addr, phys_addr >> MMUPAGE_SHIFT);
 	if (ret != VM_FAULT_NOPAGE) {
 		mutex_unlock(&encl->lock);
 

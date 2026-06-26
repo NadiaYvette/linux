@@ -54,8 +54,13 @@ void __init reserve_real_mode(void)
 
 	WARN_ON(slab_is_available());
 
-	/* Has to be under 1M so we can execute real-mode AP code. */
-	mem = memblock_phys_alloc_range(size, PAGE_SIZE, 0, 1<<20);
+	/*
+	 * Has to be under 1M so we can execute real-mode AP code.  Align to
+	 * MMUPAGE_SIZE (hardware page), not PAGE_SIZE: under page clustering a
+	 * PAGE_SIZE (e.g. 256K) alignment is unsatisfiable in a fragmented
+	 * sub-1M e820.  Identity at PAGE_MMUSHIFT == 0.
+	 */
+	mem = memblock_phys_alloc_range(size, MMUPAGE_SIZE, 0, 1<<20);
 	if (!mem)
 		pr_info("No sub-1M memory is available for the trampoline\n");
 	else
@@ -97,7 +102,8 @@ static void __init setup_real_mode(void)
 	unsigned char *base;
 	unsigned long phys_base;
 	struct trampoline_header *trampoline_header;
-	size_t size = PAGE_ALIGN(real_mode_blob_end - real_mode_blob);
+	/* MMUPAGE-granular to match reserve_real_mode()'s allocation size. */
+	size_t size = ALIGN(real_mode_blob_end - real_mode_blob, MMUPAGE_SIZE);
 #ifdef CONFIG_X86_64
 	u64 *trampoline_pgd;
 	u64 efer;
@@ -112,7 +118,14 @@ static void __init setup_real_mode(void)
 	 * successfully. This is not needed for SEV.
 	 */
 	if (cc_platform_has(CC_ATTR_HOST_MEM_ENCRYPT))
-		set_memory_decrypted((unsigned long)base, size >> PAGE_SHIFT);
+		/*
+		 * Round up: under page clustering the trampoline is smaller than
+		 * a PAGE, so size >> PAGE_SHIFT would be 0.  set_memory_*
+		 * operates at PAGE granularity on the containing page.  Identity
+		 * at PAGE_MMUSHIFT == 0 (size is PAGE-aligned there).
+		 */
+		set_memory_decrypted((unsigned long)base,
+				     DIV_ROUND_UP(size, PAGE_SIZE));
 
 	memcpy(base, real_mode_blob, size);
 
@@ -190,20 +203,43 @@ static void __init set_real_mode_permissions(void)
 	unsigned char *base = (unsigned char *) real_mode_header;
 	size_t size = PAGE_ALIGN(real_mode_blob_end - real_mode_blob);
 
-	size_t ro_size =
-		PAGE_ALIGN(real_mode_header->ro_end) -
-		__pa(base);
+	/*
+	 * With PAGE_MMUSHIFT > 0, text_start may be MMUPAGE-aligned
+	 * rather than PAGE-aligned.  Round down to PAGE boundary so
+	 * the CPA code gets a page-aligned address.
+	 */
+	unsigned long text_start_phys =
+		PAGE_ALIGN_DOWN(real_mode_header->text_start);
 
 	size_t text_size =
-		PAGE_ALIGN(real_mode_header->ro_end) -
-		real_mode_header->text_start;
+		PAGE_ALIGN(real_mode_header->ro_end) - text_start_phys;
 
 	unsigned long text_start =
-		(unsigned long) __va(real_mode_header->text_start);
+		(unsigned long) __va(text_start_phys);
 
-	set_memory_nx((unsigned long) base, size >> PAGE_SHIFT);
-	set_memory_ro((unsigned long) base, ro_size >> PAGE_SHIFT);
-	set_memory_x((unsigned long) text_start, text_size >> PAGE_SHIFT);
+	if (PAGE_MMUSHIFT == 0) {
+		size_t ro_size =
+			PAGE_ALIGN(real_mode_header->ro_end) -
+			__pa(base);
+
+		set_memory_nx((unsigned long) base, size >> PAGE_SHIFT);
+		set_memory_ro((unsigned long) base, ro_size >> PAGE_SHIFT);
+		set_memory_x(text_start, text_size >> PAGE_SHIFT);
+	} else {
+		/*
+		 * With PAGE_MMUSHIFT > 0, CPA operates at PAGE_SIZE
+		 * granularity.  We can't do fine-grained NX+RO without
+		 * creating W+X on the data sections that share the same
+		 * PAGE.  But we MUST clear NX on the text, otherwise the
+		 * AP will triple-fault on instruction fetch (the direct
+		 * mapping uses PAGE_KERNEL which includes _PAGE_NX).
+		 *
+		 * Accept the W+X trade-off — the trampoline is only
+		 * used during AP boot and the security impact is
+		 * negligible.
+		 */
+		set_memory_x(text_start, text_size >> PAGE_SHIFT);
+	}
 }
 
 void __init init_real_mode(void)

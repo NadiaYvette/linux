@@ -83,10 +83,10 @@ SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
 		unsigned long, prot, unsigned long, flags,
 		unsigned long, fd, unsigned long, off)
 {
-	if (off & ~PAGE_MASK)
+	if (off & ~MMUPAGE_MASK)
 		return -EINVAL;
 
-	return ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> PAGE_SHIFT);
+	return ksys_mmap_pgoff(addr, len, prot, flags, fd, off >> MMUPAGE_SHIFT);
 }
 
 static void find_start_end(unsigned long addr, unsigned long flags,
@@ -141,7 +141,8 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr, unsigned long len,
 		return -ENOMEM;
 
 	if (addr) {
-		addr = PAGE_ALIGN(addr);
+		/* PGCL: hint addresses are MMUPAGE-granular (identity at shift 0) */
+		addr = MMUPAGE_ALIGN(addr);
 		vma = find_vma(mm, addr);
 		if (end - len >= addr &&
 		    (!vma || addr + len <= vm_start_gap(vma)))
@@ -152,7 +153,7 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr, unsigned long len,
 	info.low_limit = begin;
 	info.high_limit = end;
 	if (!(filp && is_file_hugepages(filp))) {
-		info.align_offset = pgoff << PAGE_SHIFT;
+		info.align_offset = pgoff << MMUPAGE_SHIFT;
 		info.start_gap = stack_guard_placement(vm_flags);
 	}
 	if (filp) {
@@ -187,7 +188,8 @@ arch_get_unmapped_area_topdown(struct file *filp, unsigned long addr0,
 
 	/* requesting a specific address */
 	if (addr) {
-		addr &= PAGE_MASK;
+		/* PGCL: hint addresses are MMUPAGE-granular (identity at shift 0) */
+		addr &= MMUPAGE_MASK;
 		if (!mmap_address_hint_valid(addr, len))
 			goto get_unmapped_area;
 
@@ -207,7 +209,7 @@ get_unmapped_area:
 	info.high_limit = get_mmap_base(0);
 	if (!(filp && is_file_hugepages(filp))) {
 		info.start_gap = stack_guard_placement(vm_flags);
-		info.align_offset = pgoff << PAGE_SHIFT;
+		info.align_offset = pgoff << MMUPAGE_SHIFT;
 	}
 
 	/*
@@ -225,7 +227,14 @@ get_unmapped_area:
 		info.align_offset += get_align_bits();
 	}
 	addr = vm_unmapped_area(&info);
-	if (!(addr & ~PAGE_MASK))
+	/*
+	 * PGCL: vm_unmapped_area() returns an MMUPAGE-granular address; a valid
+	 * result need not be PAGE_SIZE-aligned, so test alignment with
+	 * MMUPAGE_MASK (identity at PAGE_MMUSHIFT==0).  Using PAGE_MASK here made
+	 * valid MMUPAGE-aligned results look like errors -> silent bottom-up
+	 * fallback (and VM_BUG_ON under DEBUG_VM).
+	 */
+	if (!(addr & ~MMUPAGE_MASK))
 		return addr;
 	VM_BUG_ON(addr != -ENOMEM);
 
