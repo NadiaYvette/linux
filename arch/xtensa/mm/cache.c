@@ -225,9 +225,13 @@ void update_mmu_cache_range(struct vm_fault *vmf, struct vm_area_struct *vma,
 
 	folio = page_folio(pfn_to_page(pfn));
 
-	/* Invalidate old entries in TLBs */
-	for (i = 0; i < nr; i++)
-		flush_tlb_page(vma, addr + i * PAGE_SIZE);
+	/*
+	 * Invalidate old entries in TLBs.  Each clustered PAGE installs
+	 * PAGE_MMUCOUNT MMUPAGE-sized PTEs, each with its own TLB entry, so
+	 * flush every MMUPAGE in the range (identity at PAGE_MMUSHIFT == 0).
+	 */
+	for (i = 0; i < nr * PAGE_MMUCOUNT; i++)
+		flush_tlb_page(vma, addr + i * MMUPAGE_SIZE);
 	nr = folio_nr_pages(folio);
 
 #if (DCACHE_WAY_SIZE > PAGE_SIZE)

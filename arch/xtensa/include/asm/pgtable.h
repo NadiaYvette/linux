@@ -376,16 +376,24 @@ static inline pte_t pte_swp_clear_exclusive(pte_t pte)
  * ((pte_t*) ((unsigned long)(pmd_val(*pmd) & PAGE_MASK)) + pte_index(addr))
  *
  */
+/*
+ * Page clustering (CONFIG_PAGE_MMUSHIFT > 0): PAGE_SIZE > MMUPAGE_SIZE, but the
+ * hardware MMU (and its PTE auto-refill) walks the page table in MMUPAGE units.
+ * The PTE table geometry (PTRS_PER_PTE, PGDIR_SHIFT) is MMUPAGE-based, so the
+ * leaf-PTE index is taken at MMUPAGE_SHIFT and the table base is MMUPAGE-aligned
+ * (it occupies the first MMUPAGE_SIZE of its possibly-larger backing page).
+ * Identity with PAGE_SHIFT when PAGE_MMUSHIFT == 0.
+ */
 #define _PGD_INDEX(rt,rs)	extui	rt, rs, PGDIR_SHIFT, 32-PGDIR_SHIFT
-#define _PTE_INDEX(rt,rs)	extui	rt, rs, PAGE_SHIFT, PTRS_PER_PTE_SHIFT
+#define _PTE_INDEX(rt,rs)	extui	rt, rs, MMUPAGE_SHIFT, PTRS_PER_PTE_SHIFT
 
 #define _PGD_OFFSET(mm,adr,tmp)		l32i	mm, mm, MM_PGD;		\
 					_PGD_INDEX(tmp, adr);		\
 					addx4	mm, tmp, mm
 
 #define _PTE_OFFSET(pmd,adr,tmp)	_PTE_INDEX(tmp, adr);		\
-					srli	pmd, pmd, PAGE_SHIFT;	\
-					slli	pmd, pmd, PAGE_SHIFT;	\
+					srli	pmd, pmd, MMUPAGE_SHIFT;	\
+					slli	pmd, pmd, MMUPAGE_SHIFT;	\
 					addx4	pmd, tmp, pmd
 
 #else
