@@ -87,7 +87,7 @@ size_t memcpy_real_iter(struct iov_iter *iter, unsigned long src, size_t count)
 	void *chunk;
 	pte_t pte;
 
-	BUILD_BUG_ON(MEMCPY_REAL_SIZE != PAGE_SIZE);
+	BUILD_BUG_ON(MEMCPY_REAL_SIZE != MMUPAGE_SIZE);
 	while (count) {
 		phys = src & MEMCPY_REAL_MASK;
 		offset = src & ~MEMCPY_REAL_MASK;

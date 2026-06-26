@@ -33,7 +33,7 @@ void __storage_key_init_range(unsigned long start, unsigned long end)
 			}
 		}
 		page_set_storage_key(start, PAGE_DEFAULT_KEY, 1);
-		start += PAGE_SIZE;
+		start += MMUPAGE_SIZE;
 	}
 }
 
@@ -99,12 +99,12 @@ static int walk_pte_level(pmd_t *pmdp, unsigned long addr, unsigned long end,
 		if (flags & SET_MEMORY_INV) {
 			new = set_pte_bit(new, __pgprot(_PAGE_INVALID));
 		} else if (flags & SET_MEMORY_DEF) {
-			new = __pte(pte_val(new) & PAGE_MASK);
+			new = __pte(pte_val(new) & MMUPAGE_MASK);
 			new = set_pte_bit(new, PAGE_KERNEL);
 		}
 		pgt_set((unsigned long *)ptep, pte_val(new), addr, CRDTE_DTT_PAGE);
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 		cond_resched();
 	} while (addr < end);
 	return 0;
@@ -129,7 +129,7 @@ static int split_pmd_page(pmd_t *pmdp, unsigned long addr)
 	ptep = pt_dir;
 	for (i = 0; i < PTRS_PER_PTE; i++) {
 		set_pte(ptep, __pte(pte_addr | prot));
-		pte_addr += PAGE_SIZE;
+		pte_addr += MMUPAGE_SIZE;
 		ptep++;
 	}
 	new = __pmd(__pa(pt_dir) | _SEGMENT_ENTRY);

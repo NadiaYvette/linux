@@ -114,6 +114,47 @@ err_p4d:
 	return -ENOMEM;
 }
 
+#if PAGE_MMUSHIFT
+/*
+ * With PGCL, PAGE_SIZE >> _PAGE_TABLE_SIZE, so allocating order-0 pages
+ * for PTE tables wastes enormous memory (e.g. 64KB for a 4KB table).
+ * Use a slab cache instead.  The cache object is _PAGE_TABLE_SIZE * 2
+ * (PTE entries + software entries), aligned to _PAGE_TABLE_SIZE * 2.
+ *
+ * Since multiple PTE tables share the same underlying struct page/ptdesc,
+ * we cannot use per-ptdesc split PTE locks.  All PTE operations use the
+ * per-mm page_table_lock instead (coarser but correct).
+ */
+static struct kmem_cache *pte_table_cache;
+
+void __init pgtable_cache_init(void)
+{
+	unsigned long sz = _PAGE_TABLE_SIZE * 2;
+
+	pte_table_cache = kmem_cache_create("pte_table", sz, sz,
+					    SLAB_PANIC, NULL);
+}
+
+unsigned long *page_table_alloc_noprof(struct mm_struct *mm)
+{
+	gfp_t gfp = GFP_KERNEL_ACCOUNT;
+	unsigned long *table;
+
+	if (mm == &init_mm)
+		gfp &= ~__GFP_ACCOUNT;
+	table = kmem_cache_alloc(pte_table_cache, gfp);
+	if (!table)
+		return NULL;
+	memset64((u64 *)table, _PAGE_INVALID, PTRS_PER_PTE);
+	memset64((u64 *)table + PTRS_PER_PTE, 0, PTRS_PER_PTE);
+	return table;
+}
+
+void page_table_free(struct mm_struct *mm, unsigned long *table)
+{
+	kmem_cache_free(pte_table_cache, table);
+}
+#else
 unsigned long *page_table_alloc_noprof(struct mm_struct *mm)
 {
 	gfp_t gfp = GFP_KERNEL_ACCOUNT;
@@ -144,8 +185,34 @@ void page_table_free(struct mm_struct *mm, unsigned long *table)
 		return free_reserved_ptdesc(ptdesc);
 	pagetable_dtor_free(ptdesc);
 }
+#endif
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+#if PAGE_MMUSHIFT
+/*
+ * With PGCL slab-based PTE tables, we cannot use ptdesc->pt_rcu_head
+ * since multiple PTE tables share one page.  Just free directly —
+ * the caller holds the mm lock and has already invalidated PTEs.
+ */
+static void pte_free_now(struct rcu_head *head)
+{
+	unsigned long *table = (unsigned long *)head;
+
+	kmem_cache_free(pte_table_cache, table);
+}
+
+void pte_free_defer(struct mm_struct *mm, pgtable_t pgtable)
+{
+	/*
+	 * Embed rcu_head at the start of the PTE table (which is being
+	 * freed, so the PTE entries are no longer referenced).  The table
+	 * is _PAGE_TABLE_SIZE * 2 = 4096 bytes, plenty for rcu_head.
+	 */
+	struct rcu_head *head = (struct rcu_head *)pgtable;
+
+	call_rcu(head, pte_free_now);
+}
+#else
 static void pte_free_now(struct rcu_head *head)
 {
 	struct ptdesc *ptdesc = container_of(head, struct ptdesc, pt_rcu_head);
@@ -159,6 +226,7 @@ void pte_free_defer(struct mm_struct *mm, pgtable_t pgtable)
 
 	call_rcu(&ptdesc->pt_rcu_head, pte_free_now);
 }
+#endif
 #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
 
 /*
@@ -236,7 +304,7 @@ static int base_page_walk(unsigned long *origin, unsigned long addr,
 	if (!alloc)
 		return 0;
 	pte = origin;
-	pte += (addr & _PAGE_INDEX) >> PAGE_SHIFT;
+	pte += (addr & _PAGE_INDEX) >> MMUPAGE_SHIFT;
 	do {
 		next = base_page_addr_end(addr, end);
 		*pte = base_lra(addr);
