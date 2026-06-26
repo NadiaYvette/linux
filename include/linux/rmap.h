@@ -144,9 +144,16 @@ static inline void __folio_large_mapcount_sanity_checks(const struct folio *foli
 	 * folio in a single MM as "exclusively mapped". This is primarily
 	 * a check on 32bit, where we currently reduce the size of the per-MM
 	 * mapcount to a short.
+	 *
+	 * PGCL: mapcount counts hardware (MMUPAGE) PTEs, so a fully PTE-mapped
+	 * folio has folio_large_nr_pages() * PAGE_MMUCOUNT mappings and a
+	 * single add may carry up to one cluster's PAGE_MMUCOUNT sub-PTEs.
+	 * PAGE_MMUCOUNT == 1 at PAGE_MMUSHIFT == 0, so this is the mainline
+	 * bound there (Newton limit).
 	 */
-	VM_WARN_ON_ONCE(diff > folio_large_nr_pages(folio));
-	VM_WARN_ON_ONCE(folio_large_nr_pages(folio) - 1 > MM_ID_MAPCOUNT_MAX);
+	VM_WARN_ON_ONCE(diff > folio_large_nr_pages(folio) * PAGE_MMUCOUNT);
+	VM_WARN_ON_ONCE(folio_large_nr_pages(folio) * PAGE_MMUCOUNT - 1 >
+			MM_ID_MAPCOUNT_MAX);
 
 	VM_WARN_ON_ONCE(folio_mm_id(folio, 0) == MM_ID_DUMMY &&
 			folio->_mm_id_mapcount[0] != -1);
@@ -421,6 +428,13 @@ void folio_remove_rmap_ptes(struct folio *, struct page *, int nr_pages,
 		struct vm_area_struct *);
 #define folio_remove_rmap_pte(folio, page, vma) \
 	folio_remove_rmap_ptes(folio, page, 1, vma)
+#if PAGE_MMUSHIFT
+/* PGCL: add/remove @count MMUPAGE sub-PTE mappings of ONE kernel page (cluster) */
+void folio_add_rmap_subptes(struct folio *, struct page *, int count,
+		struct vm_area_struct *);
+void folio_remove_rmap_subptes(struct folio *, struct page *, int count,
+		struct vm_area_struct *);
+#endif
 void folio_remove_rmap_pmd(struct folio *, struct page *,
 		struct vm_area_struct *);
 void folio_remove_rmap_pud(struct folio *, struct page *,
@@ -871,6 +885,19 @@ struct page_vma_mapped_walk {
 	pte_t *pte;
 	spinlock_t *ptl;
 	unsigned int flags;
+	/*
+	 * Number of consecutive MMUPAGE PTEs at @pte that the current yield
+	 * covers.  For non-PGCL builds (PAGE_MMUSHIFT == 0) always 1.  For
+	 * PGCL the walker yields one kernel page at a time and populates
+	 * this with the count of MMUPAGE PTEs (typically PAGE_MMUCOUNT, less
+	 * at VMA edges or for partial sub-page mappings via remap_file_pages).
+	 *
+	 * PTE-level operations (set_ptes, get_and_clear_ptes, TLB flush, RSS
+	 * accounting, refcount) should consume @nr_mmupages.  Struct-page
+	 * operations (rmap, _mapcount) should treat each yield as a single
+	 * kernel page.
+	 */
+	unsigned int nr_mmupages;
 };
 
 #define DEFINE_FOLIO_VMA_WALK(name, _folio, _vma, _address, _flags)	\
@@ -881,6 +908,7 @@ struct page_vma_mapped_walk {
 		.vma = _vma,						\
 		.address = _address,					\
 		.flags = _flags,					\
+		.nr_mmupages = 1,					\
 	}
 
 static inline void page_vma_mapped_walk_done(struct page_vma_mapped_walk *pvmw)

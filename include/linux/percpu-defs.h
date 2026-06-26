@@ -155,14 +155,23 @@
 
 /*
  * Declaration/definition used for per-CPU variables that must be page aligned.
+ *
+ * Aligned to MMUPAGE_SIZE (the hardware page), not the kernel PAGE_SIZE: under
+ * page clustering (PAGE_MMUSHIFT > 0) the two differ, and every page-aligned
+ * per-CPU variable in the tree needs only hardware-page alignment -- they are
+ * hardware structures mapped into the cpu_entry_area at hardware-page
+ * granularity (DS area, TSS, GDT, entry/exception/doublefault stacks) or
+ * vmapped, guard-paged stacks.  None requires kernel-cluster-page alignment, so
+ * aligning to the (large) PAGE_SIZE would only waste memory.  Identity at
+ * PAGE_MMUSHIFT == 0 (MMUPAGE_SIZE == PAGE_SIZE).
  */
 #define DECLARE_PER_CPU_PAGE_ALIGNED(type, name)			\
 	DECLARE_PER_CPU_SECTION(type, name, "..page_aligned")		\
-	__aligned(PAGE_SIZE)
+	__aligned(MMUPAGE_SIZE)
 
 #define DEFINE_PER_CPU_PAGE_ALIGNED(type, name)				\
 	DEFINE_PER_CPU_SECTION(type, name, "..page_aligned")		\
-	__aligned(PAGE_SIZE)
+	__aligned(MMUPAGE_SIZE)
 
 /*
  * Declaration/definition used for per-CPU variables that must be read mostly.

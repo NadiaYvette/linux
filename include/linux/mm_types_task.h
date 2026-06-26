@@ -17,7 +17,18 @@
 #include <asm/tlbbatch.h>
 #endif
 
+/*
+ * When PACK_PTE_PTLOCKS is on, an architecture packs multiple
+ * MMUPAGE-sized PTE tables into a single PAGE_SIZE ptdesc; the ptdesc
+ * therefore carries an array of spinlocks (one per sub-table) that must
+ * be dynamically allocated regardless of spinlock_t size.  Force the
+ * ALLOC_SPLIT_PTLOCKS path so ptdesc->ptl is a pointer.
+ */
+#ifdef CONFIG_PACK_PTE_PTLOCKS
+#define ALLOC_SPLIT_PTLOCKS	1
+#else
 #define ALLOC_SPLIT_PTLOCKS	(SPINLOCK_SIZE > BITS_PER_LONG/8)
+#endif
 
 /*
  * When updating this, please also update struct resident_page_types[] in

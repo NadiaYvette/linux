@@ -47,7 +47,7 @@
 
 static inline unsigned long pte_index(unsigned long address)
 {
-	return (address >> PAGE_SHIFT) & (PTRS_PER_PTE - 1);
+	return (address >> MMUPAGE_SHIFT) & (PTRS_PER_PTE - 1);
 }
 
 #ifndef pmd_index
@@ -388,6 +388,26 @@ static inline pte_t pte_advance_pfn(pte_t pte, unsigned long nr)
 
 #define pte_next_pfn(pte) pte_advance_pfn(pte, 1)
 
+/*
+ * Generic fallback for __phys_to_pte_val: identity transform.
+ * Architectures where the PTE PFN field is not a direct physical address
+ * (e.g. riscv with _PAGE_PFN_SHIFT != MMUPAGE_SHIFT) must define their own.
+ * Defined here (before set_ptes) so PGCL sub-page PTE encoding works.
+ */
+#ifndef __phys_to_pte_val
+#define __phys_to_pte_val(phys)	(phys)
+#endif
+
+/*
+ * Inverse of __phys_to_pte_val.  Identity on archs where the PTE PFN field
+ * is a direct physical address (x86, s390 etc).  Archs where the encoding
+ * differs (mips PFN at bit 6, riscv _PAGE_PFN_SHIFT != MMUPAGE_SHIFT) must
+ * override this together with __phys_to_pte_val.
+ */
+#ifndef __pte_val_to_phys
+#define __pte_val_to_phys(val)	(val)
+#endif
+
 #ifndef set_ptes
 /**
  * set_ptes - Map consecutive pages to a contiguous range of addresses.
@@ -410,6 +430,29 @@ static inline pte_t pte_advance_pfn(pte_t pte, unsigned long nr)
 static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 		pte_t *ptep, pte_t pte, unsigned int nr)
 {
+#if PAGE_MMUSHIFT > 0
+	page_table_check_ptes_set(mm, addr, ptep, pte, nr);
+
+	if (nr == 1) {
+		/* Single PTE: caller already set up sub-page offset */
+		set_pte(ptep, pte);
+	} else {
+		unsigned int i;
+
+		/*
+		 * With page clustering, nr is the number of PTEs
+		 * (MMUPAGE-granular entries) to write.  Each PTE
+		 * maps one MMUPAGE.  Advance physical address by
+		 * MMUPAGE_SIZE per PTE.
+		 */
+		for (i = 0; i < nr; i++) {
+			set_pte(ptep, pte);
+			ptep++;
+			pte = __pte(pte_val(pte) +
+				    __phys_to_pte_val(MMUPAGE_SIZE));
+		}
+	}
+#else
 	page_table_check_ptes_set(mm, addr, ptep, pte, nr);
 
 	for (;;) {
@@ -419,6 +462,7 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 		ptep++;
 		pte = pte_next_pfn(pte);
 	}
+#endif
 }
 #endif
 #define set_pte_at(mm, addr, ptep, pte) set_ptes(mm, addr, ptep, pte, 1)
@@ -658,7 +702,7 @@ static inline void clear_young_dirty_ptes(struct vm_area_struct *vma,
 		if (--nr == 0)
 			break;
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 	}
 }
 #endif
@@ -845,7 +889,7 @@ static inline pte_t get_and_clear_full_ptes(struct mm_struct *mm,
 	pte = ptep_get_and_clear_full(mm, addr, ptep, full);
 	while (--nr) {
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 		tmp_pte = ptep_get_and_clear_full(mm, addr, ptep, full);
 		if (pte_dirty(tmp_pte))
 			pte = pte_mkdirty(pte);
@@ -906,7 +950,7 @@ static inline void clear_full_ptes(struct mm_struct *mm, unsigned long addr,
 		if (--nr == 0)
 			break;
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 	}
 }
 #endif
@@ -993,7 +1037,7 @@ static inline void clear_not_present_full_ptes(struct mm_struct *mm,
 		if (--nr == 0)
 			break;
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 	}
 }
 #endif
@@ -1018,6 +1062,48 @@ static inline pte_t pte_mkwrite(pte_t pte, struct vm_area_struct *vma)
 {
 	return pte_mkwrite_novma(pte);
 }
+#endif
+
+/*
+ * pte_mksub - adjust a PTE to address a sub-page (MMU page) within a
+ * kernel page.  offset is in bytes, always a multiple of MMUPAGE_SIZE.
+ * When PAGE_MMUSHIFT == 0, this is a no-op (offset is always 0).
+ * Architectures should override this if their PTE format requires
+ * special handling.
+ */
+#ifndef pte_mksub
+static inline pte_t pte_mksub(pte_t pte, unsigned long offset)
+{
+#if PAGE_MMUSHIFT
+	return __pte(pte_val(pte) + __phys_to_pte_val(offset));
+#else
+	return pte;
+#endif
+}
+#define pte_mksub pte_mksub
+#endif
+
+/*
+ * pte_suboffset - extract the sub-page byte offset from a PTE.
+ * Returns the offset of the addressed MMU page within its kernel page.
+ * When PAGE_MMUSHIFT == 0, always returns 0.
+ */
+#ifndef pte_suboffset
+static inline unsigned long pte_suboffset(pte_t pte)
+{
+#if PAGE_MMUSHIFT
+	/*
+	 * Convert the PTE's PFN field back to a physical address (identity
+	 * on most archs; mips/riscv encode PFN at a different bit position
+	 * and override __pte_val_to_phys), then mask out everything except
+	 * the sub-page bits within a kernel page.
+	 */
+	return __pte_val_to_phys(pte_val(pte)) & (PAGE_SIZE - 1) & MMUPAGE_MASK;
+#else
+	return 0;
+#endif
+}
+#define pte_suboffset pte_suboffset
 #endif
 
 #if defined(CONFIG_ARCH_WANT_PMD_MKWRITE) && !defined(pmd_mkwrite)
@@ -1062,7 +1148,7 @@ static inline void wrprotect_ptes(struct mm_struct *mm, unsigned long addr,
 		if (--nr == 0)
 			break;
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 	}
 }
 #endif
@@ -1095,7 +1181,7 @@ static inline bool clear_flush_young_ptes(struct vm_area_struct *vma,
 		if (--nr == 0)
 			break;
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 	}
 
 	return young;
@@ -1616,7 +1702,7 @@ static inline pte_t modify_prot_start_ptes(struct vm_area_struct *vma,
 	pte = ptep_modify_prot_start(vma, addr, ptep);
 	while (--nr) {
 		ptep++;
-		addr += PAGE_SIZE;
+		addr += MMUPAGE_SIZE;
 		tmp_pte = ptep_modify_prot_start(vma, addr, ptep);
 		if (pte_dirty(tmp_pte))
 			pte = pte_mkdirty(pte);
@@ -1653,12 +1739,21 @@ static inline void modify_prot_commit_ptes(struct vm_area_struct *vma, unsigned 
 {
 	int i;
 
-	for (i = 0; i < nr; ++i, ++ptep, addr += PAGE_SIZE) {
+	for (i = 0; i < nr; ++i, ++ptep, addr += MMUPAGE_SIZE) {
 		ptep_modify_prot_commit(vma, addr, ptep, old_pte, pte);
 
-		/* Advance PFN only, set same prot */
+		/*
+		 * Advance PFN only, set same prot.
+		 * pte_next_pfn advances by PAGE_SIZE.  With PGCL, consecutive
+		 * sub-pages differ by MMUPAGE_SIZE, not PAGE_SIZE.
+		 */
+#if PAGE_MMUSHIFT
+		old_pte = __pte(pte_val(old_pte) + __phys_to_pte_val(MMUPAGE_SIZE));
+		pte = __pte(pte_val(pte) + __phys_to_pte_val(MMUPAGE_SIZE));
+#else
 		old_pte = pte_next_pfn(old_pte);
 		pte = pte_next_pfn(pte);
+#endif
 	}
 }
 #endif

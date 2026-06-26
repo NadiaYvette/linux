@@ -560,6 +560,27 @@
 
 
 /*
+ * Place .text.hot at a TLB-page boundary for the locality benefit.  The
+ * alignment is what's needed by the MMU, not what the kernel uses for its
+ * page allocator, so MMUPAGE_SIZE is the right granularity: under page
+ * clustering (PAGE_MMUSHIFT > 0) PAGE_SIZE can be many MMU-pages, and
+ * aligning on it wastes up to PAGE_SIZE - 1 bytes here -- enough on
+ * parisc/PGCL=6 to push the trap-vector branch to intr_extint past the
+ * 19-bit displacement field.
+ *
+ * Many arch lds files don't expose MMUPAGE_SIZE to the linker-script
+ * preprocessor (they synthesize PAGE_SIZE from asm-offsets via a private
+ * symbol like _PAGE_SIZE).  Fall back to PAGE_SIZE when MMUPAGE_SIZE
+ * isn't visible -- correct on non-PGCL kernels and matches the previous
+ * behavior on arches that haven't surfaced MMUPAGE_SIZE to their lds yet.
+ */
+#ifdef MMUPAGE_SIZE
+#define LDS_ALIGN_TLB_PAGE()	. = ALIGN(MMUPAGE_SIZE)
+#else
+#define LDS_ALIGN_TLB_PAGE()	. = ALIGN(PAGE_SIZE)
+#endif
+
+/*
  * Non-instrumentable text section
  */
 #define NOINSTR_TEXT							\
@@ -603,7 +624,7 @@
 		*(.text.unknown .text.unknown.*)			\
 		TEXT_SPLIT						\
 		TEXT_UNLIKELY						\
-		. = ALIGN(PAGE_SIZE);					\
+		LDS_ALIGN_TLB_PAGE();					\
 		TEXT_HOT						\
 		*(TEXT_MAIN .text.fixup)				\
 		NOINSTR_TEXT						\

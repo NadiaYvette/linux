@@ -164,8 +164,8 @@ extern struct vdso_time_data *vdso_k_time_data;
 extern struct vdso_rng_data *vdso_k_rng_data;
 extern struct vdso_arch_data *vdso_k_arch_data;
 
-#define VDSO_ARCH_DATA_SIZE ALIGN(sizeof(struct vdso_arch_data), PAGE_SIZE)
-#define VDSO_ARCH_DATA_PAGES (VDSO_ARCH_DATA_SIZE >> PAGE_SHIFT)
+#define VDSO_ARCH_DATA_SIZE ALIGN(sizeof(struct vdso_arch_data), MMUPAGE_SIZE)
+#define VDSO_ARCH_DATA_PAGES (VDSO_ARCH_DATA_SIZE >> MMUPAGE_SHIFT)
 
 enum vdso_pages {
 	VDSO_TIME_PAGE_OFFSET,
@@ -179,19 +179,19 @@ enum vdso_pages {
 #else /* !__ASSEMBLY__ */
 
 #ifdef CONFIG_VDSO_GETRANDOM
-#define __vdso_u_rng_data	PROVIDE(vdso_u_rng_data = vdso_u_data + 2 * PAGE_SIZE);
+#define __vdso_u_rng_data	PROVIDE(vdso_u_rng_data = vdso_u_data + 2 * MMUPAGE_SIZE);
 #else
 #define __vdso_u_rng_data
 #endif
 
 #ifdef CONFIG_ARCH_HAS_VDSO_ARCH_DATA
-#define __vdso_u_arch_data	PROVIDE(vdso_u_arch_data = vdso_u_data + 3 * PAGE_SIZE);
+#define __vdso_u_arch_data	PROVIDE(vdso_u_arch_data = vdso_u_data + 3 * MMUPAGE_SIZE);
 #else
 #define __vdso_u_arch_data
 #endif
 
 #define VDSO_VVAR_SYMS						\
-	PROVIDE(vdso_u_data = . - __VDSO_PAGES * PAGE_SIZE);	\
+	PROVIDE(vdso_u_data = . - __VDSO_PAGES * MMUPAGE_SIZE);	\
 	PROVIDE(vdso_u_time_data = vdso_u_data);		\
 	__vdso_u_rng_data					\
 	__vdso_u_arch_data					\
