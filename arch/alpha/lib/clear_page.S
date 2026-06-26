@@ -5,6 +5,7 @@
  * Zero an entire page.
  */
 #include <linux/export.h>
+#include <asm/page.h>
 	.text
 	.align 4
 	.global clear_page
@@ -12,7 +13,7 @@
 clear_page:
 	.prologue 0
 
-	lda	$0,128
+	lda	$0,PAGE_SIZE/64
 	nop
 	unop
 	nop

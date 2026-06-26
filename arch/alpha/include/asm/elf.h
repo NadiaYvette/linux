@@ -83,7 +83,8 @@ typedef elf_fpreg_t elf_fpregset_t[ELF_NFPREG];
 #define ELF_DATA	ELFDATA2LSB
 #define ELF_ARCH	EM_ALPHA
 
-#define ELF_EXEC_PAGESIZE	8192
+/* AT_PAGESZ = hardware page = MMUPAGE_SIZE under PGCL (8192 on alpha). */
+#define ELF_EXEC_PAGESIZE	MMUPAGE_SIZE
 
 /* This is the location that an ET_DYN program is loaded if exec'ed.  Typical
    use of this is to invoke "./ld.so someprog" to test out a new version of

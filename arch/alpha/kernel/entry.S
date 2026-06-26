@@ -11,10 +11,31 @@
 #include <asm/errno.h>
 #include <asm/unistd.h>
 #include <linux/errno.h>
+#include <asm/page.h>
 
 	.text
 	.set noat
 	.cfi_sections	.debug_frame
+
+/*
+ * Load THREAD_SIZE - 1 into $8, for use with BIC to get current.
+ * THREAD_SIZE = 2*PAGE_SIZE may exceed 16-bit signed range, so use
+ * ldah+lda pair.  The low 16 bits of (2*PAGE_SIZE-1) are 0xffff when
+ * PAGE_SIZE >= 0x8000, which the assembler would expand as a large
+ * unsigned immediate rather than -1.  Use .if to emit the signed
+ * form explicitly:  when lo >= 0x8000, increment hi by 1 and negate lo.
+ * For  16KB (MMUSHIFT=0): hi=0, lo=0x3fff   → lda $8, 0x3fff($31)
+ * For 256KB (MMUSHIFT=4): hi=4, lo=-1       → ldah $8,4($31); lda $8,-1($8)
+ */
+.macro	LOAD_THREAD_MASK
+.if	((2*PAGE_SIZE - 1) & 0xffff) >= 0x8000
+	ldah	$8, (((2*PAGE_SIZE - 1) >> 16) + 1)($31)
+	lda	$8, (((2*PAGE_SIZE - 1) & 0xffff) - 0x10000)($8)
+.else
+	ldah	$8, ((2*PAGE_SIZE - 1) >> 16)($31)
+	lda	$8, ((2*PAGE_SIZE - 1) & 0xffff)($8)
+.endif
+.endm
 
 .macro	CFI_START_OSF_FRAME	func
 	.align	4
@@ -234,7 +255,7 @@
 
 CFI_START_OSF_FRAME entInt
 	SAVE_ALL
-	lda	$8, 0x3fff
+	LOAD_THREAD_MASK
 	lda	$26, ret_from_sys_call
 	bic	$sp, $8, $8
 	mov	$sp, $19
@@ -243,7 +264,7 @@ CFI_END_OSF_FRAME entInt
 
 CFI_START_OSF_FRAME entArith
 	SAVE_ALL
-	lda	$8, 0x3fff
+	LOAD_THREAD_MASK
 	lda	$26, ret_from_sys_call
 	bic	$sp, $8, $8
 	mov	$sp, $18
@@ -271,7 +292,7 @@ CFI_START_OSF_FRAME entMM
 	.cfi_rel_offset	$15, 48
 	addq	$sp, 64, $19
 /* handle the fault */
-	lda	$8, 0x3fff
+	LOAD_THREAD_MASK
 	bic	$sp, $8, $8
 	jsr	$26, do_page_fault
 /* reload the registers after the exception code played.  */
@@ -297,7 +318,7 @@ CFI_END_OSF_FRAME entMM
 
 CFI_START_OSF_FRAME entIF
 	SAVE_ALL
-	lda	$8, 0x3fff
+	LOAD_THREAD_MASK
 	lda	$26, ret_from_sys_call
 	bic	$sp, $8, $8
 	mov	$sp, $17
@@ -367,7 +388,7 @@ CFI_START_OSF_FRAME entUna
 	.cfi_rel_offset	$27, 27*8
 	.cfi_rel_offset	$28, 28*8
 	.cfi_rel_offset	$29, 29*8
-	lda	$8, 0x3fff
+	LOAD_THREAD_MASK
 	stq	$31, 248($sp)
 	bic	$sp, $8, $8
 	jsr	$26, do_entUna
@@ -453,7 +474,7 @@ entUnaUser:
 	.cfi_rel_offset	$13, 32
 	.cfi_rel_offset	$14, 40
 	.cfi_rel_offset	$15, 48
-	lda	$8, 0x3fff
+	LOAD_THREAD_MASK
 	addq	$sp, 64, $19
 	bic	$sp, $8, $8
 	jsr	$26, do_entUnaUser
@@ -478,7 +499,7 @@ CFI_END_OSF_FRAME entUna
 
 CFI_START_OSF_FRAME entDbg
 	SAVE_ALL
-	lda	$8, 0x3fff
+	LOAD_THREAD_MASK
 	lda	$26, ret_from_sys_call
 	bic	$sp, $8, $8
 	mov	$sp, $16
@@ -517,11 +538,7 @@ CFI_END_OSF_FRAME entDbg
 	.cfi_rel_offset	$gp, 16
 entSys:
 	SAVE_ALL
-        ldq     $1, 0($sp)          /* syscall nr from saved r0 */
-        stq     $1, 8($sp)          /* regs->r1 = shadow syscall nr */
-        stq     $1, 16($sp)         /* regs->r2 = restart syscall nr */
-
-	lda	$8, 0x3fff
+	LOAD_THREAD_MASK
 	bic	$sp, $8, $8
 	lda	$4, NR_syscalls($31)
 	stq	$16, SP_OFF+24($sp)
@@ -532,6 +549,17 @@ entSys:
 	stq	$17, SP_OFF+32($sp)
 	s8addq	$0, $5, $5
 	stq	$18, SP_OFF+40($sp)
+	/* Save the syscall number into regs->r1 (mutable) and regs->r2
+	 * (preserved for restart).  Without this the strace path sets
+	 * regs->r1 itself but the non-strace fast path leaves both slots
+	 * holding whatever PAL entry put in $1/$2 -- garbage from the
+	 * caller's perspective.  $syscall_error then loads $18 from
+	 * regs->r2 to drive ERESTART restart, and the garbage value
+	 * (often zero) suppresses do_signal()'s `if (r0)` ERESTART
+	 * conversion, leaking ERESTARTSYS=512 into userspace errno.
+	 */
+	stq	$0, 8($sp)		/* regs->r1 = current syscall nr */
+	stq	$0, 16($sp)		/* regs->r2 = original syscall nr */
 	.cfi_rel_offset	$16, SP_OFF+24
 	.cfi_rel_offset	$17, SP_OFF+32
 	.cfi_rel_offset	$18, SP_OFF+40
@@ -819,7 +847,7 @@ alpha_switch_to:
 	bsr	$26, __save_fpu
 1:
 	call_pal PAL_swpctx
-	lda	$8, 0x3fff
+	LOAD_THREAD_MASK
 	UNDO_SWITCH_STACK
 	bic	$sp, $8, $8
 	mov	$17, $0
