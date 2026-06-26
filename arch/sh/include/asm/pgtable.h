@@ -98,9 +98,15 @@ static inline void update_mmu_cache_range(struct vm_fault *vmf,
 		struct vm_area_struct *vma, unsigned long address,
 		pte_t *ptep, unsigned int nr)
 {
-	pte_t pte = *ptep;
-	__update_cache(vma, address, pte);
-	__update_tlb(vma, address, pte);
+	for (;;) {
+		pte_t pte = *ptep;
+		__update_cache(vma, address, pte);
+		__update_tlb(vma, address, pte);
+		if (--nr == 0)
+			break;
+		ptep++;
+		address += MMUPAGE_SIZE;
+	}
 }
 #define update_mmu_cache(vma, addr, ptep) \
 	update_mmu_cache_range(NULL, vma, addr, ptep, 1)

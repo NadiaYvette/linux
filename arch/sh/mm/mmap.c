@@ -46,7 +46,7 @@ static inline unsigned long COLOUR_ALIGN(unsigned long addr,
 					 unsigned long pgoff)
 {
 	unsigned long base = (addr + shm_align_mask) & ~shm_align_mask;
-	unsigned long off = (pgoff << PAGE_SHIFT) & shm_align_mask;
+	unsigned long off = (pgoff << MMUPAGE_SHIFT) & shm_align_mask;
 
 	return base + off;
 }
@@ -65,7 +65,7 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr,
 		 * cache aliasing constraints.
 		 */
 		if ((flags & MAP_SHARED) &&
-		    ((addr - (pgoff << PAGE_SHIFT)) & shm_align_mask))
+		    ((addr - (pgoff << MMUPAGE_SHIFT)) & shm_align_mask))
 			return -EINVAL;
 		return addr;
 	}
@@ -92,8 +92,8 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr,
 	info.length = len;
 	info.low_limit = TASK_UNMAPPED_BASE;
 	info.high_limit = TASK_SIZE;
-	info.align_mask = do_colour_align ? (PAGE_MASK & shm_align_mask) : 0;
-	info.align_offset = pgoff << PAGE_SHIFT;
+	info.align_mask = do_colour_align ? (MMUPAGE_MASK & shm_align_mask) : 0;
+	info.align_offset = pgoff << MMUPAGE_SHIFT;
 	return vm_unmapped_area(&info);
 }
 
@@ -113,7 +113,7 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 		 * cache aliasing constraints.
 		 */
 		if ((flags & MAP_SHARED) &&
-		    ((addr - (pgoff << PAGE_SHIFT)) & shm_align_mask))
+		    ((addr - (pgoff << MMUPAGE_SHIFT)) & shm_align_mask))
 			return -EINVAL;
 		return addr;
 	}
@@ -142,8 +142,8 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 	info.length = len;
 	info.low_limit = PAGE_SIZE;
 	info.high_limit = mm->mmap_base;
-	info.align_mask = do_colour_align ? (PAGE_MASK & shm_align_mask) : 0;
-	info.align_offset = pgoff << PAGE_SHIFT;
+	info.align_mask = do_colour_align ? (MMUPAGE_MASK & shm_align_mask) : 0;
+	info.align_offset = pgoff << MMUPAGE_SHIFT;
 	addr = vm_unmapped_area(&info);
 
 	/*
@@ -152,7 +152,7 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 	 * can happen with large stack limits and large mmap()
 	 * allocations.
 	 */
-	if (addr & ~PAGE_MASK) {
+	if (addr & ~MMUPAGE_MASK) {
 		VM_BUG_ON(addr != -ENOMEM);
 		info.flags = 0;
 		info.low_limit = TASK_UNMAPPED_BASE;
