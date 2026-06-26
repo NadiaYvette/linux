@@ -170,7 +170,7 @@ static void note_prot_uxn(struct ptdump_pg_state *st, unsigned long addr)
 	WARN_ONCE(1, "arm64/mm: Found non-UXN mapping at address %p/%pS\n",
 		  (void *)st->start_address, (void *)st->start_address);
 
-	st->uxn_pages += (addr - st->start_address) / PAGE_SIZE;
+	st->uxn_pages += (addr - st->start_address) / MMUPAGE_SIZE;
 }
 
 static void note_prot_wx(struct ptdump_pg_state *st, unsigned long addr)
@@ -185,7 +185,7 @@ static void note_prot_wx(struct ptdump_pg_state *st, unsigned long addr)
 	WARN_ONCE(1, "arm64/mm: Found insecure W+X mapping at address %p/%pS\n",
 		  (void *)st->start_address, (void *)st->start_address);
 
-	st->wx_pages += (addr - st->start_address) / PAGE_SIZE;
+	st->wx_pages += (addr - st->start_address) / MMUPAGE_SIZE;
 }
 
 void note_page(struct ptdump_state *pt_st, unsigned long addr, int level,

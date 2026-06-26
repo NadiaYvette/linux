@@ -83,7 +83,7 @@ static int find_num_contig(struct mm_struct *mm, unsigned long addr,
 	pud_t *pudp;
 	pmd_t *pmdp;
 
-	*pgsize = PAGE_SIZE;
+	*pgsize = MMUPAGE_SIZE;
 	p4dp = p4d_offset(pgdp, addr);
 	pudp = pud_offset(p4dp, addr);
 	pmdp = pmd_offset(pudp, addr);
@@ -106,7 +106,7 @@ static inline int num_contig_ptes(unsigned long size, size_t *pgsize)
 		contig_ptes = CONT_PMDS;
 		break;
 	case CONT_PTE_SIZE:
-		*pgsize = PAGE_SIZE;
+		*pgsize = MMUPAGE_SIZE;
 		contig_ptes = CONT_PTES;
 		break;
 	default:
@@ -503,7 +503,8 @@ static int __init hugetlbpage_init(void)
 
 	hugetlb_add_hstate(CONT_PMD_SHIFT - PAGE_SHIFT);
 	hugetlb_add_hstate(PMD_SHIFT - PAGE_SHIFT);
-	hugetlb_add_hstate(CONT_PTE_SHIFT - PAGE_SHIFT);
+	if (CONT_PTE_SHIFT > PAGE_SHIFT)
+		hugetlb_add_hstate(CONT_PTE_SHIFT - PAGE_SHIFT);
 
 	return 0;
 }
