@@ -203,9 +203,11 @@ static inline void check_stack_overflow(unsigned long sp)
 static __always_inline void call_do_softirq(const void *sp)
 {
 	/* Temporarily switch r1 to sp, call __do_softirq() then restore r1. */
+	const void *newsp = (const char *)sp + THREAD_SIZE - STACK_FRAME_MIN_SIZE;
+
 	asm volatile (
-		 PPC_STLU "	%%r1, %[offset](%[sp])	;"
-		"mr		%%r1, %[sp]		;"
+		 PPC_STL "	%%r1, 0(%[newsp])	;"
+		"mr		%%r1, %[newsp]		;"
 #ifdef CONFIG_PPC_KERNEL_PCREL
 		"bl		%[callee]@notoc		;"
 #else
@@ -214,7 +216,7 @@ static __always_inline void call_do_softirq(const void *sp)
 		 PPC_LL "	%%r1, 0(%%r1)		;"
 		 : // Outputs
 		 : // Inputs
-		   [sp] "b" (sp), [offset] "i" (THREAD_SIZE - STACK_FRAME_MIN_SIZE),
+		   [newsp] "b" (newsp),
 		   [callee] "i" (__do_softirq)
 		 : // Clobbers
 		   "lr", "xer", "ctr", "memory", "cr0", "cr1", "cr5", "cr6",
@@ -257,12 +259,13 @@ static void __do_irq(struct pt_regs *regs, unsigned long oldsp)
 static __always_inline void call_do_irq(struct pt_regs *regs, void *sp)
 {
 	register unsigned long r3 asm("r3") = (unsigned long)regs;
+	void *newsp = (char *)sp + THREAD_SIZE - STACK_FRAME_MIN_SIZE;
 
 	/* Temporarily switch r1 to sp, call __do_irq() then restore r1. */
 	asm volatile (
-		 PPC_STLU "	%%r1, %[offset](%[sp])	;"
+		 PPC_STL "	%%r1, 0(%[newsp])	;"
 		"mr		%%r4, %%r1		;"
-		"mr		%%r1, %[sp]		;"
+		"mr		%%r1, %[newsp]		;"
 #ifdef CONFIG_PPC_KERNEL_PCREL
 		"bl		%[callee]@notoc		;"
 #else
@@ -272,7 +275,7 @@ static __always_inline void call_do_irq(struct pt_regs *regs, void *sp)
 		 : // Outputs
 		   "+r" (r3)
 		 : // Inputs
-		   [sp] "b" (sp), [offset] "i" (THREAD_SIZE - STACK_FRAME_MIN_SIZE),
+		   [newsp] "b" (newsp),
 		   [callee] "i" (__do_irq)
 		 : // Clobbers
 		   "lr", "xer", "ctr", "memory", "cr0", "cr1", "cr5", "cr6",
