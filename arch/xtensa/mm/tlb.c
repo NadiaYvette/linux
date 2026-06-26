@@ -28,7 +28,12 @@ static inline void __flush_itlb_all (void)
 
 	for (w = 0; w < ITLB_ARF_WAYS; w++) {
 		for (i = 0; i < (1 << XCHAL_ITLB_ARF_ENTRIES_LOG2); i++) {
-			int e = w + (i << PAGE_SHIFT);
+			/*
+			 * The autorefill-way entry index sits at the hardware
+			 * page-size (MMUPAGE) bit position of the TLB index;
+			 * identity with PAGE_SHIFT when PAGE_MMUSHIFT == 0.
+			 */
+			int e = w + (i << MMUPAGE_SHIFT);
 			invalidate_itlb_entry_no_isync(e);
 		}
 	}
@@ -41,7 +46,8 @@ static inline void __flush_dtlb_all (void)
 
 	for (w = 0; w < DTLB_ARF_WAYS; w++) {
 		for (i = 0; i < (1 << XCHAL_DTLB_ARF_ENTRIES_LOG2); i++) {
-			int e = w + (i << PAGE_SHIFT);
+			/* See __flush_itlb_all() re MMUPAGE_SHIFT. */
+			int e = w + (i << MMUPAGE_SHIFT);
 			invalidate_dtlb_entry_no_isync(e);
 		}
 	}
@@ -100,21 +106,27 @@ void local_flush_tlb_range(struct vm_area_struct *vma,
 		 (unsigned long)mm->context.asid[cpu], start, end);
 	local_irq_save(flags);
 
-	if (end-start + (PAGE_SIZE-1) <= _TLB_ENTRIES << PAGE_SHIFT) {
+	/*
+	 * Each hardware TLB entry covers one MMUPAGE, so the range is
+	 * invalidated in MMUPAGE steps (PAGE_MMUCOUNT entries per clustered
+	 * PAGE) and the TLB-capacity heuristic counts MMUPAGE-sized entries.
+	 * Identity with PAGE_SIZE/PAGE_SHIFT when PAGE_MMUSHIFT == 0.
+	 */
+	if (end-start + (MMUPAGE_SIZE-1) <= _TLB_ENTRIES << MMUPAGE_SHIFT) {
 		int oldpid = get_rasid_register();
 
 		set_rasid_register(ASID_INSERT(mm->context.asid[cpu]));
-		start &= PAGE_MASK;
+		start &= MMUPAGE_MASK;
 		if (vma->vm_flags & VM_EXEC)
 			while(start < end) {
 				invalidate_itlb_mapping(start);
 				invalidate_dtlb_mapping(start);
-				start += PAGE_SIZE;
+				start += MMUPAGE_SIZE;
 			}
 		else
 			while(start < end) {
 				invalidate_dtlb_mapping(start);
-				start += PAGE_SIZE;
+				start += MMUPAGE_SIZE;
 			}
 
 		set_rasid_register(oldpid);
@@ -151,12 +163,13 @@ void local_flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
 void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
 {
 	if (end > start && start >= TASK_SIZE && end <= PAGE_OFFSET &&
-	    end - start < _TLB_ENTRIES << PAGE_SHIFT) {
-		start &= PAGE_MASK;
+	    end - start < _TLB_ENTRIES << MMUPAGE_SHIFT) {
+		/* One TLB entry per MMUPAGE; identity at PAGE_MMUSHIFT == 0. */
+		start &= MMUPAGE_MASK;
 		while (start < end) {
 			invalidate_itlb_mapping(start);
 			invalidate_dtlb_mapping(start);
-			start += PAGE_SIZE;
+			start += MMUPAGE_SIZE;
 		}
 	} else {
 		local_flush_tlb_all();
@@ -231,12 +244,16 @@ static void tlb_suspicious(void)
  */
 static int check_tlb_entry(unsigned w, unsigned e, bool dtlb)
 {
-	unsigned tlbidx = w | (e << PAGE_SHIFT);
+	/*
+	 * The TLB index encodes the autorefill-way entry at the MMUPAGE bit
+	 * position, and each entry maps one MMUPAGE; identity at MMUSHIFT 0.
+	 */
+	unsigned tlbidx = w | (e << MMUPAGE_SHIFT);
 	unsigned r0 = dtlb ?
 		read_dtlb_virtual(tlbidx) : read_itlb_virtual(tlbidx);
 	unsigned r1 = dtlb ?
 		read_dtlb_translation(tlbidx) : read_itlb_translation(tlbidx);
-	unsigned vpn = (r0 & PAGE_MASK) | (e << PAGE_SHIFT);
+	unsigned vpn = (r0 & MMUPAGE_MASK) | (e << MMUPAGE_SHIFT);
 	unsigned pte = get_pte_for_vaddr(vpn);
 	unsigned mm_asid = (get_rasid_register() >> 8) & ASID_MASK;
 	unsigned tlb_asid = r0 & ASID_MASK;
@@ -251,7 +268,7 @@ static int check_tlb_entry(unsigned w, unsigned e, bool dtlb)
 	}
 
 	if (tlb_asid == mm_asid) {
-		if ((pte ^ r1) & PAGE_MASK) {
+		if ((pte ^ r1) & MMUPAGE_MASK) {
 			pr_err("%cTLB: way: %u, entry: %u, mapping: %08x->%08x, PTE: %08x\n",
 					dtlb ? 'D' : 'I', w, e, r0, r1, pte);
 			if (pte == 0 || !pte_present(__pte(pte))) {

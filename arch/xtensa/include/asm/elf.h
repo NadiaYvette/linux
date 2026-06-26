@@ -112,7 +112,7 @@ typedef elf_fpreg_t elf_fpregset_t[ELF_NFPREG];
 #define ELF_CLASS	ELFCLASS32
 #define ELF_ARCH	EM_XTENSA
 
-#define ELF_EXEC_PAGESIZE	PAGE_SIZE
+#define ELF_EXEC_PAGESIZE	MMUPAGE_SIZE
 #define CORE_DUMP_USE_REGSET
 
 /*

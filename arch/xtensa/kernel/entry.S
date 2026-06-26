@@ -1659,7 +1659,12 @@ ENTRY(fast_second_level_miss)
 
 	movi	a1, (PHYS_OFFSET - PAGE_OFFSET) & 0xffffffff
 	add	a0, a0, a1		# pmdval - PAGE_OFFSET
-	extui	a1, a0, 0, PAGE_SHIFT	# ... & PAGE_MASK
+	/*
+	 * Under page clustering the hardware PTE auto-refill way maps an
+	 * MMUPAGE_SIZE (hardware page) of PTEs, so mask the page-table page
+	 * to MMUPAGE granularity (identity with PAGE_SHIFT at PAGE_MMUSHIFT==0).
+	 */
+	extui	a1, a0, 0, MMUPAGE_SHIFT	# ... & MMUPAGE_MASK
 	xor	a0, a0, a1
 
 	movi	a1, _PAGE_DIRECTORY
@@ -1678,9 +1683,9 @@ ENTRY(fast_second_level_miss)
 	extui	a3, a3, 28, 2		# addr. bit 28 and 29	0,1,2,3
 	rsr	a1, ptevaddr
 	addx2	a3, a3, a3		# ->			0,3,6,9
-	srli	a1, a1, PAGE_SHIFT
+	srli	a1, a1, MMUPAGE_SHIFT
 	extui	a3, a3, 2, 2		# ->			0,0,1,2
-	slli	a1, a1, PAGE_SHIFT	# ptevaddr & PAGE_MASK
+	slli	a1, a1, MMUPAGE_SHIFT	# ptevaddr & MMUPAGE_MASK
 	addi	a3, a3, DTLB_WAY_PGD
 	add	a1, a1, a3		# ... + way_number
 

@@ -66,6 +66,29 @@ enum fixed_addresses kmap_local_map_idx(int type, unsigned long pfn);
 enum fixed_addresses kmap_local_unmap_idx(int type, unsigned long addr);
 #define arch_kmap_local_unmap_idx	kmap_local_unmap_idx
 
+#elif defined(CONFIG_PAGE_MMUSHIFT) && CONFIG_PAGE_MMUSHIFT > 0
+
+/*
+ * Page clustering without dcache aliasing: a kmap covers a whole PAGE, but the
+ * fixmap is indexed in MMUPAGE units, so each logical kmap slot consumes
+ * PAGE_MMUCOUNT consecutive fixmap indices.  Scale the generic slot index
+ * (idx + KM_MAX_IDX * cpu) accordingly so consecutive kmaps are PAGE-spaced and
+ * arch_kmap_local_set_pte's cluster of sub-PTEs fits exactly in one slot.
+ */
+#include <linux/smp.h>
+
+static inline int arch_kmap_local_map_idx(int idx, unsigned long pfn)
+{
+	return (idx + KM_MAX_IDX * smp_processor_id()) * PAGE_MMUCOUNT;
+}
+#define arch_kmap_local_map_idx		arch_kmap_local_map_idx
+
+static inline int arch_kmap_local_unmap_idx(int idx, unsigned long vaddr)
+{
+	return (idx + KM_MAX_IDX * smp_processor_id()) * PAGE_MMUCOUNT;
+}
+#define arch_kmap_local_unmap_idx	arch_kmap_local_unmap_idx
+
 #endif
 
 extern pte_t *pkmap_page_table;
@@ -74,6 +97,16 @@ static inline void flush_cache_kmaps(void)
 {
 	flush_cache_all();
 }
+
+/*
+ * A kmap slot covers one PAGE.  Under page clustering (PAGE_MMUSHIFT > 0) a PAGE
+ * is PAGE_MMUCOUNT MMUPAGEs, each needing its own hardware PTE, so install the
+ * whole cluster of sub-PTEs (the leaf PTEs are MMUPAGE-granular and contiguous).
+ * set_ptes() writes PAGE_MMUCOUNT entries advancing the physical address by
+ * MMUPAGE_SIZE each; this is a single set_pte() when PAGE_MMUSHIFT == 0.
+ */
+#define arch_kmap_local_set_pte(mm, vaddr, ptep, ptev)	\
+	set_ptes(mm, vaddr, ptep, ptev, PAGE_MMUCOUNT)
 
 #define arch_kmap_local_post_unmap(vaddr)	\
 	local_flush_tlb_kernel_range(vaddr, vaddr + PAGE_SIZE)
