@@ -32,8 +32,14 @@
 			    SPR_DMMUCFGR_NTS_OFF))
 #define NUM_ITLB_SETS (1 << ((mfspr(SPR_IMMUCFGR) & SPR_IMMUCFGR_NTS) >> \
 			    SPR_IMMUCFGR_NTS_OFF))
-#define DTLB_OFFSET(addr) (((addr) >> PAGE_SHIFT) & (NUM_DTLB_SETS-1))
-#define ITLB_OFFSET(addr) (((addr) >> PAGE_SHIFT) & (NUM_ITLB_SETS-1))
+/*
+ * The TLB set is selected per HARDWARE page (MMUPAGE, 8 KiB) -- the asm
+ * miss handlers index it with EA >> MMUPAGE_SHIFT (the 0xd shifts).  Under
+ * page clustering a clustered PAGE spans PAGE_MMUCOUNT sets, so use
+ * MMUPAGE_SHIFT here too.  Identity at PAGE_MMUSHIFT==0.
+ */
+#define DTLB_OFFSET(addr) (((addr) >> MMUPAGE_SHIFT) & (NUM_DTLB_SETS-1))
+#define ITLB_OFFSET(addr) (((addr) >> MMUPAGE_SHIFT) & (NUM_ITLB_SETS-1))
 /*
  * Invalidate all TLB entries.
  *
@@ -103,7 +109,12 @@ void local_flush_tlb_range(struct vm_area_struct *vma,
 	dtlbeir = have_dtlbeir;
 	itlbeir = have_itlbeir;
 
-	for (addr = start; addr < end; addr += PAGE_SIZE) {
+	/*
+	 * Step by MMUPAGE_SIZE: each hardware TLB entry covers one MMUPAGE,
+	 * so a clustered PAGE needs PAGE_MMUCOUNT invalidations.  Identity at
+	 * PAGE_MMUSHIFT==0 (MMUPAGE_SIZE == PAGE_SIZE).
+	 */
+	for (addr = start; addr < end; addr += MMUPAGE_SIZE) {
 		if (dtlbeir)
 			flush_dtlb_page_eir(addr);
 		else

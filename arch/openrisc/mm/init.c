@@ -98,9 +98,21 @@ static void __init map_ram(void)
 				      __func__);
 			set_pmd(pme, __pmd(_KERNPG_TABLE + __pa(pte)));
 
-			/* Fill the newly allocated page with PTE'S */
+			/*
+			 * Fill the newly allocated page with PTEs.  Each PTE
+			 * slot maps one HARDWARE page (MMUPAGE, 8 KiB): the
+			 * software TLB walker indexes the table by
+			 * (EA >> MMUPAGE_SHIFT) & (PTRS_PER_PTE-1), so step the
+			 * virtual/physical cursors by MMUPAGE_SIZE, not the
+			 * (clustered) PAGE_SIZE.  Under page clustering one
+			 * clustered PAGE is PAGE_MMUCOUNT such slots; using
+			 * PAGE_SIZE here would map only every PAGE_MMUCOUNTth
+			 * hardware page and run the cursor PAGE_MMUCOUNT times
+			 * too far per PGD entry.  Identity at PAGE_MMUSHIFT==0
+			 * (MMUPAGE_SIZE == PAGE_SIZE).
+			 */
 			for (j = 0; p < e && j < PTRS_PER_PTE;
-			     v += PAGE_SIZE, p += PAGE_SIZE, j++, pte++) {
+			     v += MMUPAGE_SIZE, p += MMUPAGE_SIZE, j++, pte++) {
 				if (v >= (u32) _e_kernel_ro ||
 				    v < (u32) _s_kernel_ro)
 					prot = PAGE_KERNEL;
@@ -208,8 +220,21 @@ static int __init map_page(unsigned long va, phys_addr_t pa, pgprot_t prot)
 	if (pte == NULL)
 		return -ENOMEM;
 
+	/*
+	 * A fixmap slot is exactly one HARDWARE page (MMUPAGE), not a
+	 * clustered PAGE: the generic fixmap is MMUPAGE-granular under page
+	 * clustering (asm-generic/fixmap.h spaces slots by MMUPAGE_SIZE and
+	 * __set_fixmap callers add the in-MMUPAGE offset).  So install a
+	 * single PTE for the MMUPAGE containing @pa, masking the physical
+	 * address with MMUPAGE_MASK (pfn_pte()/PAGE_SHIFT would drop the
+	 * sub-cluster offset and map the cluster base -- wrong for a
+	 * non-cluster-aligned fixmap target such as TEXT_POKE).  Mapping more
+	 * than one PTE here would overrun the adjacent (8 KiB-spaced) fixmap
+	 * slot.  Identity at PAGE_MMUSHIFT==0 (MMUPAGE_MASK == PAGE_MASK).
+	 */
 	if (pgprot_val(prot))
-		set_pte_at(&init_mm, va, pte, pfn_pte(pa >> PAGE_SHIFT, prot));
+		set_pte_at(&init_mm, va, pte,
+			   __pte(((pa & MMUPAGE_MASK)) | pgprot_val(prot)));
 	else
 		pte_clear(&init_mm, va, pte);
 
