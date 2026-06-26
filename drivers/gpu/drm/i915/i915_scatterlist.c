@@ -82,7 +82,7 @@ struct i915_refct_sgt *i915_rsgt_from_mm_node(const struct drm_mm_node *node,
 					      u32 page_alignment)
 {
 	const u32 max_segment = round_down(UINT_MAX, page_alignment);
-	const u32 segment_pages = max_segment >> PAGE_SHIFT;
+	const u32 segment_pages = max_segment >> MMUPAGE_SHIFT;
 	u64 block_size, offset, prev_end;
 	struct i915_refct_sgt *rsgt;
 	struct sg_table *st;
@@ -94,7 +94,7 @@ struct i915_refct_sgt *i915_rsgt_from_mm_node(const struct drm_mm_node *node,
 	if (!rsgt)
 		return ERR_PTR(-ENOMEM);
 
-	i915_refct_sgt_init(rsgt, node->size << PAGE_SHIFT);
+	i915_refct_sgt_init(rsgt, node->size << MMUPAGE_SHIFT);
 	st = &rsgt->table;
 	/* restricted by sg_alloc_table */
 	if (WARN_ON(overflows_type(DIV_ROUND_UP_ULL(node->size, segment_pages),
@@ -112,8 +112,8 @@ struct i915_refct_sgt *i915_rsgt_from_mm_node(const struct drm_mm_node *node,
 	sg = st->sgl;
 	st->nents = 0;
 	prev_end = (resource_size_t)-1;
-	block_size = node->size << PAGE_SHIFT;
-	offset = node->start << PAGE_SHIFT;
+	block_size = node->size << MMUPAGE_SHIFT;
+	offset = node->start << MMUPAGE_SHIFT;
 
 	while (block_size) {
 		u64 len;

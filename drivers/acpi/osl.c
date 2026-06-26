@@ -282,8 +282,24 @@ acpi_map_lookup_virt(void __iomem *virt, acpi_size size)
 	return NULL;
 }
 
-#if defined(CONFIG_ARM64) || defined(CONFIG_RISCV)
-/* ioremap will take care of cache attributes */
+#if defined(CONFIG_ARM64) || defined(CONFIG_RISCV) || defined(CONFIG_LOONGARCH) || CONFIG_PAGE_MMUSHIFT > 0
+/*
+ * ioremap will take care of cache attributes (LoongArch uses the DMW
+ * direct-mapped window, ioremap is essentially free there).
+ *
+ * The kmap path is unsafe under PGCL (PAGE_MMUSHIFT > 0) on EVERY arch,
+ * not just the three above: struct page is PAGE-granular (one per
+ * PAGE_SIZE cluster), but acpi_map() derives an MMUPAGE-granular pfn
+ * (pg_off >> MMUPAGE_SHIFT) and feeds it to page_is_ram()/pfn_to_page()/
+ * kmap(), which all expect a PAGE pfn (pg_off >> PAGE_SHIFT).  The pfn is
+ * then PAGE_MMUCOUNT times too large, so page_is_ram() probes the wrong
+ * address (e.g. table at phys P is tested at P << PAGE_MMUSHIFT) and, when
+ * that happens to land in RAM on a large-memory machine, kmap() maps the
+ * wrong physical page and ACPI reads garbage (e.g. a bogus MCFG length ->
+ * runaway entry loop).  Small-RAM/QEMU configs dodge it by accident
+ * because P << PAGE_MMUSHIFT lands above RAM.  Route through ioremap under
+ * PGCL on all arches.  Identity (page_is_ram) when PAGE_MMUSHIFT == 0.
+ */
 #define should_use_kmap(pfn)   0
 #else
 #define should_use_kmap(pfn)   page_is_ram(pfn)
@@ -293,9 +309,9 @@ static void __iomem *acpi_map(acpi_physical_address pg_off, unsigned long pg_sz)
 {
 	unsigned long pfn;
 
-	pfn = pg_off >> PAGE_SHIFT;
+	pfn = pg_off >> MMUPAGE_SHIFT;
 	if (should_use_kmap(pfn)) {
-		if (pg_sz > PAGE_SIZE)
+		if (pg_sz > MMUPAGE_SIZE)
 			return NULL;
 		return (void __iomem __force *)kmap(pfn_to_page(pfn));
 	} else
@@ -306,7 +322,7 @@ static void acpi_unmap(acpi_physical_address pg_off, void __iomem *vaddr)
 {
 	unsigned long pfn;
 
-	pfn = pg_off >> PAGE_SHIFT;
+	pfn = pg_off >> MMUPAGE_SHIFT;
 	if (should_use_kmap(pfn))
 		kunmap(pfn_to_page(pfn));
 	else
@@ -356,8 +372,8 @@ void __iomem __ref
 		return NULL;
 	}
 
-	pg_off = round_down(phys, PAGE_SIZE);
-	pg_sz = round_up(phys + size, PAGE_SIZE) - pg_off;
+	pg_off = round_down(phys, MMUPAGE_SIZE);
+	pg_sz = round_up(phys + size, MMUPAGE_SIZE) - pg_off;
 	virt = acpi_map(phys, size);
 	if (!virt) {
 		mutex_unlock(&acpi_ioremap_lock);
@@ -366,7 +382,7 @@ void __iomem __ref
 	}
 
 	INIT_LIST_HEAD(&map->list);
-	map->virt = (void __iomem __force *)((unsigned long)virt & PAGE_MASK);
+	map->virt = (void __iomem __force *)((unsigned long)virt & MMUPAGE_MASK);
 	map->phys = pg_off;
 	map->size = pg_sz;
 	map->track.refcount = 1;

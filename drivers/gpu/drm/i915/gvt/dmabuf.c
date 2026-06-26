@@ -55,10 +55,10 @@ static int vgpu_gem_get_pages(struct drm_i915_gem_object *obj)
 	struct intel_vgpu_fb_info *fb_info;
 	unsigned int page_num; /* limited by sg_alloc_table */
 
-	if (overflows_type(obj->base.size >> PAGE_SHIFT, page_num))
+	if (overflows_type(obj->base.size >> MMUPAGE_SHIFT, page_num))
 		return -E2BIG;
 
-	page_num = obj->base.size >> PAGE_SHIFT;
+	page_num = obj->base.size >> MMUPAGE_SHIFT;
 	fb_info = (struct intel_vgpu_fb_info *)obj->gvt_info;
 	if (drm_WARN_ON(&dev_priv->drm, !fb_info))
 		return -ENODEV;
@@ -77,7 +77,7 @@ static int vgpu_gem_get_pages(struct drm_i915_gem_object *obj)
 		return ret;
 	}
 	gtt_entries = (gen8_pte_t __iomem *)to_gt(dev_priv)->ggtt->gsm +
-		(fb_info->start >> PAGE_SHIFT);
+		(fb_info->start >> MMUPAGE_SHIFT);
 	for_each_sg(st->sgl, sg, page_num, i) {
 		dma_addr_t dma_addr =
 			GEN8_DECODE_PTE(readq(&gtt_entries[i]));
@@ -87,8 +87,8 @@ static int vgpu_gem_get_pages(struct drm_i915_gem_object *obj)
 		}
 
 		sg->offset = 0;
-		sg->length = PAGE_SIZE;
-		sg_dma_len(sg) = PAGE_SIZE;
+		sg->length = MMUPAGE_SIZE;
+		sg_dma_len(sg) = MMUPAGE_SIZE;
 		sg_dma_address(sg) = dma_addr;
 	}
 
@@ -208,7 +208,7 @@ static struct drm_i915_gem_object *vgpu_create_gem(struct drm_device *dev,
 		return NULL;
 
 	drm_gem_private_object_init(dev, &obj->base,
-		roundup(info->size, PAGE_SIZE));
+		roundup(info->size, MMUPAGE_SIZE));
 	i915_gem_object_init(obj, &intel_vgpu_gem_ops, &lock_class, 0);
 	i915_gem_object_set_readonly(obj);
 
@@ -325,7 +325,7 @@ static int vgpu_get_plane_info(struct drm_device *dev,
 		return -EINVAL;
 	}
 
-	if (info->start & (PAGE_SIZE - 1)) {
+	if (info->start & (MMUPAGE_SIZE - 1)) {
 		gvt_vgpu_err("Not aligned fb address:0x%llx\n", info->start);
 		return -EFAULT;
 	}

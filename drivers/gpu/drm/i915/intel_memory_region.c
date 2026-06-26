@@ -68,7 +68,7 @@ static int iopagetest(struct intel_memory_region *mem,
 	int err;
 	int i;
 
-	va = ioremap_wc(mem->io.start + offset, PAGE_SIZE);
+	va = ioremap_wc(mem->io.start + offset, MMUPAGE_SIZE);
 	if (!va) {
 		dev_err(mem->i915->drm.dev,
 			"Failed to ioremap memory region [%pa + %pa] for %ps\n",
@@ -77,11 +77,11 @@ static int iopagetest(struct intel_memory_region *mem,
 	}
 
 	for (i = 0; i < ARRAY_SIZE(val); i++) {
-		err = __iopagetest(mem, va, PAGE_SIZE, val[i], offset, caller);
+		err = __iopagetest(mem, va, MMUPAGE_SIZE, val[i], offset, caller);
 		if (err)
 			break;
 
-		err = __iopagetest(mem, va, PAGE_SIZE, ~val[i], offset, caller);
+		err = __iopagetest(mem, va, MMUPAGE_SIZE, ~val[i], offset, caller);
 		if (err)
 			break;
 	}
@@ -93,7 +93,7 @@ static int iopagetest(struct intel_memory_region *mem,
 static resource_size_t random_page(resource_size_t last)
 {
 	/* Limited to low 44b (16TiB), but should suffice for a spot check */
-	return get_random_u32_below(last >> PAGE_SHIFT) << PAGE_SHIFT;
+	return get_random_u32_below(last >> MMUPAGE_SHIFT) << MMUPAGE_SHIFT;
 }
 
 static int iomemtest(struct intel_memory_region *mem,
@@ -103,10 +103,10 @@ static int iomemtest(struct intel_memory_region *mem,
 	resource_size_t last, page;
 	int err;
 
-	if (resource_size(&mem->io) < PAGE_SIZE)
+	if (resource_size(&mem->io) < MMUPAGE_SIZE)
 		return 0;
 
-	last = resource_size(&mem->io) - PAGE_SIZE;
+	last = resource_size(&mem->io) - MMUPAGE_SIZE;
 
 	/*
 	 * Quick test to check read/write access to the iomap (backing store).
@@ -120,7 +120,7 @@ static int iomemtest(struct intel_memory_region *mem,
 	 */
 
 	if (test_all) {
-		for (page = 0; page <= last; page += PAGE_SIZE) {
+		for (page = 0; page <= last; page += MMUPAGE_SIZE) {
 			err = iopagetest(mem, page, caller);
 			if (err)
 				return err;
@@ -313,8 +313,8 @@ void intel_memory_region_avail(struct intel_memory_region *mr,
 	if (mr->type == INTEL_MEMORY_LOCAL) {
 		i915_ttm_buddy_man_avail(mr->region_private,
 					 avail, visible_avail);
-		*avail <<= PAGE_SHIFT;
-		*visible_avail <<= PAGE_SHIFT;
+		*avail <<= MMUPAGE_SHIFT;
+		*visible_avail <<= MMUPAGE_SHIFT;
 	} else {
 		*avail = mr->total;
 		*visible_avail = mr->total;

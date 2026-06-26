@@ -1225,12 +1225,12 @@ static bool can_fault(struct vm_fault *vmf, unsigned long size, unsigned long *p
 	unsigned long end = start + size;
 	bool is_valid;
 
-	is_valid = (vmf->address & mask) == ((vmf->pgoff << PAGE_SHIFT) & mask) &&
+	is_valid = (vmf->address & mask) == ((vmf->pgoff << MMUPAGE_SHIFT) & mask) &&
 		start >= vmf->vma->vm_start &&
 		end <= vmf->vma->vm_end;
 
 	if (is_valid)
-		*pfn = vmf->pgoff & ~(mask >> PAGE_SHIFT);
+		*pfn = vmf->pgoff & ~(mask >> MMUPAGE_SHIFT);
 
 	return is_valid;
 }

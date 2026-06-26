@@ -369,7 +369,7 @@ int pvrdma_mmap(struct ib_ucontext *ibcontext, struct vm_area_struct *vma)
 	struct pvrdma_ucontext *context = to_vucontext(ibcontext);
 	unsigned long start = vma->vm_start;
 	unsigned long size = vma->vm_end - vma->vm_start;
-	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
+	unsigned long offset = vma->vm_pgoff << MMUPAGE_SHIFT;
 
 	dev_dbg(&context->dev->pdev->dev, "create mmap region\n");
 

@@ -73,7 +73,7 @@ static const struct vm_operations_struct rvt_vm_ops = {
 int rvt_mmap(struct ib_ucontext *context, struct vm_area_struct *vma)
 {
 	struct rvt_dev_info *rdi = ib_to_rvt(context->device);
-	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
+	unsigned long offset = vma->vm_pgoff << MMUPAGE_SHIFT;
 	unsigned long size = vma->vm_end - vma->vm_start;
 	struct rvt_mmap_info *ip, *pp;
 	int ret = -EINVAL;

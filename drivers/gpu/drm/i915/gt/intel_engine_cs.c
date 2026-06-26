@@ -275,7 +275,7 @@ u32 intel_engine_context_size(struct intel_gt *gt, u8 class)
 	struct intel_uncore *uncore = gt->uncore;
 	u32 cxt_size;
 
-	BUILD_BUG_ON(I915_GTT_PAGE_SIZE != PAGE_SIZE);
+	BUILD_BUG_ON(I915_GTT_PAGE_SIZE != MMUPAGE_SIZE);
 
 	switch (class) {
 	case COMPUTE_CLASS:

@@ -47,10 +47,17 @@ struct sg_table;
  *    This value is derived from %PVR_DEVICE_PAGE_SIZE.
  */
 
-/* PVR_DEVICE_PAGE_SIZE determines the page size */
-#define PVR_DEVICE_PAGE_SIZE (PAGE_SIZE)
-#define PVR_DEVICE_PAGE_SHIFT (PAGE_SHIFT)
-#define PVR_DEVICE_PAGE_MASK (PAGE_MASK)
+/* PVR_DEVICE_PAGE_SIZE determines the page size.  This is the GPU's
+ * MMU page size, which must be one of the hardware-supported sizes
+ * (SZ_4K, SZ_16K, SZ_64K, SZ_256K, SZ_1M, SZ_2M -- see pvr_mmu.c).
+ * Under PGCL the kernel PAGE_SIZE may be a multiple of the MMU page
+ * (e.g. 128K at PGCL=5 with a 4K MMU page), which would be rejected
+ * by the device MMU.  Use MMUPAGE_SIZE so the GPU programs the
+ * underlying hardware page size instead of the kernel-cluster size.
+ */
+#define PVR_DEVICE_PAGE_SIZE (MMUPAGE_SIZE)
+#define PVR_DEVICE_PAGE_SHIFT (MMUPAGE_SHIFT)
+#define PVR_DEVICE_PAGE_MASK (MMUPAGE_MASK)
 
 /**
  * DOC: Page table index utilities (constants)

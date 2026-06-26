@@ -950,7 +950,7 @@ static int init_ggtt(struct i915_ggtt *ggtt)
 	}
 
 	/* And finally clear the reserved guard page */
-	ggtt->vm.clear_range(&ggtt->vm, ggtt->vm.total - PAGE_SIZE, PAGE_SIZE);
+	ggtt->vm.clear_range(&ggtt->vm, ggtt->vm.total - I915_GTT_PAGE_SIZE, I915_GTT_PAGE_SIZE);
 
 	return 0;
 

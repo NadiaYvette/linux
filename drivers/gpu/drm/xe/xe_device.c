@@ -285,8 +285,9 @@ static vm_fault_t barrier_fault(struct vm_fault *vmf)
 		unsigned long pfn;
 
 #define LAST_DB_PAGE_OFFSET 0x7ff001
-		pfn = PHYS_PFN(pci_resource_start(to_pci_dev(dev->dev), 0) +
-				LAST_DB_PAGE_OFFSET);
+		/* vmf_insert_pfn_prot() takes an MMUPAGE-granular PFN. */
+		pfn = (pci_resource_start(to_pci_dev(dev->dev), 0) +
+				LAST_DB_PAGE_OFFSET) >> MMUPAGE_SHIFT;
 		ret = vmf_insert_pfn_prot(vma, vma->vm_start, pfn,
 					  pgprot_noncached(prot));
 		drm_dev_exit(idx);
@@ -302,7 +303,9 @@ static vm_fault_t barrier_fault(struct vm_fault *vmf)
 		if (drmm_add_action_or_reset(dev, barrier_release_dummy_page, page))
 			return VM_FAULT_OOM;
 
-		ret = vmf_insert_pfn_prot(vma, vma->vm_start, page_to_pfn(page),
+		/* vmf_insert_pfn_prot() takes an MMUPAGE-granular PFN. */
+		ret = vmf_insert_pfn_prot(vma, vma->vm_start,
+					  page_to_pfn(page) << PAGE_MMUSHIFT,
 					  prot);
 	}
 

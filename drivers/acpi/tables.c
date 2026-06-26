@@ -416,7 +416,14 @@ static const char table_sigs[][ACPI_NAMESEG_SIZE] __nonstring_array __initconst 
 static struct cpio_data __initdata acpi_initrd_files[NR_ACPI_INITRD_TABLES];
 static DECLARE_BITMAP(acpi_initrd_installed, NR_ACPI_INITRD_TABLES);
 
-#define MAP_CHUNK_SIZE   (NR_FIX_BTMAPS << PAGE_SHIFT)
+/*
+ * early_memremap() is fixmap-backed: each of the NR_FIX_BTMAPS slots maps one
+ * MMUPAGE_SIZE hardware page, so the one-shot mappable window is sized in
+ * MMUPAGE units.  Using PAGE_SHIFT here would over-claim the window by
+ * PAGE_MMUCOUNT under page clustering and overflow the fixmap.  Identity when
+ * PAGE_MMUSHIFT == 0.
+ */
+#define MAP_CHUNK_SIZE   (NR_FIX_BTMAPS << MMUPAGE_SHIFT)
 
 void __init acpi_table_upgrade(void)
 {
@@ -527,11 +534,11 @@ void __init acpi_table_upgrade(void)
 		total_offset += size;
 
 		while (size) {
-			slop = dest_addr & ~PAGE_MASK;
+			slop = dest_addr & ~MMUPAGE_MASK;
 			clen = size;
 			if (clen > MAP_CHUNK_SIZE - slop)
 				clen = MAP_CHUNK_SIZE - slop;
-			dest_p = early_memremap(dest_addr & PAGE_MASK,
+			dest_p = early_memremap(dest_addr & MMUPAGE_MASK,
 						clen + slop);
 			memcpy(dest_p + slop, src_p, clen);
 			early_memunmap(dest_p, clen + slop);
