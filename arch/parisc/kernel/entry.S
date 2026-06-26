@@ -389,7 +389,7 @@
 #else
 	extru_safe	\va,31-ASM_PGDIR_SHIFT,ASM_BITS_PER_PGD,\index
 #endif
-	dep             %r0,31,PAGE_SHIFT,\pmd  /* clear offset */
+	dep             %r0,31,ASM_PLD_SHIFT,\pmd  /* clear offset within MMUPAGE-sized page dir */
 #if CONFIG_PGTABLE_LEVELS < 3
 	copy		%r0,\pte
 #endif
@@ -397,8 +397,8 @@
 	bb,>=,n		\pmd,_PxD_PRESENT_BIT,\fault
 	dep		%r0,31,PxD_FLAG_SHIFT,\pmd /* clear flags */
 	SHLREG		\pmd,PxD_VALUE_SHIFT,\pmd
-	extru_safe	\va,31-PAGE_SHIFT,ASM_BITS_PER_PTE,\index
-	dep		%r0,31,PAGE_SHIFT,\pmd  /* clear offset */
+	extru_safe	\va,31-ASM_PLD_SHIFT,ASM_BITS_PER_PTE,\index
+	dep		%r0,31,ASM_PLD_SHIFT,\pmd  /* clear offset within MMUPAGE-sized PTE table */
 	shladd		\index,BITS_PER_PTE_ENTRY,\pmd,\pmd /* pmd is now pte */
 	.endm
 
@@ -471,9 +471,9 @@
 	 * - 38 to 52-bit Physical Page Number
 	 * - 12 to 26-bit page offset
 	 */
-	/* bitshift difference between a PFN (based on kernel's PAGE_SIZE)
-	 * to a CPU TLB 4k PFN (4k => 12 bits to shift) */
-	#define PAGE_ADD_SHIFT		(PAGE_SHIFT-12)
+	/* PTE stores physical address at 4KB (MMUPAGE) granularity in bits 12+.
+	 * No additional shift needed to convert PTE PFN to TLB 4K PFN. */
+	#define PAGE_ADD_SHIFT		(MMUPAGE_SHIFT-12)
 	#define PAGE_ADD_HUGE_SHIFT	(REAL_HPAGE_SHIFT-12)
 	#define PFN_START_BIT	(63-ASM_PFN_PTE_SHIFT+(63-58)-PAGE_ADD_SHIFT)
 
@@ -728,8 +728,12 @@ ENTRY(fault_vector_11)
 END(fault_vector_11)
 
 #endif
-	/* Fault vector is separately protected and *must* be on its own page */
-	.align		PAGE_SIZE
+	/* Fault vector is separately protected and *must* be on its own page.
+	 * Protection isolation works at the hardware MMU page (MMUPAGE_SIZE);
+	 * with PGCL, PAGE_SIZE may be many MMU-pages large and aligning here
+	 * pushes the rest of .text.hot beyond the trap branch immediate range.
+	 */
+	.align		MMUPAGE_SIZE
 
 	.import		handle_interruption,code
 	.import		do_cpu_irq_mask,code
@@ -803,7 +807,9 @@ ENDPROC_CFI(_switch_to)
 	 *
 	 */
 
-	.align	PAGE_SIZE
+	/* MMU-page alignment is sufficient for protection isolation; using
+	 * PAGE_SIZE wastes up to PAGE_SIZE-1 bytes under PGCL. */
+	.align	MMUPAGE_SIZE
 
 ENTRY_CFI(syscall_exit_rfi)
 	mfctl	%cr30,%r16		/* task_struct */
