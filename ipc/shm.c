@@ -1552,7 +1552,7 @@ long do_shmat(int shmid, char __user *shmaddr, int shmflg,
 					goto out;
 			} else
 #ifndef __ARCH_FORCE_SHMLBA
-				if (addr & ~PAGE_MASK)
+				if (addr & ~MMUPAGE_MASK)
 #endif
 					goto out;
 		}
@@ -1739,7 +1739,7 @@ long ksys_shmdt(char __user *shmaddr)
 	VMA_ITERATOR(vmi, mm, addr);
 #endif
 
-	if (addr & ~PAGE_MASK)
+	if (addr & ~MMUPAGE_MASK)
 		return retval;
 
 	if (mmap_write_lock_killable(mm))
@@ -1775,7 +1775,7 @@ long ksys_shmdt(char __user *shmaddr)
 		 * otherwise it starts at this address with no hassles.
 		 */
 		if ((vma->vm_ops == &shm_vm_ops) &&
-			(vma->vm_start - addr)/PAGE_SIZE == vma->vm_pgoff) {
+			(vma->vm_start - addr)/MMUPAGE_SIZE == vma->vm_pgoff) {
 
 			/*
 			 * Record the file of the shm segment being
@@ -1804,11 +1804,11 @@ long ksys_shmdt(char __user *shmaddr)
 	 * could possibly have landed at. Also cast things to loff_t to
 	 * prevent overflows and make comparisons vs. equal-width types.
 	 */
-	size = PAGE_ALIGN(size);
+	size = MMUPAGE_ALIGN(size);
 	while (vma && (loff_t)(vma->vm_end - addr) <= size) {
 		/* finding a matching vma now does not alter retval */
 		if ((vma->vm_ops == &shm_vm_ops) &&
-		    ((vma->vm_start - addr)/PAGE_SIZE == vma->vm_pgoff) &&
+		    ((vma->vm_start - addr)/MMUPAGE_SIZE == vma->vm_pgoff) &&
 		    (vma->vm_file == file)) {
 			do_vmi_align_munmap(&vmi, vma, mm, vma->vm_start,
 					    vma->vm_end, NULL, false);

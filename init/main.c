@@ -13,6 +13,7 @@
 #define DEBUG		/* Enable initcall_debug */
 
 #include <linux/types.h>
+#include <linux/namei.h>
 #include <linux/export.h>
 #include <linux/extable.h>
 #include <linux/module.h>
@@ -719,11 +720,6 @@ static noinline void __ref __noreturn rest_init(void)
 	int pid;
 
 	rcu_scheduler_starting();
-	/*
-	 * We need to spawn init first so that it obtains pid 1, however
-	 * the init task will end up wanting to create kthreads, which, if
-	 * we schedule it before we create kthreadd, will OOPS.
-	 */
 	pid = user_mode_thread(kernel_init, NULL, CLONE_FS);
 	/*
 	 * Pin init on the boot CPU. Task migration is not properly working
@@ -809,7 +805,7 @@ void __init __weak smp_prepare_boot_cpu(void)
 {
 }
 
-# if THREAD_SIZE >= PAGE_SIZE
+# if THREAD_SIZE >= MMUPAGE_SIZE
 void __init __weak thread_stack_cache_init(void)
 {
 }
