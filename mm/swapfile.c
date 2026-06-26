@@ -2413,7 +2413,7 @@ static int unuse_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 		folio_free_swap(folio);
 		folio_unlock(folio);
 		folio_put(folio);
-	} while (addr += PAGE_SIZE, addr != end);
+	} while (addr += MMUPAGE_SIZE, addr != end);
 
 	if (pte)
 		pte_unmap(pte);
@@ -3295,7 +3295,13 @@ static unsigned long read_swap_header(struct swap_info_struct *si,
 	unsigned long swapfilepages;
 	unsigned long last_page;
 
-	if (memcmp("SWAPSPACE2", swap_header->magic.magic, 10)) {
+	/*
+	 * Userspace mkswap formats the area for an MMUPAGE-sized page -- that is
+	 * what getpagesize() reports under page clustering -- so the signature
+	 * lives at MMUPAGE_SIZE-10, not PAGE_SIZE-10.  MMUPAGE_SIZE == PAGE_SIZE
+	 * when PAGE_MMUSHIFT == 0, so non-clustered builds are unchanged.
+	 */
+	if (memcmp("SWAPSPACE2", (char *)swap_header + MMUPAGE_SIZE - 10, 10)) {
 		pr_err("Unable to find swap-space signature\n");
 		return 0;
 	}
@@ -3322,6 +3328,22 @@ static unsigned long read_swap_header(struct swap_info_struct *si,
 	if (!last_page) {
 		pr_warn("Empty swap-file\n");
 		return 0;
+	}
+	if (PAGE_MMUSHIFT) {
+		/*
+		 * mkswap counted slots in MMUPAGE units; the kernel swaps whole
+		 * PAGE-sized clusters.  Fold the area down to whole clusters,
+		 * discarding the sub-cluster slack (the rest of the header
+		 * cluster and any partial tail cluster).  last_page is the index
+		 * of the last slot, so total slots == last_page + 1.
+		 */
+		unsigned long clusters = (last_page + 1) >> PAGE_MMUSHIFT;
+
+		if (!clusters) {
+			pr_warn("Swap area smaller than one kernel page\n");
+			return 0;
+		}
+		last_page = clusters - 1;
 	}
 	if (last_page > maxpages) {
 		pr_warn("Truncating oversized swap area, only using %luk out of %luk\n",
@@ -3390,6 +3412,17 @@ static int setup_swap_clusters_info(struct swap_info_struct *si,
 				page_nr, swap_header->info.last_page);
 			err = -EINVAL;
 			goto err;
+		}
+		if (PAGE_MMUSHIFT) {
+			/*
+			 * Bad pages are MMUPAGE indices; a bad sub-page poisons
+			 * its whole cluster.  Fold to the cluster slot, skipping
+			 * repeats (mkswap lists badpages in ascending order).
+			 */
+			if (i && (page_nr >> PAGE_MMUSHIFT) ==
+			    (swap_header->info.badpages[i - 1] >> PAGE_MMUSHIFT))
+				continue;
+			page_nr >>= PAGE_MMUSHIFT;
 		}
 		err = swap_cluster_setup_bad_slot(si, cluster_info, page_nr, false);
 		if (err)

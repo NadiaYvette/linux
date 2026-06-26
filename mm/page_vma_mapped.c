@@ -291,15 +291,90 @@ restart:
 			goto next_pte;
 		}
 this_pte:
-		if (check_pte(pvmw, 1))
+		if (check_pte(pvmw, 1)) {
+			/*
+			 * Under PGCL, scan forward up to PAGE_MMUCOUNT-1 more
+			 * PTEs that map sub-pages of the same kernel page
+			 * (same kernel-PFN).  Caller consumes nr_mmupages PTEs
+			 * as a single rmap event (one struct page, one
+			 * _mapcount).
+			 *
+			 * Two PTE classes batch:
+			 *   - Present PTEs: pte_pfn drops sub-page bits, so all
+			 *     16 sub-PTEs of a kernel page share the same PFN.
+			 *   - Migration entries: try_to_migrate_one writes the
+			 *     same encoded PFN to all sub-PTEs of a kernel-page
+			 *     mapping site.  Batching here lets remove_migration_pte
+			 *     restore the site as a single rmap event, mirroring
+			 *     the symmetry try_to_migrate_one uses on the tear-down
+			 *     side (commit 0452d1cbc36c).
+			 *
+			 * Other non-present types (device-private, device-
+			 * exclusive, hwpoison) keep nr_mmupages == 1 — they have
+			 * device-specific semantics and aren't batched.
+			 */
+			pvmw->nr_mmupages = 1;
+			if (PAGE_MMUSHIFT > 0) {
+				pte_t first = ptep_get(pvmw->pte);
+				bool present = pte_present(first);
+				bool is_migration = false;
+				unsigned long match_pfn = 0;
+
+				if (present) {
+					match_pfn = pte_pfn(first);
+				} else {
+					softleaf_t e = softleaf_from_pte(first);
+
+					if (softleaf_is_migration(e)) {
+						is_migration = true;
+						match_pfn = softleaf_to_pfn(e);
+					}
+				}
+
+				if (present || is_migration) {
+					unsigned long sub_off =
+						(pvmw->address & (PAGE_SIZE - 1))
+						>> MMUPAGE_SHIFT;
+					unsigned int n = 1;
+					unsigned int max = PAGE_MMUCOUNT - sub_off;
+
+					if (pvmw->address + max * MMUPAGE_SIZE > end)
+						max = (end - pvmw->address)
+						      >> MMUPAGE_SHIFT;
+					while (n < max) {
+						pte_t pe = ptep_get(pvmw->pte + n);
+						unsigned long pe_pfn;
+
+						if (present) {
+							if (!pte_present(pe))
+								break;
+							pe_pfn = pte_pfn(pe);
+						} else {
+							softleaf_t pe_e;
+
+							if (pte_present(pe))
+								break;
+							pe_e = softleaf_from_pte(pe);
+							if (!softleaf_is_migration(pe_e))
+								break;
+							pe_pfn = softleaf_to_pfn(pe_e);
+						}
+						if (pe_pfn != match_pfn)
+							break;
+						n++;
+					}
+					pvmw->nr_mmupages = n;
+				}
+			}
 			return true;
+		}
 next_pte:
 		do {
-			pvmw->address += PAGE_SIZE;
+			pvmw->address += MMUPAGE_SIZE;
 			if (pvmw->address >= end)
 				return not_found(pvmw);
 			/* Did we cross page table boundary? */
-			if ((pvmw->address & (PMD_SIZE - PAGE_SIZE)) == 0) {
+			if ((pvmw->address & (PMD_SIZE - MMUPAGE_SIZE)) == 0) {
 				if (pvmw->ptl) {
 					spin_unlock(pvmw->ptl);
 					pvmw->ptl = NULL;
@@ -347,6 +422,7 @@ unsigned long page_mapped_in_vma(const struct page *page,
 		.nr_pages = 1,
 		.vma = vma,
 		.flags = PVMW_SYNC,
+		.nr_mmupages = 1,
 	};
 
 	pvmw.address = vma_address(vma, page_pgoff(folio, page), 1);

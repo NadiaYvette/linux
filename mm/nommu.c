@@ -1116,7 +1116,7 @@ unsigned long do_mmap(struct file *file,
 			pregion->vm_usage++;
 			vma->vm_region = pregion;
 			start = pregion->vm_start;
-			start += (pgoff - pregion->vm_pgoff) << PAGE_SHIFT;
+			start += (pgoff - pregion->vm_pgoff) << MMUPAGE_SHIFT;
 			vma->vm_start = start;
 			vma->vm_end = start + len;
 
@@ -1616,7 +1616,7 @@ int remap_vmalloc_range(struct vm_area_struct *vma, void *addr,
 	if (!(vma->vm_flags & VM_USERMAP))
 		return -EINVAL;
 
-	vma->vm_start = (unsigned long)(addr + (pgoff << PAGE_SHIFT));
+	vma->vm_start = (unsigned long)(addr + (pgoff << MMUPAGE_SHIFT));
 	vma->vm_end = vma->vm_start + size;
 
 	return 0;
@@ -1838,7 +1838,7 @@ int nommu_shrink_inode_mappings(struct inode *inode, size_t size,
 
 		region = vma->vm_region;
 		r_size = region->vm_top - region->vm_start;
-		r_top = (region->vm_pgoff << PAGE_SHIFT) + r_size;
+		r_top = (region->vm_pgoff << MMUPAGE_SHIFT) + r_size;
 
 		if (r_top > newsize) {
 			region->vm_top -= r_top - newsize;

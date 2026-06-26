@@ -328,7 +328,7 @@ static bool mfill_file_over_size(struct vm_area_struct *dst_vma,
 
 	inode = dst_vma->vm_file->f_inode;
 	offset = linear_page_index(dst_vma, dst_addr);
-	max_off = DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE);
+	max_off = DIV_ROUND_UP(i_size_read(inode), MMUPAGE_SIZE);
 	return offset >= max_off;
 }
 
@@ -434,7 +434,7 @@ static int mfill_copy_folio_locked(struct folio *folio, unsigned long src_addr)
 	 */
 	pagefault_disable();
 	ret = copy_from_user(kaddr, (const void __user *) src_addr,
-			     PAGE_SIZE);
+			     MMUPAGE_SIZE);
 	pagefault_enable();
 	kunmap_local(kaddr);
 
@@ -521,7 +521,7 @@ static int mfill_copy_folio_retry(struct mfill_state *mfill_state,
 	mfill_put_vma(mfill_state);
 
 	kaddr = kmap_local_folio(folio, 0);
-	err = copy_from_user(kaddr, (const void __user *) src_addr, PAGE_SIZE);
+	err = copy_from_user(kaddr, (const void __user *) src_addr, MMUPAGE_SIZE);
 	kunmap_local(kaddr);
 	if (unlikely(err))
 		return -EFAULT;
@@ -678,6 +678,7 @@ static int mfill_atomic_pte_continue(struct mfill_state *state)
 	const struct vm_uffd_ops *ops = vma_uffd_ops(dst_vma);
 	unsigned long dst_addr = state->dst_addr;
 	pgoff_t pgoff = linear_page_index(dst_vma, dst_addr);
+	pgoff_t cache_pgoff = pgoff_mmu_to_page(pgoff);
 	struct inode *inode = file_inode(dst_vma->vm_file);
 	uffd_flags_t flags = state->flags;
 	pmd_t *dst_pmd = state->pmd;
@@ -690,12 +691,12 @@ static int mfill_atomic_pte_continue(struct mfill_state *state)
 		return -EOPNOTSUPP;
 	}
 
-	folio = ops->get_folio_noalloc(inode, pgoff);
+	folio = ops->get_folio_noalloc(inode, cache_pgoff);
 	/* Our caller expects us to return -EFAULT if we failed to find folio */
 	if (IS_ERR_OR_NULL(folio))
 		return -EFAULT;
 
-	page = folio_file_page(folio, pgoff);
+	page = folio_file_page(folio, cache_pgoff);
 	if (PageHWPoison(page)) {
 		ret = -EIO;
 		goto out_release;
@@ -998,9 +999,9 @@ static __always_inline ssize_t mfill_atomic(struct userfaultfd_ctx *ctx,
 		cond_resched();
 
 		if (!err) {
-			state.dst_addr += PAGE_SIZE;
-			state.src_addr += PAGE_SIZE;
-			copied += PAGE_SIZE;
+			state.dst_addr += MMUPAGE_SIZE;
+			state.src_addr += MMUPAGE_SIZE;
+			copied += MMUPAGE_SIZE;
 
 			if (fatal_signal_pending(current))
 				err = -EINTR;
@@ -1267,7 +1268,7 @@ static long move_present_ptes(struct mm_struct *mm,
 		}
 
 		folio_move_anon_rmap(src_folio, dst_vma);
-		src_folio->index = linear_page_index(dst_vma, dst_addr);
+		src_folio->index = pgoff_mmu_to_page(linear_page_index(dst_vma, dst_addr));
 
 		orig_dst_pte = folio_mk_pte(src_folio, dst_vma->vm_page_prot);
 		/* Set soft dirty bit so userspace can notice the pte was moved */
@@ -1278,10 +1279,10 @@ static long move_present_ptes(struct mm_struct *mm,
 		orig_dst_pte = pte_mkwrite(orig_dst_pte, dst_vma);
 		set_pte_at(mm, dst_addr, dst_pte, orig_dst_pte);
 
-		src_addr += PAGE_SIZE;
+		src_addr += MMUPAGE_SIZE;
 		if (src_addr == src_end)
 			break;
-		dst_addr += PAGE_SIZE;
+		dst_addr += MMUPAGE_SIZE;
 		dst_pte++;
 		src_pte++;
 
@@ -1336,7 +1337,7 @@ static int move_swap_pte(struct mm_struct *mm, struct vm_area_struct *dst_vma,
 	 */
 	if (src_folio) {
 		folio_move_anon_rmap(src_folio, dst_vma);
-		src_folio->index = linear_page_index(dst_vma, dst_addr);
+		src_folio->index = pgoff_mmu_to_page(linear_page_index(dst_vma, dst_addr));
 	} else {
 		/*
 		 * Check if the swap entry is cached after acquiring the src_pte
@@ -1360,7 +1361,7 @@ static int move_swap_pte(struct mm_struct *mm, struct vm_area_struct *dst_vma,
 	set_pte_at(mm, dst_addr, dst_pte, orig_src_pte);
 	double_pt_unlock(dst_ptl, src_ptl);
 
-	return PAGE_SIZE;
+	return MMUPAGE_SIZE;
 }
 
 static int move_zeropage_pte(struct mm_struct *mm,
@@ -1387,7 +1388,7 @@ static int move_zeropage_pte(struct mm_struct *mm,
 	set_pte_at(mm, dst_addr, dst_pte, zero_pte);
 	double_pt_unlock(dst_ptl, src_ptl);
 
-	return PAGE_SIZE;
+	return MMUPAGE_SIZE;
 }
 
 
@@ -1474,7 +1475,7 @@ retry:
 		if (!(mode & UFFDIO_MOVE_MODE_ALLOW_SRC_HOLES))
 			ret = -ENOENT;
 		else /* nothing to do to move a hole */
-			ret = PAGE_SIZE;
+			ret = MMUPAGE_SIZE;
 		goto out;
 	}
 

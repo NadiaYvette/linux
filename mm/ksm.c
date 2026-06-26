@@ -625,7 +625,7 @@ static int break_ksm_pmd_entry(pmd_t *pmdp, unsigned long addr, unsigned long en
 	if (!start_ptep)
 		return 0;
 
-	for (ptep = start_ptep; addr < end; ptep++, addr += PAGE_SIZE) {
+	for (ptep = start_ptep; addr < end; ptep++, addr += MMUPAGE_SIZE) {
 		pte_t pte = ptep_get(ptep);
 		struct folio *folio = NULL;
 
@@ -2537,7 +2537,7 @@ static int ksm_next_page_pmd_entry(pmd_t *pmdp, unsigned long addr, unsigned lon
 	if (!start_ptep)
 		return 0;
 
-	for (ptep = start_ptep; addr < end; ptep++, addr += PAGE_SIZE) {
+	for (ptep = start_ptep; addr < end; ptep++, addr += MMUPAGE_SIZE) {
 		pte = ptep_get(ptep);
 
 		if (!pte_present(pte))
@@ -3120,7 +3120,7 @@ struct folio *ksm_might_need_to_copy(struct folio *folio,
 			return folio;	/* no need to copy it */
 	} else if (!anon_vma) {
 		return folio;		/* no need to copy it */
-	} else if (folio->index == linear_page_index(vma, addr) &&
+	} else if (folio->index == pgoff_mmu_to_page(linear_page_index(vma, addr)) &&
 			anon_vma->root == vma->anon_vma->root) {
 		return folio;		/* still no need to copy it */
 	}

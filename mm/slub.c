@@ -584,8 +584,20 @@ static inline unsigned int order_objects(unsigned int order, unsigned int size)
 static inline struct kmem_cache_order_objects oo_make(unsigned int order,
 		unsigned int size)
 {
+	unsigned int nr = order_objects(order, size);
+
+	/*
+	 * Cap at MAX_OBJS_PER_PAGE rather than OO_MASK so that the value
+	 * fits in the 15-bit slab.objects bitfield even when PAGE_SIZE is
+	 * large enough (e.g. 1 MB with PGCL) that a small-object slab
+	 * would otherwise exceed it.  Without this cap, the bitfield write
+	 * silently truncates (32768 → 0 for kmalloc-32 at PAGE_SIZE=1MB),
+	 * obj_exts is sized 0, and obj_to_index() reads past the metadata
+	 * array — corrupting the obj_cgroup pointer on first kfree from
+	 * the slab.
+	 */
 	struct kmem_cache_order_objects x = {
-		(order << OO_SHIFT) + order_objects(order, size)
+		(order << OO_SHIFT) + min_t(unsigned int, nr, MAX_OBJS_PER_PAGE)
 	};
 
 	return x;
@@ -7489,8 +7501,10 @@ static inline int calculate_order(unsigned int size)
 
 	min_order = max_t(unsigned int, slub_min_order,
 			  get_order(min_objects * size));
-	if (order_objects(min_order, size) > MAX_OBJS_PER_PAGE)
-		return get_order(size * MAX_OBJS_PER_PAGE) - 1;
+	if (order_objects(min_order, size) > MAX_OBJS_PER_PAGE) {
+		unsigned int order = get_order(size * MAX_OBJS_PER_PAGE);
+		return order > 0 ? order - 1 : 0;
+	}
 
 	/*
 	 * Attempt to find best configuration for a slab. This works by first

@@ -50,9 +50,9 @@ enum {
 static int hmm_pfns_fill(unsigned long addr, unsigned long end,
 			 struct hmm_range *range, unsigned long cpu_flags)
 {
-	unsigned long i = (addr - range->start) >> PAGE_SHIFT;
+	unsigned long i = (addr - range->start) >> MMUPAGE_SHIFT;
 
-	for (; addr < end; addr += PAGE_SIZE, i++) {
+	for (; addr < end; addr += MMUPAGE_SIZE, i++) {
 		range->hmm_pfns[i] &= HMM_PFN_INOUT_FLAGS;
 		range->hmm_pfns[i] |= cpu_flags;
 	}
@@ -86,7 +86,7 @@ static int hmm_vma_fault(unsigned long addr, unsigned long end,
 		fault_flags |= FAULT_FLAG_WRITE;
 	}
 
-	for (; addr < end; addr += PAGE_SIZE)
+	for (; addr < end; addr += MMUPAGE_SIZE)
 		if (handle_mm_fault(vma, addr, fault_flags, NULL) &
 		    VM_FAULT_ERROR)
 			return -EFAULT;
@@ -163,8 +163,8 @@ static int hmm_vma_walk_hole(unsigned long addr, unsigned long end,
 	unsigned long i, npages;
 	unsigned long *hmm_pfns;
 
-	i = (addr - range->start) >> PAGE_SHIFT;
-	npages = (end - addr) >> PAGE_SHIFT;
+	i = (addr - range->start) >> MMUPAGE_SHIFT;
+	npages = (end - addr) >> MMUPAGE_SHIFT;
 	hmm_pfns = &range->hmm_pfns[i];
 	required_fault =
 		hmm_range_need_fault(hmm_vma_walk, hmm_pfns, npages, 0);
@@ -191,7 +191,7 @@ static inline unsigned long pmd_to_hmm_pfn_flags(struct hmm_range *range,
 		return 0;
 	return (pmd_write(pmd) ? (HMM_PFN_VALID | HMM_PFN_WRITE) :
 				 HMM_PFN_VALID) |
-	       hmm_pfn_flags_order(PMD_SHIFT - PAGE_SHIFT);
+	       hmm_pfn_flags_order(PMD_SHIFT - MMUPAGE_SHIFT);
 }
 
 static int hmm_vma_handle_pmd(struct mm_walk *walk, unsigned long addr,
@@ -204,15 +204,15 @@ static int hmm_vma_handle_pmd(struct mm_walk *walk, unsigned long addr,
 	unsigned int required_fault;
 	unsigned long cpu_flags;
 
-	npages = (end - addr) >> PAGE_SHIFT;
+	npages = (end - addr) >> MMUPAGE_SHIFT;
 	cpu_flags = pmd_to_hmm_pfn_flags(range, pmd);
 	required_fault =
 		hmm_range_need_fault(hmm_vma_walk, hmm_pfns, npages, cpu_flags);
 	if (required_fault)
 		return hmm_vma_fault(addr, end, required_fault, walk);
 
-	pfn = pmd_pfn(pmd) + ((addr & ~PMD_MASK) >> PAGE_SHIFT);
-	for (i = 0; addr < end; addr += PAGE_SIZE, i++, pfn++) {
+	pfn = pmd_pfn(pmd) + ((addr & ~PMD_MASK) >> MMUPAGE_SHIFT);
+	for (i = 0; addr < end; addr += MMUPAGE_SIZE, i++, pfn++) {
 		hmm_pfns[i] &= HMM_PFN_INOUT_FLAGS;
 		hmm_pfns[i] |= pfn | cpu_flags;
 	}
@@ -338,7 +338,7 @@ static int hmm_vma_handle_absent_pmd(struct mm_walk *walk, unsigned long start,
 {
 	struct hmm_vma_walk *hmm_vma_walk = walk->private;
 	struct hmm_range *range = hmm_vma_walk->range;
-	unsigned long npages = (end - start) >> PAGE_SHIFT;
+	unsigned long npages = (end - start) >> MMUPAGE_SHIFT;
 	const softleaf_t entry = softleaf_from_pmd(pmd);
 	unsigned long addr = start;
 	unsigned int required_fault;
@@ -347,7 +347,7 @@ static int hmm_vma_handle_absent_pmd(struct mm_walk *walk, unsigned long start,
 	    softleaf_to_folio(entry)->pgmap->owner ==
 	    range->dev_private_owner) {
 		unsigned long cpu_flags = HMM_PFN_VALID |
-			hmm_pfn_flags_order(PMD_SHIFT - PAGE_SHIFT);
+			hmm_pfn_flags_order(PMD_SHIFT - MMUPAGE_SHIFT);
 		unsigned long pfn = softleaf_to_pfn(entry);
 		unsigned long i;
 
@@ -359,7 +359,7 @@ static int hmm_vma_handle_absent_pmd(struct mm_walk *walk, unsigned long start,
 		 * inferred, because drivers which are not yet aware of large
 		 * folios probably do not support sparsely populated PFN lists.
 		 */
-		for (i = 0; addr < end; addr += PAGE_SIZE, i++, pfn++) {
+		for (i = 0; addr < end; addr += MMUPAGE_SIZE, i++, pfn++) {
 			hmm_pfns[i] &= HMM_PFN_INOUT_FLAGS;
 			hmm_pfns[i] |= pfn | cpu_flags;
 		}
@@ -385,7 +385,7 @@ static int hmm_vma_handle_absent_pmd(struct mm_walk *walk, unsigned long start,
 {
 	struct hmm_vma_walk *hmm_vma_walk = walk->private;
 	struct hmm_range *range = hmm_vma_walk->range;
-	unsigned long npages = (end - start) >> PAGE_SHIFT;
+	unsigned long npages = (end - start) >> MMUPAGE_SHIFT;
 
 	if (hmm_range_need_fault(hmm_vma_walk, hmm_pfns, npages, 0))
 		return -EFAULT;
@@ -401,8 +401,8 @@ static int hmm_vma_walk_pmd(pmd_t *pmdp,
 	struct hmm_vma_walk *hmm_vma_walk = walk->private;
 	struct hmm_range *range = hmm_vma_walk->range;
 	unsigned long *hmm_pfns =
-		&range->hmm_pfns[(start - range->start) >> PAGE_SHIFT];
-	unsigned long npages = (end - start) >> PAGE_SHIFT;
+		&range->hmm_pfns[(start - range->start) >> MMUPAGE_SHIFT];
+	unsigned long npages = (end - start) >> MMUPAGE_SHIFT;
 	unsigned long addr = start;
 	pte_t *ptep;
 	pmd_t pmd;
@@ -457,7 +457,7 @@ again:
 	ptep = pte_offset_map(pmdp, addr);
 	if (!ptep)
 		goto again;
-	for (; addr < end; addr += PAGE_SIZE, ptep++, hmm_pfns++) {
+	for (; addr < end; addr += MMUPAGE_SIZE, ptep++, hmm_pfns++) {
 		int r;
 
 		r = hmm_vma_handle_pte(walk, addr, end, pmdp, ptep, hmm_pfns);
@@ -478,7 +478,7 @@ static inline unsigned long pud_to_hmm_pfn_flags(struct hmm_range *range,
 		return 0;
 	return (pud_write(pud) ? (HMM_PFN_VALID | HMM_PFN_WRITE) :
 				 HMM_PFN_VALID) |
-	       hmm_pfn_flags_order(PUD_SHIFT - PAGE_SHIFT);
+	       hmm_pfn_flags_order(PUD_SHIFT - MMUPAGE_SHIFT);
 }
 
 static int hmm_vma_walk_pud(pud_t *pudp, unsigned long start, unsigned long end,
@@ -508,8 +508,8 @@ static int hmm_vma_walk_pud(pud_t *pudp, unsigned long start, unsigned long end,
 		unsigned long *hmm_pfns;
 		unsigned long cpu_flags;
 
-		i = (addr - range->start) >> PAGE_SHIFT;
-		npages = (end - addr) >> PAGE_SHIFT;
+		i = (addr - range->start) >> MMUPAGE_SHIFT;
+		npages = (end - addr) >> MMUPAGE_SHIFT;
 		hmm_pfns = &range->hmm_pfns[i];
 
 		cpu_flags = pud_to_hmm_pfn_flags(range, pud);
@@ -520,7 +520,7 @@ static int hmm_vma_walk_pud(pud_t *pudp, unsigned long start, unsigned long end,
 			return hmm_vma_fault(addr, end, required_fault, walk);
 		}
 
-		pfn = pud_pfn(pud) + ((addr & ~PUD_MASK) >> PAGE_SHIFT);
+		pfn = pud_pfn(pud) + ((addr & ~PUD_MASK) >> MMUPAGE_SHIFT);
 		for (i = 0; i < npages; ++i, ++pfn) {
 			hmm_pfns[i] &= HMM_PFN_INOUT_FLAGS;
 			hmm_pfns[i] |= pfn | cpu_flags;
@@ -557,7 +557,7 @@ static int hmm_vma_walk_hugetlb_entry(pte_t *pte, unsigned long hmask,
 	ptl = huge_pte_lock(hstate_vma(vma), walk->mm, pte);
 	entry = huge_ptep_get(walk->mm, addr, pte);
 
-	i = (start - range->start) >> PAGE_SHIFT;
+	i = (start - range->start) >> MMUPAGE_SHIFT;
 	pfn_req_flags = range->hmm_pfns[i];
 	cpu_flags = pte_to_hmm_pfn_flags(range, entry) |
 		    hmm_pfn_flags_order(huge_page_order(hstate_vma(vma)));
@@ -581,8 +581,8 @@ static int hmm_vma_walk_hugetlb_entry(pte_t *pte, unsigned long hmask,
 		return ret;
 	}
 
-	pfn = pte_pfn(entry) + ((start & ~hmask) >> PAGE_SHIFT);
-	for (; addr < end; addr += PAGE_SIZE, i++, pfn++) {
+	pfn = pte_pfn(entry) + ((start & ~hmask) >> MMUPAGE_SHIFT);
+	for (; addr < end; addr += MMUPAGE_SIZE, i++, pfn++) {
 		range->hmm_pfns[i] &= HMM_PFN_INOUT_FLAGS;
 		range->hmm_pfns[i] |= pfn | cpu_flags;
 	}
@@ -618,8 +618,8 @@ static int hmm_vma_walk_test(unsigned long start, unsigned long end,
 	 */
 	if (hmm_range_need_fault(hmm_vma_walk,
 				 range->hmm_pfns +
-					 ((start - range->start) >> PAGE_SHIFT),
-				 (end - start) >> PAGE_SHIFT, 0))
+					 ((start - range->start) >> MMUPAGE_SHIFT),
+				 (end - start) >> MMUPAGE_SHIFT, 0))
 		return -EFAULT;
 
 	hmm_pfns_fill(start, end, range, HMM_PFN_ERROR);
@@ -701,7 +701,7 @@ int hmm_dma_map_alloc(struct device *dev, struct hmm_dma_map *map,
 	bool dma_need_sync = false;
 	bool use_iova;
 
-	WARN_ON_ONCE(!(nr_entries * PAGE_SIZE / dma_entry_size));
+	WARN_ON_ONCE(!(nr_entries * MMUPAGE_SIZE / dma_entry_size));
 
 	/*
 	 * The HMM API violates our normal DMA buffer ownership rules and can't
@@ -721,7 +721,7 @@ int hmm_dma_map_alloc(struct device *dev, struct hmm_dma_map *map,
 		return -ENOMEM;
 
 	use_iova = dma_iova_try_alloc(dev, &map->state, 0,
-			nr_entries * PAGE_SIZE);
+			nr_entries * MMUPAGE_SIZE);
 	if (!use_iova && dma_need_unmap(dev)) {
 		map->dma_list = kvzalloc_objs(*map->dma_list, nr_entries,
 					      GFP_KERNEL | __GFP_NOWARN);

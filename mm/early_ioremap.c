@@ -134,16 +134,16 @@ __early_ioremap(resource_size_t phys_addr, unsigned long size, pgprot_t prot)
 
 	prev_size[slot] = size;
 	/*
-	 * Mappings have to be page-aligned
+	 * Mappings have to be MMU-page-aligned (hardware page size)
 	 */
-	offset = offset_in_page(phys_addr);
-	phys_addr &= PAGE_MASK;
-	size = PAGE_ALIGN(last_addr + 1) - phys_addr;
+	offset = phys_addr & ~MMUPAGE_MASK;
+	phys_addr &= MMUPAGE_MASK;
+	size = ALIGN(last_addr + 1, MMUPAGE_SIZE) - phys_addr;
 
 	/*
 	 * Mappings have to fit in the FIX_BTMAP area.
 	 */
-	nrpages = size >> PAGE_SHIFT;
+	nrpages = size >> MMUPAGE_SHIFT;
 	if (WARN_ON(nrpages > NR_FIX_BTMAPS))
 		return NULL;
 
@@ -159,7 +159,7 @@ __early_ioremap(resource_size_t phys_addr, unsigned long size, pgprot_t prot)
 			__late_set_fixmap(idx, phys_addr, prot);
 		else
 			__early_set_fixmap(idx, phys_addr, prot);
-		phys_addr += PAGE_SIZE;
+		phys_addr += MMUPAGE_SIZE;
 		--idx;
 		--nrpages;
 	}
@@ -199,8 +199,8 @@ void __init early_iounmap(void __iomem *addr, unsigned long size)
 	if (WARN_ON(virt_addr < fix_to_virt(FIX_BTMAP_BEGIN)))
 		return;
 
-	offset = offset_in_page(virt_addr);
-	nrpages = PAGE_ALIGN(offset + size) >> PAGE_SHIFT;
+	offset = virt_addr & ~MMUPAGE_MASK;
+	nrpages = ALIGN(offset + size, MMUPAGE_SIZE) >> MMUPAGE_SHIFT;
 
 	idx = FIX_BTMAP_BEGIN - NR_FIX_BTMAPS*slot;
 	while (nrpages > 0) {
@@ -251,7 +251,14 @@ early_memremap_prot(resource_size_t phys_addr, unsigned long size,
 }
 #endif
 
-#define MAX_MAP_CHUNK	(NR_FIX_BTMAPS << PAGE_SHIFT)
+/*
+ * The fixmap pool maps MMUPAGE-sized hardware pages; each NR_FIX_BTMAPS slot
+ * is one MMUPAGE.  Under page-clustering, MMUPAGE_SHIFT < PAGE_SHIFT, so
+ * computing the chunk size with PAGE_SHIFT (and aligning with PAGE_MASK)
+ * overstates capacity by PAGE_MMUCOUNT and overflows __early_ioremap's
+ * NR_FIX_BTMAPS check, returning NULL and panicing initramfs copy.
+ */
+#define MAX_MAP_CHUNK	(NR_FIX_BTMAPS << MMUPAGE_SHIFT)
 
 /*
  * If no empty slot, handle that and return -ENOMEM.
@@ -262,11 +269,11 @@ int __init copy_from_early_mem(void *dest, phys_addr_t src, unsigned long size)
 	char *p;
 
 	while (size) {
-		slop = offset_in_page(src);
+		slop = src & ~MMUPAGE_MASK;
 		clen = size;
 		if (clen > MAX_MAP_CHUNK - slop)
 			clen = MAX_MAP_CHUNK - slop;
-		p = early_memremap(src & PAGE_MASK, clen + slop);
+		p = early_memremap(src & MMUPAGE_MASK, clen + slop);
 		if (!p)
 			return -ENOMEM;
 		memcpy(dest, p + slop, clen);
