@@ -1313,7 +1313,7 @@ unsigned long thp_get_unmapped_area_vmflags(struct file *filp, unsigned long add
 		vm_flags_t vm_flags)
 {
 	unsigned long ret;
-	loff_t off = (loff_t)pgoff << PAGE_SHIFT;
+	loff_t off = (loff_t)pgoff << MMUPAGE_SHIFT;
 
 	ret = __thp_get_unmapped_area(filp, addr, len, off, flags, PMD_SIZE, vm_flags);
 	if (ret)
@@ -1391,7 +1391,7 @@ static void map_anon_folio_pmd_pf(struct folio *folio, pmd_t *pmd,
 		struct vm_area_struct *vma, unsigned long haddr)
 {
 	map_anon_folio_pmd_nopf(folio, pmd, vma, haddr);
-	add_mm_counter(vma->vm_mm, MM_ANONPAGES, HPAGE_PMD_NR);
+	add_mm_counter(vma->vm_mm, MM_ANONPAGES, HPAGE_PMD_MMUNR);
 	count_vm_event(THP_FAULT_ALLOC);
 	count_mthp_stat(HPAGE_PMD_ORDER, MTHP_STAT_ANON_FAULT_ALLOC);
 	count_memcg_event_mm(vma->vm_mm, THP_FAULT_ALLOC);
@@ -1644,7 +1644,7 @@ static vm_fault_t insert_pmd(struct vm_area_struct *vma, unsigned long addr,
 		} else {
 			folio_get(fop.folio);
 			folio_add_file_rmap_pmd(fop.folio, &fop.folio->page, vma);
-			add_mm_counter(mm, mm_counter_file(fop.folio), HPAGE_PMD_NR);
+			add_mm_counter(mm, mm_counter_file(fop.folio), HPAGE_PMD_MMUNR);
 		}
 	} else {
 		entry = pmd_mkhuge(pfn_pmd(fop.pfn, prot));
@@ -1763,7 +1763,7 @@ static vm_fault_t insert_pud(struct vm_area_struct *vma, unsigned long addr,
 
 		folio_get(fop.folio);
 		folio_add_file_rmap_pud(fop.folio, &fop.folio->page, vma);
-		add_mm_counter(mm, mm_counter_file(fop.folio), HPAGE_PUD_NR);
+		add_mm_counter(mm, mm_counter_file(fop.folio), HPAGE_PUD_MMUNR);
 	} else {
 		entry = pud_mkhuge(pfn_pud(fop.pfn, prot));
 		entry = pud_mkspecial(entry);
@@ -1915,7 +1915,7 @@ static void copy_huge_non_present_pmd(
 					    dst_vma, src_vma);
 	}
 
-	add_mm_counter(dst_mm, MM_ANONPAGES, HPAGE_PMD_NR);
+	add_mm_counter(dst_mm, MM_ANONPAGES, HPAGE_PMD_MMUNR);
 	mm_inc_nr_ptes(dst_mm);
 	pgtable_trans_huge_deposit(dst_mm, dst_pmd, pgtable);
 	if (!userfaultfd_wp(dst_vma))
@@ -2009,7 +2009,7 @@ int copy_huge_pmd(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		__split_huge_pmd(src_vma, src_pmd, addr, false);
 		return -EAGAIN;
 	}
-	add_mm_counter(dst_mm, MM_ANONPAGES, HPAGE_PMD_NR);
+	add_mm_counter(dst_mm, MM_ANONPAGES, HPAGE_PMD_MMUNR);
 out_zero_page:
 	mm_inc_nr_ptes(dst_mm);
 	pgtable_trans_huge_deposit(dst_mm, dst_pmd, pgtable);
@@ -2310,7 +2310,7 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
 	if (!migrate_misplaced_folio(folio, target_nid)) {
 		flags |= TNF_MIGRATED;
 		nid = target_nid;
-		task_numa_fault(last_cpupid, nid, HPAGE_PMD_NR, flags);
+		task_numa_fault(last_cpupid, nid, HPAGE_PMD_MMUNR, flags);
 		return 0;
 	}
 
@@ -2331,7 +2331,7 @@ out_map:
 	spin_unlock(vmf->ptl);
 
 	if (nid != NUMA_NO_NODE)
-		task_numa_fault(last_cpupid, nid, HPAGE_PMD_NR, flags);
+		task_numa_fault(last_cpupid, nid, HPAGE_PMD_MMUNR, flags);
 	return 0;
 }
 
@@ -2428,10 +2428,10 @@ static void zap_huge_pmd_folio(struct mm_struct *mm, struct vm_area_struct *vma,
 		folio_remove_rmap_pmd(folio, &folio->page, vma);
 
 	if (folio_test_anon(folio)) {
-		add_mm_counter(mm, MM_ANONPAGES, -HPAGE_PMD_NR);
+		add_mm_counter(mm, MM_ANONPAGES, -HPAGE_PMD_MMUNR);
 	} else {
 		add_mm_counter(mm, mm_counter_file(folio),
-			       -HPAGE_PMD_NR);
+			       -HPAGE_PMD_MMUNR);
 
 		if (is_present && pmd_young(pmdval) &&
 		    likely(vma_has_recency(vma)))
@@ -2892,7 +2892,7 @@ int move_pages_huge_pmd(struct mm_struct *mm, pmd_t *dst_pmd, pmd_t *src_pmd, pm
 		}
 
 		folio_move_anon_rmap(src_folio, dst_vma);
-		src_folio->index = linear_page_index(dst_vma, dst_addr);
+		src_folio->index = pgoff_mmu_to_page(linear_page_index(dst_vma, dst_addr));
 
 		_dst_pmd = folio_mk_pmd(src_folio, dst_vma->vm_page_prot);
 		/* Follow mremap() behavior and treat the entry dirty after the move */
@@ -2980,7 +2980,7 @@ int zap_huge_pud(struct mmu_gather *tlb, struct vm_area_struct *vma,
 		page = pud_page(orig_pud);
 		folio = page_folio(page);
 		folio_remove_rmap_pud(folio, page, vma);
-		add_mm_counter(tlb->mm, mm_counter_file(folio), -HPAGE_PUD_NR);
+		add_mm_counter(tlb->mm, mm_counter_file(folio), -HPAGE_PUD_MMUNR);
 
 		spin_unlock(ptl);
 		tlb_remove_page_size(tlb, page, HPAGE_PUD_SIZE);
@@ -3016,7 +3016,7 @@ static void __split_huge_pud_locked(struct vm_area_struct *vma, pud_t *pud,
 		folio_set_referenced(folio);
 	folio_remove_rmap_pud(folio, page, vma);
 	add_mm_counter(vma->vm_mm, mm_counter_file(folio),
-		-HPAGE_PUD_NR);
+		-HPAGE_PUD_MMUNR);
 	folio_put(folio);
 }
 
@@ -3071,18 +3071,18 @@ static void __split_huge_zero_page_pmd(struct vm_area_struct *vma,
 
 	pte = pte_offset_map(&_pmd, haddr);
 	VM_BUG_ON(!pte);
-	for (i = 0, addr = haddr; i < HPAGE_PMD_NR; i++, addr += PAGE_SIZE) {
+	for (i = 0, addr = haddr; i < HPAGE_PMD_MMUNR;
+	     i++, addr += MMUPAGE_SIZE) {
 		pte_t entry;
 
 		entry = pfn_pte(zero_pfn(addr), vma->vm_page_prot);
 		entry = pte_mkspecial(entry);
 		if (pmd_uffd_wp(old_pmd))
 			entry = pte_mkuffd_wp(entry);
-		VM_BUG_ON(!pte_none(ptep_get(pte)));
-		set_pte_at(mm, addr, pte, entry);
-		pte++;
+		VM_BUG_ON(!pte_none(ptep_get(pte + i)));
+		set_pte_at(mm, addr, pte + i, entry);
 	}
-	pte_unmap(pte - 1);
+	pte_unmap(pte + HPAGE_PMD_MMUNR - 1);
 	smp_wmb(); /* make pte visible before pmd */
 	pmd_populate(mm, pmd, pgtable);
 }
@@ -3133,11 +3133,18 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 			if (!folio_test_referenced(folio) && pmd_young(old_pmd))
 				folio_set_referenced(folio);
 			folio_remove_rmap_pmd(folio, page, vma);
-			add_mm_counter(mm, mm_counter_file(folio), -HPAGE_PMD_NR);
+			/*
+			 * PGCL: MM_FILEPAGES rss is MMUPAGE-granular and the
+			 * file-PMD-THP fault adds +HPAGE_PMD_MMUNR, so tear-down
+			 * must subtract HPAGE_PMD_MMUNR, not the cluster-count
+			 * HPAGE_PMD_NR (which leaks the rest of the PMD per split).
+			 * Matches the migration path below + zap_huge_pmd().
+			 */
+			add_mm_counter(mm, mm_counter_file(folio), -HPAGE_PMD_MMUNR);
 			folio_put(folio);
 			return;
 		}
-		add_mm_counter(mm, mm_counter_file(folio), -HPAGE_PMD_NR);
+		add_mm_counter(mm, mm_counter_file(folio), -HPAGE_PMD_MMUNR);
 		return;
 	}
 
@@ -3195,12 +3202,31 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 		if (!freeze) {
 			rmap_t rmap_flags = RMAP_NONE;
 
-			folio_ref_add(folio, HPAGE_PMD_NR - 1);
+			folio_ref_add(folio, HPAGE_PMD_MMUNR - 1);
 			if (anon_exclusive)
 				rmap_flags |= RMAP_EXCLUSIVE;
 
 			folio_add_anon_rmap_ptes(folio, page, HPAGE_PMD_NR,
 						 vma, haddr, rmap_flags);
+#if PAGE_MMUSHIFT
+			/*
+			 * PGCL MMUPAGE: the PMD->PTE split maps each of the
+			 * HPAGE_PMD_NR clusters by PAGE_MMUCOUNT sub-PTEs.
+			 * folio_add_anon_rmap_ptes() accounted one sub-PTE per
+			 * cluster (and propagated PageAnonExclusive); add the
+			 * remaining PAGE_MMUCOUNT-1 per cluster so the mapcount
+			 * matches the MMUPAGE zap/reclaim/migrate removal.  The
+			 * HPAGE_PMD_MMUNR PTE references were taken via
+			 * folio_ref_add above.
+			 */
+			{
+				int c;
+
+				for (c = 0; c < HPAGE_PMD_NR; c++)
+					folio_add_rmap_subptes(folio, page + c,
+							PAGE_MMUCOUNT - 1, vma);
+			}
+#endif
 		}
 	} else {
 		/*
@@ -3263,11 +3289,27 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 		if (!freeze) {
 			rmap_t rmap_flags = RMAP_NONE;
 
-			folio_ref_add(folio, HPAGE_PMD_NR - 1);
+			folio_ref_add(folio, HPAGE_PMD_MMUNR - 1);
 			if (anon_exclusive)
 				rmap_flags |= RMAP_EXCLUSIVE;
 			folio_add_anon_rmap_ptes(folio, page, HPAGE_PMD_NR,
 						 vma, haddr, rmap_flags);
+#if PAGE_MMUSHIFT
+			/*
+			 * PGCL MMUPAGE: folio_add_anon_rmap_ptes() accounted one
+			 * sub-PTE per cluster; add the remaining PAGE_MMUCOUNT-1
+			 * per cluster so the PTE-mapped folio's mapcount matches
+			 * the MMUPAGE zap/reclaim/migrate removal (mirror of the
+			 * device-private !freeze branch above).
+			 */
+			{
+				int c;
+
+				for (c = 0; c < HPAGE_PMD_NR; c++)
+					folio_add_rmap_subptes(folio, page + c,
+							PAGE_MMUCOUNT - 1, vma);
+			}
+#endif
 		}
 	}
 
@@ -3289,16 +3331,17 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 		pte_t entry;
 		swp_entry_t swp_entry;
 
-		for (i = 0, addr = haddr; i < HPAGE_PMD_NR; i++, addr += PAGE_SIZE) {
+		for (i = 0, addr = haddr; i < HPAGE_PMD_MMUNR;
+		     i++, addr += MMUPAGE_SIZE) {
 			if (write)
 				swp_entry = make_writable_migration_entry(
-							page_to_pfn(page + i));
+					page_to_pfn(page + i / PAGE_MMUCOUNT));
 			else if (anon_exclusive)
 				swp_entry = make_readable_exclusive_migration_entry(
-							page_to_pfn(page + i));
+					page_to_pfn(page + i / PAGE_MMUCOUNT));
 			else
 				swp_entry = make_readable_migration_entry(
-							page_to_pfn(page + i));
+					page_to_pfn(page + i / PAGE_MMUCOUNT));
 			if (young)
 				swp_entry = make_migration_entry_young(swp_entry);
 			if (dirty)
@@ -3315,7 +3358,8 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 		pte_t entry;
 		swp_entry_t swp_entry;
 
-		for (i = 0, addr = haddr; i < HPAGE_PMD_NR; i++, addr += PAGE_SIZE) {
+		for (i = 0, addr = haddr; i < HPAGE_PMD_MMUNR;
+		     i++, addr += MMUPAGE_SIZE) {
 			/*
 			 * anon_exclusive was already propagated to the relevant
 			 * pages corresponding to the pte entries when freeze
@@ -3323,10 +3367,10 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 			 */
 			if (write)
 				swp_entry = make_writable_device_private_entry(
-							page_to_pfn(page + i));
+					page_to_pfn(page + i / PAGE_MMUCOUNT));
 			else
 				swp_entry = make_readable_device_private_entry(
-							page_to_pfn(page + i));
+					page_to_pfn(page + i / PAGE_MMUCOUNT));
 			/*
 			 * Young and dirty bits are not progated via swp_entry
 			 */
@@ -3354,10 +3398,10 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 		if (uffd_wp)
 			entry = pte_mkuffd_wp(entry);
 
-		for (i = 0; i < HPAGE_PMD_NR; i++)
+		for (i = 0; i < HPAGE_PMD_MMUNR; i++)
 			VM_WARN_ON(!pte_none(ptep_get(pte + i)));
 
-		set_ptes(mm, haddr, pte, entry, HPAGE_PMD_NR);
+		set_ptes(mm, haddr, pte, entry, HPAGE_PMD_MMUNR);
 	}
 	pte_unmap(pte);
 
@@ -3511,7 +3555,7 @@ static bool __discard_anon_folio_pmd_locked(struct vm_area_struct *vma,
 
 	folio_remove_rmap_pmd(folio, pmd_page(orig_pmd), vma);
 	zap_deposited_table(mm, pmdp);
-	add_mm_counter(mm, MM_ANONPAGES, -HPAGE_PMD_NR);
+	add_mm_counter(mm, MM_ANONPAGES, -HPAGE_PMD_MMUNR);
 	if (vma->vm_flags & VM_LOCKED)
 		mlock_drain_local();
 	folio_put(folio);
@@ -3612,6 +3656,24 @@ static void __split_folio_to_order(struct folio *folio, int old_order,
 		struct folio *new_folio = (struct folio *)new_head;
 
 		VM_BUG_ON_PAGE(atomic_read(&new_folio->_mapcount) != -1, new_head);
+		/*
+		 * PGCL fix: VM_BUG_ON_PAGE above is a no-op without
+		 * CONFIG_DEBUG_VM, allowing phantom _mapcount values from
+		 * folio_add_new_anon_rmap()'s bulk init to slip through.
+		 * Force-reset to -1 so the post-split sub-folio is genuinely
+		 * unmapped; remap_page() will inc it back to 0 if there's a
+		 * migration entry restored to point to this sub-folio.
+		 *
+		 * The phantom-mapcount premise only exists under PGCL
+		 * (PAGE_MMUSHIFT > 0): folio_add_new_anon_rmap() bulk-inits
+		 * PAGE_MMUCOUNT per-page _mapcounts while a fault installs one
+		 * PTE.  At PAGE_MMUSHIFT == 0 one page == one PTE, no phantom
+		 * exists, and mainline never writes _mapcount here — so gate
+		 * the reset on PGCL to preserve the Newton limit (forcing -1 on
+		 * a still-mapped head at shift 0 would free a mapped page).
+		 */
+		if (PAGE_MMUSHIFT > 0 && IS_ENABLED(CONFIG_PAGE_MAPCOUNT))
+			atomic_set(&new_folio->_mapcount, -1);
 
 		/*
 		 * Clone page flags before unfreezing refcount.
@@ -3686,6 +3748,34 @@ static void __split_folio_to_order(struct folio *folio, int old_order,
 		folio_set_order(folio, new_order);
 	else
 		ClearPageCompound(&folio->page);
+
+	/*
+	 * PGCL fix: Reset head's _mapcount to -1 (= 0 mappings) when
+	 * splitting to order 0.  folio_add_new_anon_rmap() bulk-initializes
+	 * all per-page _mapcount to 0 even when the fault path only creates
+	 * one PTE (partial mapping under THP=on).  unmap_folio() dec's
+	 * _mapcount only for the PTE-present sub-page; if the head sub-page
+	 * was never PTE-mapped, its _mapcount stays at 0 (phantom mapping).
+	 *
+	 * After split, that phantom causes folio_mapped(head) to return
+	 * true, and the caller's folio_put (e.g., in
+	 * madvise_cold_or_pageout_pte_range) frees the folio while
+	 * "still mapped" — leading to a stale PTE for the actually-mapped
+	 * post-split sub-folio and rss-counter imbalance at exit_mmap.
+	 *
+	 * Sub-folios at idx > 0 already have _mapcount == -1 (per the
+	 * VM_BUG_ON_PAGE check at the top of this function).  This fix
+	 * extends the same invariant to the head, which remap_page() will
+	 * inc back to 0 if and only if there's a migration entry for it.
+	 *
+	 * Gate on PAGE_MMUSHIFT > 0: the phantom only arises from PGCL's
+	 * bulk _mapcount init.  At shift 0 mainline leaves the head
+	 * _mapcount alone; forcing -1 on a still-mapped head would free a
+	 * mapped page onto the buddy list (the laptop pgcl0 reserved-bit
+	 * crash).  Newton limit: byte-identical to mainline at shift 0.
+	 */
+	if (PAGE_MMUSHIFT > 0 && !new_order && IS_ENABLED(CONFIG_PAGE_MAPCOUNT))
+		atomic_set(&folio->page._mapcount, -1);
 }
 
 /**
