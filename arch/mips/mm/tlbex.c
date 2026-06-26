@@ -780,7 +780,7 @@ void build_get_pmde64(u32 **p, struct uasm_label **l, struct uasm_reloc **r,
 		 * everything but the lower xuseg addresses goes down
 		 * the module_alloc/vmalloc path.
 		 */
-		uasm_i_dsrl_safe(p, ptr, tmp, PGDIR_SHIFT + PGD_TABLE_ORDER + PAGE_SHIFT - 3);
+		uasm_i_dsrl_safe(p, ptr, tmp, PGDIR_SHIFT + PGD_TABLE_ORDER + MMUPAGE_SHIFT - 3);
 		uasm_il_bnez(p, r, ptr, label_vmalloc);
 	} else {
 		uasm_il_bltz(p, r, tmp, label_vmalloc);
@@ -954,8 +954,8 @@ EXPORT_SYMBOL_GPL(build_get_pgde32);
 
 static void build_adjust_context(u32 **p, unsigned int ctx)
 {
-	unsigned int shift = 4 - (PTE_T_LOG2 + 1) + PAGE_SHIFT - 12;
-	unsigned int mask = (PTRS_PER_PTE / 2 - 1) << (PTE_T_LOG2 + 1);
+	unsigned int shift = 4 - (PTE_T_LOG2 + 1) + MMUPAGE_SHIFT - 12;
+	unsigned int mask = (MMUPAGE_SIZE / sizeof(pte_t) / 2 - 1) << (PTE_T_LOG2 + 1);
 
 	if (shift)
 		UASM_i_SRL(p, ctx, ctx, shift);
@@ -1073,7 +1073,7 @@ build_fast_tlb_refill_handler (u32 **p, struct uasm_label **l,
 			UASM_i_SW(p, scratch, scratchpad_offset(0), 0);
 
 		uasm_i_dsrl_safe(p, scratch, tmp,
-				 PGDIR_SHIFT + PGD_TABLE_ORDER + PAGE_SHIFT - 3);
+				 PGDIR_SHIFT + PGD_TABLE_ORDER + MMUPAGE_SHIFT - 3);
 		uasm_il_bnez(p, r, scratch, label_vmalloc);
 
 		if (pgd_reg == -1) {
@@ -1217,7 +1217,7 @@ build_fast_tlb_refill_handler (u32 **p, struct uasm_label **l,
 		build_tlb_write_entry(p, l, r, tlb_random);
 		uasm_l_leave(l, *p);
 		rv.restore_scratch = 1;
-	} else if (PAGE_SHIFT == 14 || PAGE_SHIFT == 13)  {
+	} else if (MMUPAGE_SHIFT == 14 || MMUPAGE_SHIFT == 13)  {
 		build_tlb_write_entry(p, l, r, tlb_random);
 		uasm_l_leave(l, *p);
 		UASM_i_LW(p, scratch, scratchpad_offset(0), 0);
@@ -1442,13 +1442,13 @@ static void setup_pw(void)
 	pgd_w = PGDIR_SHIFT - PMD_SHIFT + PGD_TABLE_ORDER;
 
 	pmd_i = PMD_SHIFT;    /* 2nd level PMD */
-	pmd_w = PMD_SHIFT - PAGE_SHIFT;
+	pmd_w = PMD_SHIFT - MMUPAGE_SHIFT;
 #else
-	pgd_w = PGDIR_SHIFT - PAGE_SHIFT + PGD_TABLE_ORDER;
+	pgd_w = PGDIR_SHIFT - MMUPAGE_SHIFT + PGD_TABLE_ORDER;
 #endif
 
-	pt_i  = PAGE_SHIFT;    /* 3rd level PTE */
-	pt_w  = PAGE_SHIFT - 3;
+	pt_i  = MMUPAGE_SHIFT;    /* 3rd level PTE */
+	pt_w  = MMUPAGE_SHIFT - 3;
 
 	pte_i = ilog2(_PAGE_GLOBAL);
 	pte_w = 0;
@@ -1483,7 +1483,7 @@ static void build_loongson3_tlb_refill_handler(void)
 	if (check_for_high_segbits) {
 		uasm_i_dmfc0(&p, GPR_K0, C0_BADVADDR);
 		uasm_i_dsrl_safe(&p, GPR_K1, GPR_K0,
-				PGDIR_SHIFT + PGD_TABLE_ORDER + PAGE_SHIFT - 3);
+				PGDIR_SHIFT + PGD_TABLE_ORDER + MMUPAGE_SHIFT - 3);
 		uasm_il_beqz(&p, &r, GPR_K1, label_vmalloc);
 		uasm_i_nop(&p);
 
@@ -2012,8 +2012,8 @@ build_r4000_tlbchange_handler_head(u32 **p, struct uasm_label **l,
 
 	UASM_i_MFC0(p, wr.r1, C0_BADVADDR);
 	UASM_i_LW(p, wr.r2, 0, wr.r2);
-	UASM_i_SRL(p, wr.r1, wr.r1, PAGE_SHIFT - PTE_T_LOG2);
-	uasm_i_andi(p, wr.r1, wr.r1, (PTRS_PER_PTE - 1) << PTE_T_LOG2);
+	UASM_i_SRL(p, wr.r1, wr.r1, MMUPAGE_SHIFT - PTE_T_LOG2);
+	uasm_i_andi(p, wr.r1, wr.r1, (MMUPAGE_SIZE / sizeof(pte_t) - 1) << PTE_T_LOG2);
 	UASM_i_ADDU(p, wr.r2, wr.r2, wr.r1);
 
 #ifdef CONFIG_SMP
@@ -2415,7 +2415,7 @@ static void config_htw_params(void)
 	pwfield |= PGDIR_SHIFT << MIPS_PWFIELD_GDI_SHIFT;
 	/* re-initialize the PTI field including the even/odd bit */
 	pwfield &= ~MIPS_PWFIELD_PTI_MASK;
-	pwfield |= PAGE_SHIFT << MIPS_PWFIELD_PTI_SHIFT;
+	pwfield |= MMUPAGE_SHIFT << MIPS_PWFIELD_PTI_SHIFT;
 	if (CONFIG_PGTABLE_LEVELS >= 3) {
 		pwfield &= ~MIPS_PWFIELD_MDI_MASK;
 		pwfield |= PMD_SHIFT << MIPS_PWFIELD_MDI_SHIFT;
@@ -2440,7 +2440,7 @@ static void config_htw_params(void)
 	}
 
 	pwsize = ilog2(PTRS_PER_PGD) << MIPS_PWSIZE_GDW_SHIFT;
-	pwsize |= ilog2(PTRS_PER_PTE) << MIPS_PWSIZE_PTW_SHIFT;
+	pwsize |= ilog2(MMUPAGE_SIZE / sizeof(pte_t)) << MIPS_PWSIZE_PTW_SHIFT;
 	if (CONFIG_PGTABLE_LEVELS >= 3)
 		pwsize |= ilog2(PTRS_PER_PMD) << MIPS_PWSIZE_MDW_SHIFT;
 
@@ -2542,7 +2542,7 @@ void build_tlb_refill_handler(void)
 	check_pabits();
 
 #ifdef CONFIG_64BIT
-	check_for_high_segbits = current_cpu_data.vmbits > (PGDIR_SHIFT + PGD_TABLE_ORDER + PAGE_SHIFT - 3);
+	check_for_high_segbits = current_cpu_data.vmbits > (PGDIR_SHIFT + PGD_TABLE_ORDER + MMUPAGE_SHIFT - 3);
 #endif
 
 	if (cpu_has_3kex) {

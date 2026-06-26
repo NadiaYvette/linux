@@ -267,7 +267,7 @@ void octeon_cache_init(void)
 {
 	probe_octeon();
 
-	shm_align_mask = PAGE_SIZE - 1;
+	shm_align_mask = MMUPAGE_SIZE - 1;
 
 	flush_cache_all			= octeon_flush_icache_all;
 	__flush_cache_all		= octeon_flush_icache_all;

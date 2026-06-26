@@ -64,7 +64,7 @@ static unsigned long vdso_base(void)
 
 	if (IS_ENABLED(CONFIG_MIPS_FP_SUPPORT)) {
 		/* Skip the delay slot emulation page */
-		base += PAGE_SIZE;
+		base += MMUPAGE_SIZE;
 	}
 
 	if (current->flags & PF_RANDOMIZE) {
@@ -89,8 +89,15 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	if (IS_ENABLED(CONFIG_MIPS_FP_SUPPORT)) {
 		unsigned long unused;
 
-		/* Map delay slot emulation page */
-		base = do_mmap(NULL, STACK_TOP, PAGE_SIZE, PROT_READ | PROT_EXEC,
+		/*
+		 * Map delay slot emulation page.  Only one hardware page is
+		 * needed (the gap reserved in vdso_base() above is MMUPAGE_SIZE);
+		 * map exactly that.  Mapping PAGE_SIZE here would, under PGCL
+		 * (PAGE_SIZE > MMUPAGE_SIZE), MAP_FIXED-clobber the kernel-page
+		 * holding the top of the user stack where copy_strings() just
+		 * placed argv/env.  Identity at PAGE_MMUSHIFT==0.
+		 */
+		base = do_mmap(NULL, STACK_TOP, MMUPAGE_SIZE, PROT_READ | PROT_EXEC,
 			       MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, 0, 0, &unused,
 			       NULL);
 		if (IS_ERR_VALUE(base)) {
@@ -107,8 +114,8 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	 * only map a page even though the total area is 64K, as we only need
 	 * the counter registers at the start.
 	 */
-	gic_size = mips_gic_present() ? PAGE_SIZE : 0;
-	size = gic_size + VDSO_NR_PAGES * PAGE_SIZE + image->size;
+	gic_size = mips_gic_present() ? MMUPAGE_SIZE : 0;
+	size = gic_size + VDSO_NR_PAGES * MMUPAGE_SIZE + image->size;
 
 	/*
 	 * Find a region that's large enough for us to perform the
@@ -135,7 +142,7 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	}
 
 	data_addr = base + gic_size;
-	vdso_addr = data_addr + VDSO_NR_PAGES * PAGE_SIZE;
+	vdso_addr = data_addr + VDSO_NR_PAGES * MMUPAGE_SIZE;
 
 	vma = vdso_install_vvar_mapping(mm, data_addr);
 	if (IS_ERR(vma)) {
