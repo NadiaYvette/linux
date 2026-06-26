@@ -158,7 +158,16 @@ extern void paging_init(void);
 #define _PAGE_SHARED   _PAGE_U_SHARED
 #define _PAGE_READ     (_PAGE_URE | _PAGE_SRE)
 
-#define _PAGE_CHG_MASK	(PAGE_MASK | _PAGE_ACCESSED | _PAGE_DIRTY)
+/*
+ * Bits preserved across a protection change (pte_modify(), e.g. mprotect()).
+ * The physical-frame bits are MMUPAGE (hardware page) granular, not PAGE
+ * granular: under page clustering a PAGE spans PAGE_MMUCOUNT MMUPAGEs and a
+ * sub-PTE's frame number carries its sub-page offset in bits
+ * [PAGE_SHIFT-1 : MMUPAGE_SHIFT].  PAGE_MASK would clear exactly those bits
+ * and collapse every sub-PTE in a cluster onto the cluster base, so use
+ * MMUPAGE_MASK.  Identity at PAGE_MMUSHIFT==0 (MMUPAGE_MASK == PAGE_MASK).
+ */
+#define _PAGE_CHG_MASK	(MMUPAGE_MASK | _PAGE_ACCESSED | _PAGE_DIRTY)
 #define _PAGE_BASE     (_PAGE_PRESENT | _PAGE_ACCESSED)
 #define _PAGE_ALL      (_PAGE_PRESENT | _PAGE_ACCESSED)
 #define _KERNPG_TABLE \
