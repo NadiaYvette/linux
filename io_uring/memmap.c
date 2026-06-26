@@ -296,7 +296,7 @@ __cold int io_uring_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct io_ring_ctx *ctx = file->private_data;
 	size_t sz = vma->vm_end - vma->vm_start;
-	long offset = vma->vm_pgoff << PAGE_SHIFT;
+	long offset = vma->vm_pgoff << MMUPAGE_SHIFT;
 	unsigned int page_limit = UINT_MAX;
 	struct io_mapped_region *region;
 	void *ptr;
