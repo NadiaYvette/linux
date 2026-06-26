@@ -197,7 +197,7 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 	if (ptep && pte_present(*ptep)) {
 		address = (unsigned long) page_address(pte_page(*ptep));
 		/* MS: I need add offset in page */
-		address += ((unsigned long)frame->tramp) & ~PAGE_MASK;
+		address += ((unsigned long)frame->tramp) & ~MMUPAGE_MASK;
 		/* MS address is virtual */
 		address = __virt_to_phys(address);
 		invalidate_icache_range(address, address + 8);
@@ -314,3 +314,4 @@ asmlinkage void do_notify_resume(struct pt_regs *regs, int in_syscall)
 	if (test_thread_flag(TIF_NOTIFY_RESUME))
 		resume_user_mode_work(regs);
 }
+

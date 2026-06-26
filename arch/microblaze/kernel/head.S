@@ -39,9 +39,15 @@
 #include <asm/processor.h>
 
 .section .data
+# swapper_pg_dir must be MMUPAGE-aligned: the TLB miss handler in
+# hw_exception_handler.S computes the PGD entry address with an
+# "or r4, r4, r5" of pg_dir base and offset, which is correct only
+# when the base is MMUPAGE-aligned so the low offset bits do not
+# collide with the base.
+.balign MMUPAGE_SIZE
 .global swapper_pg_dir
 swapper_pg_dir:
-	.space	PAGE_SIZE
+	.space	MMUPAGE_SIZE
 
 .section .rodata
 .align 4
