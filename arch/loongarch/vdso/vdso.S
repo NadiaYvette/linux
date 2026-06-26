@@ -13,10 +13,10 @@
 	__PAGE_ALIGNED_DATA
 
 	.globl vdso_start, vdso_end
-	.balign PAGE_SIZE
+	.balign MMUPAGE_SIZE
 vdso_start:
 	.incbin "arch/loongarch/vdso/vdso.so"
-	.balign PAGE_SIZE
+	.balign MMUPAGE_SIZE
 vdso_end:
 
 	.previous

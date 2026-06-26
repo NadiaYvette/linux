@@ -10,11 +10,11 @@
 #include <linux/mm.h>
 #include <linux/mman.h>
 
-#define SHM_ALIGN_MASK	(SHMLBA - 1)
+#define SHM_ALIGN_MASK	(MMUPAGE_SIZE - 1)
 
 #define COLOUR_ALIGN(addr, pgoff)			\
 	((((addr) + SHM_ALIGN_MASK) & ~SHM_ALIGN_MASK)	\
-	 + (((pgoff) << PAGE_SHIFT) & SHM_ALIGN_MASK))
+	 + (((pgoff) << MMUPAGE_SHIFT) & SHM_ALIGN_MASK))
 
 enum mmap_allocation_direction {UP, DOWN};
 
@@ -41,7 +41,7 @@ static unsigned long arch_get_unmapped_area_common(struct file *filp,
 		 * cache aliasing constraints.
 		 */
 		if ((flags & MAP_SHARED) &&
-		    ((addr - (pgoff << PAGE_SHIFT)) & SHM_ALIGN_MASK))
+		    ((addr - (pgoff << MMUPAGE_SHIFT)) & SHM_ALIGN_MASK))
 			return -EINVAL;
 		return addr;
 	}
@@ -64,19 +64,19 @@ static unsigned long arch_get_unmapped_area_common(struct file *filp,
 	}
 
 	info.length = len;
-	info.align_offset = pgoff << PAGE_SHIFT;
+	info.align_offset = pgoff << MMUPAGE_SHIFT;
 	if (filp && is_file_hugepages(filp))
 		info.align_mask = huge_page_mask_align(filp);
 	else
-		info.align_mask = do_color_align ? (PAGE_MASK & SHM_ALIGN_MASK) : 0;
+		info.align_mask = do_color_align ? (MMUPAGE_MASK & SHM_ALIGN_MASK) : 0;
 
 	if (dir == DOWN) {
 		info.flags = VM_UNMAPPED_AREA_TOPDOWN;
-		info.low_limit = PAGE_SIZE;
+		info.low_limit = MMUPAGE_SIZE;
 		info.high_limit = mm->mmap_base;
 		addr = vm_unmapped_area(&info);
 
-		if (!(addr & ~PAGE_MASK))
+		if (!(addr & ~MMUPAGE_MASK))
 			return addr;
 
 		/*
