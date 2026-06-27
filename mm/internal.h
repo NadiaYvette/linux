@@ -1439,7 +1439,17 @@ static inline unsigned long vma_address_end(struct page_vma_mapped_walk *pvmw)
 
 	/* Common case, plus ->pgoff is invalid for KSM */
 	if (pvmw->nr_pages == 1)
-		return pvmw->address + PAGE_SIZE;
+		/*
+		 * PGCL #143: PAGE_SIZE is a whole cluster, but a VMA is only
+		 * MMUPAGE-aligned and may legally end mid-cluster — clamp to
+		 * vm_end (as the nr_pages>1 path below already does) so the PVMW
+		 * batch scan cannot run past this VMA into a neighbour's PTEs
+		 * that map the same cluster pfn (pte_pfn drops sub-page bits),
+		 * which would over-count nr_mmupages and over-drop ref/rmap on
+		 * teardown -> free-while-mapped.  No-op when PAGE_SIZE ==
+		 * MMUPAGE_SIZE (VMAs are PAGE-aligned then).
+		 */
+		return min(pvmw->address + PAGE_SIZE, vma->vm_end);
 
 	pgoff = pvmw->pgoff + pvmw->nr_pages;
 	address = pgoff_to_vma_addr(vma, pgoff);
