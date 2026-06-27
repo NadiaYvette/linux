@@ -2426,9 +2426,35 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 				goto discard;
 			}
 
-			if (folio_dup_swap(folio, subpage) < 0) {
-				set_pte_at(mm, address, pvmw.pte, pteval);
-				goto walk_abort;
+			/*
+			 * PGCL swap-entry batching: get_and_clear_ptes above
+			 * cleared nr_pages (== pvmw.nr_mmupages) sub-PTEs of one
+			 * cluster.  A cluster is a single struct page / single
+			 * order-0 swap slot (folio_alloc_swap allocates 1<<order
+			 * == 1 slot; every sub-PTE shares folio->swap, since
+			 * subpage == &folio->page so folio_page_idx() == 0).
+			 * Each future sub-PTE swap-in (do_swap_page, nr_ptes==1)
+			 * calls folio_put_swap(folio, page) which drops one
+			 * reference on that one slot, so the slot must hold
+			 * nr_pages references now to balance the nr_pages
+			 * swap-ins.  folio_dup_swap(folio, subpage) adds exactly
+			 * one reference at the slot, so loop it nr_pages times,
+			 * unwinding cleanly on the rare failure.
+			 */
+			{
+				unsigned long dupd;
+
+				for (dupd = 0; dupd < nr_pages; dupd++) {
+					if (folio_dup_swap(folio, subpage) < 0)
+						break;
+				}
+				if (dupd != nr_pages) {
+					while (dupd--)
+						folio_put_swap(folio, subpage);
+					set_ptes(mm, address, pvmw.pte, pteval,
+						 nr_pages);
+					goto walk_abort;
+				}
 			}
 
 			/*
@@ -2437,16 +2463,22 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 			 * so we'll not check/care.
 			 */
 			if (arch_unmap_one(mm, vma, address, pteval) < 0) {
-				folio_put_swap(folio, subpage);
-				set_pte_at(mm, address, pvmw.pte, pteval);
+				unsigned long j;
+
+				for (j = 0; j < nr_pages; j++)
+					folio_put_swap(folio, subpage);
+				set_ptes(mm, address, pvmw.pte, pteval, nr_pages);
 				goto walk_abort;
 			}
 
 			/* See folio_try_share_anon_rmap(): clear PTE first. */
 			if (anon_exclusive &&
 			    folio_try_share_anon_rmap_pte(folio, subpage)) {
-				folio_put_swap(folio, subpage);
-				set_pte_at(mm, address, pvmw.pte, pteval);
+				unsigned long j;
+
+				for (j = 0; j < nr_pages; j++)
+					folio_put_swap(folio, subpage);
+				set_ptes(mm, address, pvmw.pte, pteval, nr_pages);
 				goto walk_abort;
 			}
 			if (list_empty(&mm->mmlist)) {
@@ -2456,17 +2488,17 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 				spin_unlock(&mmlist_lock);
 			}
 			/*
-			 * PGCL Option A: nr_pages sub-PTEs were cleared by
-			 * get_and_clear_ptes above, but the swap path below
-			 * only writes ONE swap entry (set_pte_at).  Pending
-			 * proper PGCL swap-entry batching, account that
-			 * asymmetry directly: nr_pages anon pages "removed",
-			 * 1 swap entry installed.  The remaining nr_pages-1
-			 * sub-PTEs will fault as zero pages on next access
-			 * (pre-existing PGCL swap quirk).
+			 * PGCL swap-entry batching: nr_pages sub-PTEs were
+			 * cleared by get_and_clear_ptes above and now each gets
+			 * its own swap entry.  All sub-PTEs of a cluster share
+			 * the single order-0 slot (folio->swap), so every
+			 * sub-PTE stores the SAME swp_pte (identical offset);
+			 * the nr_pages references taken via folio_dup_swap above
+			 * are consumed one-per-sub-PTE on swap-in.  nr_pages anon
+			 * pages removed, nr_pages swap entries installed.
 			 */
 			add_mm_counter(mm, MM_ANONPAGES, -nr_pages);
-			inc_mm_counter(mm, MM_SWAPENTS);
+			add_mm_counter(mm, MM_SWAPENTS, nr_pages);
 			swp_pte = swp_entry_to_pte(entry);
 			if (anon_exclusive)
 				swp_pte = pte_swp_mkexclusive(swp_pte);
@@ -2481,7 +2513,23 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 				if (pte_swp_uffd_wp(pteval))
 					swp_pte = pte_swp_mkuffd_wp(swp_pte);
 			}
-			set_pte_at(mm, address, pvmw.pte, swp_pte);
+			/*
+			 * One slot, one offset for the whole cluster: write the
+			 * identical swp_pte to each sub-PTE.  set_ptes() must NOT
+			 * be used here — under PGCL it advances the raw PTE value
+			 * by MMUPAGE_SIZE per entry, which would corrupt the
+			 * (non-present) swap-entry encoding.  pteval restores on
+			 * the abort paths above are present PTEs, so set_ptes()
+			 * striding by MMUPAGE is correct there but wrong here.
+			 */
+			{
+				unsigned long j;
+
+				for (j = 0; j < nr_pages; j++)
+					set_pte_at(mm,
+						   address + (j << MMUPAGE_SHIFT),
+						   pvmw.pte + j, swp_pte);
+			}
 		} else {
 			/*
 			 * This is a locked file-backed folio,

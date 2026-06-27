@@ -5283,7 +5283,19 @@ static void check_swap_exclusive(struct folio *folio, swp_entry_t entry,
 {
 	/* Called under PT locked and folio locked, the swap count is stable */
 	do {
-		VM_WARN_ON_ONCE_FOLIO(__swap_count(entry) != 1, folio);
+		/*
+		 * PGCL: a cluster occupies a single order-0 swap slot shared by
+		 * all PAGE_MMUCOUNT sub-PTEs (see try_to_unmap_one swap-entry
+		 * batching).  An exclusive cluster therefore legitimately holds
+		 * up to PAGE_MMUCOUNT references on its slot — one per sub-PTE
+		 * still swapped out — so the count is not 1 but 1..PAGE_MMUCOUNT.
+		 * Only a count of 0 (slot lost) or > PAGE_MMUCOUNT (a foreign
+		 * reference, i.e. genuine sharing) is anomalous.  Non-PGCL
+		 * (PAGE_MMUCOUNT == 1) keeps the exact-1 invariant.
+		 */
+		VM_WARN_ON_ONCE_FOLIO(__swap_count(entry) < 1 ||
+				      __swap_count(entry) > PAGE_MMUCOUNT,
+				      folio);
 		entry.val++;
 	} while (--nr_pages);
 }
@@ -5696,8 +5708,8 @@ check_folio:
 	 * Do it after mapping, so raced page faults will likely see the folio
 	 * in swap cache and wait on the folio lock.
 	 */
-	if (should_try_to_free_swap(si, folio, vma, nr_pages, vmf->flags))
-		folio_free_swap(folio);
+	if (!PAGE_MMUSHIFT && should_try_to_free_swap(si, folio, vma, nr_pages, vmf->flags))
+		folio_free_swap(folio);	/* pgcl143 BISECT: PGCL skips eager swap free (revert) */
 
 	/*
 	 * PGCL swap-in prefetch: with PAGE_MMUSHIFT>0, each sub-page within
