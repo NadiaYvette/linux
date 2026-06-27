@@ -1985,69 +1985,6 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 				 * set_pte_range's folio_add_rmap_subptes() add side.
 				 */
 				folio_remove_rmap_subptes(folio, page, nr, vma);
-			} else if (folio_test_large(folio)) {
-				/*
-				 * ANON large folio: Contract-A cluster-site path,
-				 * converted to MMUPAGE-uniform in a following commit.
-				 * Edge-detect by PHYSICAL sub-index, not virtual:
-				 * a MMUPAGE- (not kernel-page-) aligned mapping
-				 * (vsub != psub) makes the virtual window straddle
-				 * two kernel pages, so anchor at this kernel page's
-				 * physical sub-0 slot and match pte_pfn.
-				 */
-				unsigned long mmu_step = __phys_to_pte_val(MMUPAGE_SIZE);
-				unsigned int psub = (unsigned int)((pte_val(ptent) / mmu_step) &
-							   (PAGE_MMUCOUNT - 1));
-				unsigned long kpfn = pte_pfn(ptent);
-				unsigned int idx = (addr >> MMUPAGE_SHIFT) &
-						   (PTRS_PER_PTE - 1);
-				long base_idx = (long)idx - (long)psub;
-				bool straddles = base_idx < 0 ||
-					base_idx + PAGE_MMUCOUNT > PTRS_PER_PTE;
-				pte_t *base = pte - psub;
-				bool any_present = false;
-				int j;
-
-				/*
-				 * A straddling kernel page (its PAGE_MMUCOUNT sub-PTEs
-				 * span two pte tables) can only arise for file folios
-				 * with a non-cluster-aligned pgoff; anon (pgoff 0)
-				 * never straddles since PAGE_MMUCOUNT divides
-				 * PTRS_PER_PTE.  A single per-cluster (Contract A)
-				 * remove cannot be anchored within one table for such a
-				 * page, so fall back to Option A — one rmap event per
-				 * sub-PTE.  This matches set_pte_range's add side, which
-				 * likewise uses per-sub-PTE counting on straddle, so
-				 * each straddling cluster stays self-consistent
-				 * (+1/-1 per PTE).
-				 */
-				if (straddles) {
-					for (i = 0; i < nr; i++)
-						folio_remove_rmap_pte(folio, page, vma);
-				} else {
-					/*
-					 * Non-straddle (common): the kernel page's full
-					 * window is in this table.  Fire one rmap event
-					 * iff this run cleared the LAST present sub-PTE
-					 * (the run is already cleared above, so cleared
-					 * slots read not-present).
-					 */
-					for (j = 0; j < PAGE_MMUCOUNT; j++) {
-						long t = base_idx + j;
-						pte_t pj;
-
-						if (t < 0 || t >= PTRS_PER_PTE)
-							continue;
-						pj = ptep_get(base + j);
-						if (pte_present(pj) &&
-						    pte_pfn(pj) == kpfn) {
-							any_present = true;
-							break;
-						}
-					}
-					if (!any_present)
-						folio_remove_rmap_pte(folio, page, vma);
-				}
 			} else {
 				for (i = 0; i < nr; i++)
 					folio_remove_rmap_pte(folio, page, vma);
