@@ -980,6 +980,24 @@ void folios_put_refs(struct folio_batch *folios, unsigned int *refs)
 		if (!folio_ref_sub_and_test(folio, nr_refs))
 			continue;
 
+		/*
+		 * PGCL #143 deferred-put gate (Tessera property2/coq/rmap_defer.v,
+		 * no_free_while_referenced).  This deferred put just drove refcount
+		 * to 0.  If a sibling sub-PTE still maps the cluster, a concurrent
+		 * (forked) mapper's reference was not counted in this aggregate put
+		 * -- freeing now is the free-while-mapped race (#143).  Refuse it:
+		 * undo this put and let the still-live mapper's own put free it
+		 * correctly later (leak-on-never beats corruption).  The WARN is the
+		 * in-act capture (the tlb_finish_mmu/folios_put_refs freer stack with
+		 * a live mapping); the skip is the gate.  No-op at PAGE_MMUSHIFT==0.
+		 */
+		if (PAGE_MMUSHIFT && unlikely(folio_mapped(folio))) {
+			VM_WARN_ONCE(1, "pgcl143: deferred free of still-mapped folio (pfn %lx mapcount %d nr_refs %u)",
+				     folio_pfn(folio), folio_mapcount(folio), nr_refs);
+			folio_ref_add(folio, nr_refs);
+			continue;
+		}
+
 		/* hugetlb has its own memcg */
 		if (folio_test_hugetlb(folio)) {
 			if (lruvec) {
