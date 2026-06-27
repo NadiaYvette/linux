@@ -1617,8 +1617,11 @@ static __always_inline void __folio_add_anon_rmap(struct folio *folio,
 		}
 	}
 
+	/* PGCL: one owner maps up to PAGE_MMUCOUNT sub-PTEs per cluster, so
+	 * _mapcount reaches PAGE_MMUCOUNT-1 while still exclusive; only a count
+	 * beyond that implies a second owner.  (== >0 when PAGE_MMUCOUNT==1.) */
 	VM_WARN_ON_FOLIO(!folio_test_large(folio) && PageAnonExclusive(page) &&
-			 atomic_read(&folio->_mapcount) > 0, folio);
+			 atomic_read(&folio->_mapcount) > PAGE_MMUCOUNT - 1, folio);
 	for (i = 0; i < nr_pages; i++) {
 		struct page *cur_page = page + i;
 
@@ -1632,7 +1635,7 @@ static __always_inline void __folio_add_anon_rmap(struct folio *folio,
 		 * While PTE-mapping a THP we have a PMD and a PTE
 		 * mapping.
 		 */
-		VM_WARN_ON_FOLIO(atomic_read(&cur_page->_mapcount) > 0 &&
+		VM_WARN_ON_FOLIO(atomic_read(&cur_page->_mapcount) > PAGE_MMUCOUNT - 1 &&
 				 PageAnonExclusive(cur_page), folio);
 	}
 

@@ -4636,7 +4636,9 @@ static bool __wp_can_reuse_large_anon_folio(struct folio *folio,
 	if (folio_large_mapcount(folio) != folio_ref_count(folio))
 		goto unlock;
 
-	VM_WARN_ON_ONCE_FOLIO(folio_large_mapcount(folio) > folio_nr_pages(folio), folio);
+	/* PGCL #146: large_mapcount is MMUPAGE-granular (PAGE_MMUCOUNT sub-PTE maps
+	 * per cluster), so the full-map bound is nr_pages * PAGE_MMUCOUNT. */
+	VM_WARN_ON_ONCE_FOLIO(folio_large_mapcount(folio) > folio_nr_pages(folio) * PAGE_MMUCOUNT, folio);
 	VM_WARN_ON_ONCE_FOLIO(folio_entire_mapcount(folio), folio);
 	VM_WARN_ON_ONCE(folio_mm_id(folio, 0) != vma->vm_mm->mm_id &&
 			folio_mm_id(folio, 1) != vma->vm_mm->mm_id);
