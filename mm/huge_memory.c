@@ -3672,6 +3672,26 @@ static void __split_folio_to_order(struct folio *folio, int old_order,
 		 * the reset on PGCL to preserve the Newton limit (forcing -1 on
 		 * a still-mapped head at shift 0 would free a mapped page).
 		 */
+#if PAGE_MMUSHIFT
+		/*
+		 * #143 SPLIT-RESET probe (Tessera): the reset below forces -1 on a
+		 * justification that is anon-only (folio_add_new_anon_rmap bulk-init
+		 * phantom), but fires for FILE folios too -- and remap_page() restores
+		 * only migration-entry (anon) folios.  A FILE tail with pre_mc > -1
+		 * here is a real mapcount being clobbered and never restored -> the
+		 * order-0 zap then underflows by N (= quar~=15).  Read-only.
+		 */
+		{
+			static DEFINE_RATELIMIT_STATE(rs_t, HZ, 20);
+			int pre = atomic_read(&new_folio->_mapcount);
+
+			if (pre != -1 && __ratelimit(&rs_t))
+				pr_warn("PGCL143-SPLIT-RESET tail %s cpfn=%#lx pre_mc=%d head_largemc=%d\n",
+					folio_test_anon(folio) ? "anon" : "FILE",
+					folio_pfn(new_folio), pre,
+					folio_large_mapcount(folio));
+		}
+#endif
 		if (PAGE_MMUSHIFT > 0 && IS_ENABLED(CONFIG_PAGE_MAPCOUNT))
 			atomic_set(&new_folio->_mapcount, -1);
 
@@ -3774,6 +3794,18 @@ static void __split_folio_to_order(struct folio *folio, int old_order,
 	 * mapped page onto the buddy list (the laptop pgcl0 reserved-bit
 	 * crash).  Newton limit: byte-identical to mainline at shift 0.
 	 */
+#if PAGE_MMUSHIFT
+	/* #143 SPLIT-RESET probe (head); see the tail site. */
+	if (!new_order) {
+		static DEFINE_RATELIMIT_STATE(rs_h, HZ, 20);
+		int pre = atomic_read(&folio->page._mapcount);
+
+		if (pre != -1 && __ratelimit(&rs_h))
+			pr_warn("PGCL143-SPLIT-RESET head %s cpfn=%#lx pre_mc=%d\n",
+				folio_test_anon(folio) ? "anon" : "FILE",
+				folio_pfn(folio), pre);
+	}
+#endif
 	if (PAGE_MMUSHIFT > 0 && !new_order && IS_ENABLED(CONFIG_PAGE_MAPCOUNT))
 		atomic_set(&folio->page._mapcount, -1);
 }

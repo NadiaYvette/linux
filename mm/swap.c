@@ -977,8 +977,47 @@ void folios_put_refs(struct folio_batch *folios, unsigned int *refs)
 			continue;
 		}
 
+#if PAGE_MMUSHIFT
+		{
+			/*
+			 * PGCL #143 band-aid (refcount floor) -- twin of the _mapcount
+			 * floor in __folio_remove_rmap.  The cross-mm aggregate over-put
+			 * drives a shared cluster's _refcount NEGATIVE (refcount:-N ->
+			 * "Bad page state" -> panic, the -pgcl4hard2 failure).  Floor the
+			 * subtract at 0: an over-put frees the cluster cleanly at 0
+			 * instead of underflowing; the excess (never-taken) puts are
+			 * dropped (leak-not-corrupt).  A normal put (refs >= nr_refs) is
+			 * byte-identical to folio_ref_sub_and_test.
+			 */
+			int old = folio_ref_count(folio), new_refs;
+
+			do {
+				new_refs = old > (int)nr_refs ? old - (int)nr_refs : 0;
+			} while (!atomic_try_cmpxchg(&folio->_refcount, &old, new_refs));
+			if (new_refs)
+				continue;
+			/*
+			 * PGCL #143 ref-hold GATE (the real fix): the refcount reached
+			 * 0, but if a deferred rmap removal is still PENDING on this
+			 * cluster the free is premature -- the cross-mm early-drop /
+			 * aggregate over-put racing ahead of tlb_flush_rmap_batch.
+			 * Re-hold and skip; the pending removal's own tlb_finish_mmu
+			 * free completes the cluster once pending hits 0.  The WARN's
+			 * stack names the early-drop site (Tessera SharingRace §B).
+			 */
+			if (pgcl143_pending_test(folio_pfn(folio)) ||
+			    pgcl143_quar_test(folio_pfn(folio))) {
+				VM_WARN_ONCE(1, "pgcl143: premature cluster free, deferred rmap removal pending OR quarantined (pfn %lx mc %d nr_refs %u)",
+					     folio_pfn(folio), folio_mapcount(folio),
+					     nr_refs);
+				folio_ref_inc(folio);
+				continue;
+			}
+		}
+#else
 		if (!folio_ref_sub_and_test(folio, nr_refs))
 			continue;
+#endif
 
 		/* hugetlb has its own memcg */
 		if (folio_test_hugetlb(folio)) {

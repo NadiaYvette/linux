@@ -1905,6 +1905,167 @@ void folio_add_file_rmap_pud(struct folio *folio, struct page *page,
 #endif
 }
 
+/* PGCL #143 A/B probe: forensics on stale rmap over-removes (the orphan event). */
+static atomic_t pgcl143_orphans __maybe_unused = ATOMIC_INIT(0);
+
+#if PAGE_MMUSHIFT
+/* PGCL #143 ref-hold: the cross-mm pending-deferred-rmap counter (see internal.h). */
+atomic_t pgcl143_pending[1 << PGCL143_PENDING_BITS];
+
+/* PGCL #143 discriminator: set while tlb_flush_rmap_batch runs the deferred removal. */
+DEFINE_PER_CPU(int, pgcl143_in_deferred_flush);
+
+/* PGCL #143 shadow last-remover (see internal.h): names the two removal passes. */
+DEFINE_PER_CPU(int, pgcl143_rmsite);
+u8 pgcl143_lastsite[1 << PGCL143_PENDING_BITS];
+
+/*
+ * PGCL #143 add-edge namer (Tessera SingleRoot): at a cluster install the rmap
+ * count ADDED must equal the sub-PTEs PRESENT (added==present -- CallBalance for
+ * one install from the unmapped floor).  added < present is the single root
+ * (nr<k) that drives BOTH facets.  @base_pte is the caller's cluster-base PTE
+ * (PTL held); we count this cluster's present sub-PTEs directly from the page
+ * table, robust to vsub!=psub (the virtual window is contiguous; the pfns vary
+ * by sub-offset but all lie inside the folio).
+ */
+int pgcl143_present_subptes(pte_t *base_pte, struct folio *folio)
+{
+	unsigned long fpfn = folio_pfn(folio);
+	int j, present = 0;
+
+	for (j = 0; j < PAGE_MMUCOUNT; j++) {
+		pte_t p = ptep_get(base_pte + j);
+
+		/*
+		 * pte_pfn() shifts by PAGE_SHIFT, dropping the sub-page bits, so
+		 * EVERY sub-PTE of this folio's cluster reads pte_pfn == fpfn (the
+		 * one owning struct page).  Match exactly -- the old [fpfn,fpfn+16)
+		 * range was in cluster-pfn units = 16 *neighbouring folios*, which
+		 * over-counted and produced phantom under-adds.
+		 */
+		if (pte_present(p) && pte_pfn(p) == fpfn)
+			present++;
+	}
+	return present;
+}
+
+void pgcl143_add_edge_warn(struct page *page, int added, int present,
+			   const char *site)
+{
+	static atomic_t ae_n = ATOMIC_INIT(0);
+	int k;
+
+	if (likely(added == present))
+		return;
+	k = atomic_inc_return(&ae_n);
+	if (k <= 20 || !(k & 1023))
+		pr_warn("PGCL143-UNDERADD #%d %s pfn=%#lx added=%d present=%d deficit=%d\n",
+			k, site, page_to_pfn(page), added, present, present - added);
+	if (k <= 5)
+		dump_stack();
+}
+
+/* de-confound quarantine: separate from pgcl143_pending so the pend read at the
+ * over-remove stays a clean deferred-removal count.  See internal.h. */
+atomic_t pgcl143_quar[1 << PGCL143_PENDING_BITS];
+
+/*
+ * Per-sub-PTE forensic map of an install under-add.  For each of the cluster's
+ * PAGE_MMUCOUNT sub-PTEs print: '.'=absent, '='=present & maps THIS folio at the
+ * aligned sub-frame (pfn-fpfn==j), '~'=present & maps THIS folio but vsub!=psub
+ * (pfn-fpfn!=j -- the mremap/relocate edge), 'O'=present mapping ANOTHER folio.
+ * thisfolio = count of '='+'~' (what the rmap SHOULD reflect).  fsub marked '*'.
+ * If thisfolio==added there is no real deficit (the earlier UNDERADD was a window
+ * artifact); thisfolio>added is a real under-add and the map shows its shape.
+ */
+void pgcl143_underadd_detail(struct folio *folio, pte_t *base_pte,
+			     int faulting_sub, int added, const char *site)
+{
+	static atomic_t ud_n = ATOMIC_INIT(0);
+	unsigned long fpfn = folio_pfn(folio);
+	int j, thisf = 0, otherf = 0, k;
+	char map[PAGE_MMUCOUNT + 1];
+
+	for (j = 0; j < PAGE_MMUCOUNT; j++) {
+		pte_t p = ptep_get(base_pte + j);
+
+		if (!pte_present(p)) {
+			map[j] = (j == faulting_sub) ? '!' : '.';
+			continue;
+		}
+		/* '#' present & maps THIS folio's cluster (pte_pfn==fpfn);
+		 * 'o' present & maps another cluster (a neighbour in the window). */
+		if (pte_pfn(p) == fpfn) {
+			map[j] = (j == faulting_sub) ? '*' : '#';
+			thisf++;
+		} else {
+			map[j] = 'o';
+			otherf++;
+		}
+	}
+	map[PAGE_MMUCOUNT] = '\0';
+	if (thisf == added)		/* no real deficit vs this folio */
+		return;
+	k = atomic_inc_return(&ud_n);
+	if (k <= 16 || !(k & 2047)) {
+		pr_warn("PGCL143-UADETAIL #%d %s fpfn=%#lx fsub=%d added=%d thisfolio=%d other=%d mc=%d map=[%s]\n",
+			k, site, fpfn, faulting_sub, added, thisf, otherf,
+			atomic_read(&folio->_mapcount), map);
+		if (k <= 4)
+			dump_stack();
+	}
+}
+#endif
+
+#if PAGE_MMUSHIFT
+static noinline void pgcl143_report_orphan(struct folio *folio, struct page *page,
+					   unsigned long pfn, int mc,
+					   struct vm_area_struct *vma, const char *site,
+					   int prevsite, int cursite)
+{
+	int n = atomic_inc_return(&pgcl143_orphans);
+	/*
+	 * Discriminator -- read BEFORE the quarantine inc below pollutes it.
+	 *   deferred  : this over-remover IS the deferred rmap flush.
+	 *   pend      : a deferred removal for THIS cluster is still queued.
+	 * deferred=1            -> deferred flush double-decrements (the race).
+	 * deferred=0 && pend>0  -> immediate zap over-removes a sub a queued
+	 *                          deferred batch will also remove (the collision).
+	 * pend==0               -> deferred-put race ruled out; static under-add.
+	 */
+	int deferred = this_cpu_read(pgcl143_in_deferred_flush);
+	int pend = pgcl143_pending_count(pfn);	/* CLEAN: deferred removals only */
+	int quar = pgcl143_quar_count(pfn);	/* prior over-removes on this slot */
+
+	/*
+	 * PGCL #143 hard5: QUARANTINE the over-removed cluster (SEPARATE array now)
+	 * so folios_put_refs refuses to free it.  An over-removed cluster has an
+	 * orphan sub-PTE still present; freeing it -> reuse -> wrong-data
+	 * (fs-verity/btrfs FILE CORRUPTED) + LRU list_del corruption (hard4).
+	 * Never decremented = permanent quarantine: leak-not-corrupt.  Keeping it
+	 * off pgcl143_pending makes `pend` above a clean deferred-double-discharge
+	 * signal: excess = pend - (deferred?1:0) > 0  => a second removal is queued.
+	 */
+	pgcl143_quar_inc(pfn);
+
+	/* pass=prev->cur site codes: 1 zap, 2 deferred-flush, 3 reclaim, 4 migrate, 0 other */
+	if (n <= 3) {
+		pr_alert("PGCL143-ORPHAN #%d pfn=%lx mc=%d %s deferred=%d pend=%d quar=%d anon=%d large=%d pass=%d->%d comm=%s pid=%d mm=%px swapcache=%d\n",
+			 n, pfn, mc, site, deferred, pend, quar,
+			 folio_test_anon(folio), folio_test_large(folio), prevsite, cursite,
+			 current->comm, current->pid, vma ? vma->vm_mm : NULL,
+			 folio_test_swapcache(folio));
+		/* page state + (page_owner=on) alloc+free stacks = the incarnation history */
+		dump_page(page, "pgcl143 over-remove (stale rmap on already-unmapped sub-page)");
+		dump_stack();			/* the over-remover's call path */
+	} else if (n <= 200 || !(n & 255)) {
+		pr_alert("PGCL143-ORPHAN total=%d pfn=%lx mc=%d %s deferred=%d pend=%d quar=%d anon=%d large=%d pass=%d->%d\n",
+			 n, pfn, mc, site, deferred, pend, quar,
+			 folio_test_anon(folio), folio_test_large(folio), prevsite, cursite);
+	}
+}
+#endif
+
 static __always_inline void __folio_remove_rmap(struct folio *folio,
 		struct page *page, int nr_pages, struct vm_area_struct *vma,
 		enum pgtable_level level)
@@ -1918,7 +2079,51 @@ static __always_inline void __folio_remove_rmap(struct folio *folio,
 	switch (level) {
 	case PGTABLE_LEVEL_PTE:
 		if (!folio_test_large(folio)) {
+#if PAGE_MMUSHIFT
+			unsigned int li = pgcl143_pending_idx(folio_pfn(folio));
+			int cursite = this_cpu_read(pgcl143_rmsite);
+			int prevsite = pgcl143_lastsite[li];
+			int mc;
+
+			/* shadow last-remover: stamp THIS pass; prevsite = the one before. */
+			pgcl143_lastsite[li] = (u8)cursite;
+			mc = atomic_read(&folio->_mapcount);
+
+			/*
+			 * PGCL #143 hardening: never drive _mapcount below -1 (the
+			 * orphan over-remove).  cmpxchg-decrement only while still
+			 * mapped; on an over-remove make it a no-op AND folio_get()
+			 * to cancel the caller's matching over-drop of the refcount.
+			 * Leak the orphan's accounting instead of underflowing the
+			 * mapcount/stats (LRU corruption -> freeze) or freeing while
+			 * a sub-PTE is still present (premature free -> wrong-data).
+			 */
+			while (mc > -1 &&
+			       !atomic_try_cmpxchg(&folio->_mapcount, &mc, mc - 1))
+				;
+			if (unlikely(mc <= -1)) {
+				bool got;
+
+				pgcl143_report_orphan(folio, &folio->page,
+						      folio_pfn(folio), mc, vma, "small",
+						      prevsite, cursite);
+				/*
+				 * Hold a ref ONLY if the folio is still alive.  NEVER
+				 * resurrect an already-freed (refcount 0) folio: this
+				 * over-remove is the deferred-rmap UAF firing after the
+				 * cluster's ref already hit 0, and re-inserting a being-
+				 * freed page corrupts the pcp/buddy free list (the
+				 * decay_pcp_high RCU stall).  try_get = inc-unless-zero.
+				 */
+				got = folio_try_get(folio);
+				(void)got;
+				nr = 0;
+			} else {
+				nr = (mc - 1 < 0);
+			}
+#else
 			nr = atomic_add_negative(-1, &folio->_mapcount);
+#endif
 			break;
 		}
 
@@ -1937,7 +2142,34 @@ static __always_inline void __folio_remove_rmap(struct folio *folio,
 
 		folio_sub_large_mapcount(folio, nr_pages, vma);
 		do {
+#if PAGE_MMUSHIFT
+			unsigned int li = pgcl143_pending_idx(page_to_pfn(page));
+			int cursite = this_cpu_read(pgcl143_rmsite);
+			int prevsite = pgcl143_lastsite[li];
+			int mc;
+
+			pgcl143_lastsite[li] = (u8)cursite;
+			mc = atomic_read(&page->_mapcount);
+
+			/* PGCL #143 hardening (see small-folio path above). */
+			while (mc > -1 &&
+			       !atomic_try_cmpxchg(&page->_mapcount, &mc, mc - 1))
+				;
+			if (unlikely(mc <= -1)) {
+				bool got;
+
+				pgcl143_report_orphan(folio, page, page_to_pfn(page),
+						      mc, vma, "large", prevsite, cursite);
+				/* try_get, never resurrect a freed folio (see small path) */
+				got = folio_try_get(folio);
+				(void)got;
+				/* hardened no-op: this page contributes no unmap event */
+			} else {
+				last += (mc - 1 < 0);
+			}
+#else
 			last += atomic_add_negative(-1, &page->_mapcount);
+#endif
 		} while (page++, --nr_pages > 0);
 
 		if (last &&
@@ -2127,6 +2359,10 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 	unsigned long pfn;
 	unsigned long hsz = 0;
 	int ptes = 0;
+
+#if PAGE_MMUSHIFT
+	pgcl143_set_rmsite(3);		/* #143: reclaim try_to_unmap removes tagged site 3 */
+#endif
 
 	/*
 	 * When racing against e.g. zap_pte_range() on another cpu,
@@ -2660,6 +2896,10 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 	unsigned long nr_pages = 1, end_addr;
 	unsigned long pfn;
 	unsigned long hsz = 0;
+
+#if PAGE_MMUSHIFT
+	pgcl143_set_rmsite(4);		/* #143: try_to_migrate removes tagged site 4 */
+#endif
 
 	/*
 	 * When racing against e.g. zap_pte_range() on another cpu,

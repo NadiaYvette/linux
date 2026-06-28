@@ -1362,6 +1362,10 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 						p = pte_clear_uffd_wp(p);
 					set_ptes(dst_vma->vm_mm, addr + (unsigned long)i * MMUPAGE_SIZE, dst_pte + i, p, 1);
 				}
+				/* #143 add-edge namer: fork dup added (nr) == dst present */
+				pgcl143_add_edge_warn(page, nr,
+						      pgcl143_present_subptes(dst_pte, folio),
+						      "fork");
 				rss[MM_ANONPAGES] += nr;
 				return nr;
 			}
@@ -1834,6 +1838,37 @@ zap_install_uffd_wp_if_needed(struct vm_area_struct *vma,
 	return was_installed;
 }
 
+#if PAGE_MMUSHIFT
+/*
+ * #143 Tier-1 (Tessera): count THIS cluster's present sub-PTEs in the CURRENT
+ * page table (PTL held).  A FUNCTION of the PTE state -- no stamping, cannot
+ * drift, cannot false-positive.  Straddlers are scanned for their in-table half
+ * only, so the result is a LOWER BOUND on the true cross-mm present count
+ * (= _mapcount + 1 when correct); hence _mapcount + 1 < present_here is a SOUND
+ * one-sided over-discharge signal even for multi-mm file folios.
+ */
+static int pgcl143_present_here(pte_t *pte, unsigned long addr, unsigned long cpfn)
+{
+	unsigned int sub = (addr >> MMUPAGE_SHIFT) & (PAGE_MMUCOUNT - 1);
+	long idx       = (addr >> MMUPAGE_SHIFT) & (PTRS_PER_PTE - 1);
+	long base_idx  = idx - (long)sub;	/* cluster sub-0 index in this table */
+	pte_t *base    = pte - sub;
+	int j, n = 0;
+
+	for (j = 0; j < PAGE_MMUCOUNT; j++) {
+		long t = base_idx + j;
+		pte_t pj;
+
+		if (t < 0 || t >= PTRS_PER_PTE)		/* straddler: in-table half only */
+			continue;
+		pj = ptep_get(base + j);
+		if (pte_present(pj) && pte_pfn(pj) == cpfn)
+			n++;
+	}
+	return n;
+}
+#endif
+
 static __always_inline void zap_present_folio_ptes(struct mmu_gather *tlb,
 		struct vm_area_struct *vma, struct folio *folio,
 		struct page *page, pte_t *pte, pte_t ptent, unsigned int nr,
@@ -1847,7 +1882,13 @@ static __always_inline void zap_present_folio_ptes(struct mmu_gather *tlb,
 		ptent = get_and_clear_full_ptes(mm, addr, pte, nr, tlb->fullmm);
 		if (pte_dirty(ptent)) {
 			folio_mark_dirty(folio);
-			if (tlb_delay_rmap(tlb)) {
+			/*
+			 * #143 Tier-1 instrument: force immediate (under-PTL) rmap
+			 * removal so present_here can scan live PTEs at the over-remove.
+			 * The over-discharge is path-agnostic (disc5fix), so it still
+			 * fires immediate; the deferred flush has no PTE to scan.
+			 */
+			if (!PAGE_MMUSHIFT && tlb_delay_rmap(tlb)) {
 				delay_rmap = true;
 				*force_flush = true;
 			}
@@ -1872,6 +1913,23 @@ static __always_inline void zap_present_folio_ptes(struct mmu_gather *tlb,
 
 		if (unlikely(folio_mapcount(folio) < 0))
 			print_bad_pte(vma, addr, ptent, page);
+#if PAGE_MMUSHIFT
+		/* #143 Tier-1: ground-truth present_here at the order-0 over-remove. */
+		if (!folio_test_large(folio) &&
+		    atomic_read(&folio->_mapcount) < -1) {
+			static DEFINE_RATELIMIT_STATE(rs_ph1, HZ, 50);
+
+			if (__ratelimit(&rs_ph1)) {
+				unsigned long cpfn = pte_pfn(ptent);
+				int ph = pgcl143_present_here(pte, addr, cpfn);
+
+				pr_warn("PGCL143-PRESENT-HERE cpfn=%#lx mc=%d present_here=%d %s comm=%s\n",
+					cpfn, atomic_read(&folio->_mapcount), ph,
+					folio_test_anon(folio) ? "anon" : "FILE",
+					current->comm);
+			}
+		}
+#endif
 	}
 	if (unlikely(__tlb_remove_folio_pages(tlb, page, nr, delay_rmap))) {
 		*force_flush = true;
@@ -1896,6 +1954,9 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 	struct page *page;
 	int nr;
 
+#if PAGE_MMUSHIFT
+	pgcl143_set_rmsite(1);		/* #143: immediate zap removes tagged site 1 */
+#endif
 	page = vm_normal_page(vma, addr, ptent);
 	if (!page) {
 		/* We don't need up-to-date accessed/dirty bits. */
@@ -1988,6 +2049,20 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 			} else {
 				for (i = 0; i < nr; i++)
 					folio_remove_rmap_pte(folio, page, vma);
+				/* #143 Tier-1: ground-truth present_here at the over-remove. */
+				if (atomic_read(&folio->_mapcount) < -1) {
+					static DEFINE_RATELIMIT_STATE(rs_ph, HZ, 50);
+
+					if (__ratelimit(&rs_ph)) {
+						unsigned long cpfn = pte_pfn(ptent);
+						int ph = pgcl143_present_here(pte, addr, cpfn);
+
+						pr_warn("PGCL143-PRESENT-HERE cpfn=%#lx mc=%d present_here=%d %s comm=%s\n",
+							cpfn, atomic_read(&folio->_mapcount), ph,
+							folio_test_anon(folio) ? "anon" : "FILE",
+							current->comm);
+					}
+				}
 			}
 
 			if (nr > 1)
@@ -4449,6 +4524,12 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 				 */
 				folio_ref_sub(old_folio, extra);
 			}
+			/* #143 add-edge namer: new_folio added (1 + extra) == present */
+			pgcl143_add_edge_warn(&new_folio->page, 1 + (int)extra,
+					      pgcl143_present_subptes(base_pte, new_folio),
+					      "wp_cow");
+			pgcl143_underadd_detail(new_folio, base_pte, -1,
+						1 + (int)extra, "wp_cow");
 		}
 #endif
 		/* Free the old page.. */
@@ -6145,6 +6226,34 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		unsigned long rss = 0;
 		int j;
 
+		/*
+		 * #143 ROOT detector: a brand-new folio (just out of the allocator,
+		 * _mapcount == -1) must have ZERO PTEs aliasing its pfn.  If the
+		 * cluster already holds present sub-PTEs that point into [pfn,pfn+16)
+		 * then this pfn was FREED-AND-REALLOCATED while stale PTEs still map
+		 * it -- the orphan-PTE / free-while-mapped root.  The loop below will
+		 * skip those (they are !pte_none) and under-count, and at teardown
+		 * they over-remove.  Dump it (page_owner alloc stack = this fault).
+		 */
+		{
+			int stale0 = pgcl143_present_subptes(base_pte, folio);
+
+			if (unlikely(stale0 > 0)) {
+				static atomic_t ra_n = ATOMIC_INIT(0);
+				int rk = atomic_inc_return(&ra_n);
+
+				if (rk <= 12 || !(rk & 2047)) {
+					pr_warn("PGCL143-REUSE-ALIAS #%d pfn=%#lx fresh_mc=%d ref=%d stale_aliases=%d fsub=%u\n",
+						rk, folio_pfn(folio),
+						atomic_read(&folio->_mapcount),
+						folio_ref_count(folio), stale0, sub);
+					if (rk <= 6)
+						dump_page(&folio->page,
+							  "pgcl143 fresh folio already aliased by stale PTEs (reuse-while-mapped root)");
+				}
+			}
+		}
+
 		folio_ref_add(folio, nr_pages - 1);
 		add_mm_counter(vma->vm_mm, MM_ANONPAGES, nr_pages);
 		count_mthp_stat(folio_order(folio), MTHP_STAT_ANON_FAULT_ALLOC);
@@ -6202,6 +6311,12 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		}
 		/* Fix RSS: we added 1 above (nr_pages), need rss total */
 		add_mm_counter(vma->vm_mm, MM_ANONPAGES, rss - 1);
+		/* #143 add-edge namer: rmap added == sub-PTEs present (Tessera SingleRoot) */
+		pgcl143_add_edge_warn(&folio->page, (int)rss,
+				      pgcl143_present_subptes(base_pte, folio), "do_anon");
+		/* de-confound: dump the per-sub map of any real under-add (which subs
+		 * are present-uncounted, aligned vs vsub!=psub, faulting sub). */
+		pgcl143_underadd_detail(folio, base_pte, (int)sub, (int)rss, "do_anon");
 		/* update_mmu_cache_range is now called per-sub-PTE inside the
 		 * loop above; no trailing call needed.
 		 */

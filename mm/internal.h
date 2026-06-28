@@ -25,6 +25,93 @@
 
 struct folio_batch;
 
+#if PAGE_MMUSHIFT
+/*
+ * PGCL #143 deferred-rmap ref-hold (Tessera SharingRace.Aggregate.Pinned):
+ * a cross-mm counter of pending deferred rmap removals, keyed by cluster-pfn
+ * hash.  ++ when a removal is queued (delay_rmap in __tlb_remove_folio_pages),
+ * -- when it runs (tlb_flush_rmap_batch).  folios_put_refs refuses to free a
+ * cluster while its count is > 0 -- freeing then is the free-while-a-deferred-
+ * removal-is-pending UAF (the cross-mm early-drop).  Hash collisions only
+ * over-hold (a transient leak), never under-hold, so the gate stays safe.
+ */
+#define PGCL143_PENDING_BITS 18
+extern atomic_t pgcl143_pending[1 << PGCL143_PENDING_BITS];
+static inline unsigned int pgcl143_pending_idx(unsigned long pfn)
+{
+	return (unsigned int)((pfn >> PAGE_MMUSHIFT) &
+			      ((1UL << PGCL143_PENDING_BITS) - 1));
+}
+static inline void pgcl143_pending_inc(unsigned long pfn)
+{
+	atomic_inc(&pgcl143_pending[pgcl143_pending_idx(pfn)]);
+}
+static inline void pgcl143_pending_dec(unsigned long pfn)
+{
+	atomic_dec(&pgcl143_pending[pgcl143_pending_idx(pfn)]);
+}
+static inline bool pgcl143_pending_test(unsigned long pfn)
+{
+	return atomic_read(&pgcl143_pending[pgcl143_pending_idx(pfn)]) > 0;
+}
+static inline int pgcl143_pending_count(unsigned long pfn)
+{
+	return atomic_read(&pgcl143_pending[pgcl143_pending_idx(pfn)]);
+}
+/*
+ * SEPARATE quarantine array (de-confound): the hard5 quarantine permanently
+ * marks any over-removed cluster un-freeable.  Keeping it OFF pgcl143_pending
+ * means pgcl143_pending_count() at the over-remove report is a CLEAN count of
+ * outstanding *deferred removals only* (the deferred-double-discharge signal),
+ * not polluted by accumulated quarantines from earlier over-removes.
+ */
+extern atomic_t pgcl143_quar[1 << PGCL143_PENDING_BITS];
+static inline void pgcl143_quar_inc(unsigned long pfn)
+{
+	atomic_inc(&pgcl143_quar[pgcl143_pending_idx(pfn)]);
+}
+static inline bool pgcl143_quar_test(unsigned long pfn)
+{
+	return atomic_read(&pgcl143_quar[pgcl143_pending_idx(pfn)]) > 0;
+}
+static inline int pgcl143_quar_count(unsigned long pfn)
+{
+	return atomic_read(&pgcl143_quar[pgcl143_pending_idx(pfn)]);
+}
+/*
+ * Set while tlb_flush_rmap_batch is running the DEFERRED rmap removal, so the
+ * over-remove report can say whether the over-remover IS the deferred flush
+ * (deferred double-decrement) vs an IMMEDIATE zap firing while a deferred
+ * removal for the same cluster is still queued (pending_count > 0).  This is
+ * the discriminator between the deferred-put race and a static under-add.
+ */
+DECLARE_PER_CPU(int, pgcl143_in_deferred_flush);
+
+/*
+ * #143 shadow last-remover: name the TWO removal passes behind a remove-side
+ * over-remove.  Each top-level rmap-remove caller stamps a per-cpu site code;
+ * __folio_remove_rmap records it into a per-cluster slot and, on an over-remove,
+ * reports (prev_site -> cur_site) = the two passes that double-discharged.
+ *   1 = zap (munmap/truncate/exit immediate)   2 = deferred tlb rmap flush
+ *   3 = try_to_unmap (reclaim)                  4 = try_to_migrate
+ *   0 = other/untagged
+ */
+DECLARE_PER_CPU(int, pgcl143_rmsite);
+extern u8 pgcl143_lastsite[1 << PGCL143_PENDING_BITS];
+static inline void pgcl143_set_rmsite(int s)
+{
+	this_cpu_write(pgcl143_rmsite, s);
+}
+
+int pgcl143_present_subptes(pte_t *base_pte, struct folio *folio);
+void pgcl143_add_edge_warn(struct page *page, int added, int present,
+			   const char *site);
+/* de-confound: per-sub-PTE map of an under-add (which subs are present, belong to
+ * this folio, aligned vs vsub!=psub, and whether the faulting sub is uncounted). */
+void pgcl143_underadd_detail(struct folio *folio, pte_t *base_pte,
+			     int faulting_sub, int added, const char *site);
+#endif
+
 /*
  * Maintains state across a page table move. The operation assumes both source
  * and destination VMAs already exist and are specified by the user.

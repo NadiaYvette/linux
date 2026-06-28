@@ -12,6 +12,7 @@
 #include <linux/rmap.h>
 #include <linux/pgalloc.h>
 #include <linux/hugetlb.h>
+#include "internal.h"
 
 #include <asm/tlb.h>
 
@@ -65,8 +66,21 @@ static void tlb_flush_rmap_batch(struct mmu_gather_batch *batch, struct vm_area_
 				     ENCODED_PAGE_BIT_NR_PAGES_NEXT))
 				nr_pages = encoded_nr_pages(pages[++i]);
 
+#if PAGE_MMUSHIFT
+			/* #143 discriminator: tag over-removes from THIS deferred flush. */
+			this_cpu_write(pgcl143_in_deferred_flush, 1);
+			pgcl143_set_rmsite(2);		/* site 2 = deferred tlb rmap flush */
+#endif
 			folio_remove_rmap_ptes(page_folio(page), page, nr_pages,
 					       vma);
+#if PAGE_MMUSHIFT
+			this_cpu_write(pgcl143_in_deferred_flush, 0);
+			pgcl143_set_rmsite(0);
+			/* PGCL #143: deferred removal has run -> release the
+			 * cluster's pending-removal ref-hold (folios_put_refs may
+			 * now free it). */
+			pgcl143_pending_dec(page_to_pfn(page));
+#endif
 		}
 	}
 }
@@ -171,6 +185,17 @@ static bool __tlb_remove_folio_pages_size(struct mmu_gather *tlb,
 	struct mmu_gather_batch *batch;
 
 	VM_BUG_ON(!tlb->end);
+
+#if PAGE_MMUSHIFT
+	/*
+	 * PGCL #143: a deferred rmap removal is being queued -> hold the cluster
+	 * across the deferred window.  folios_put_refs refuses to free a cluster
+	 * with a pending removal, so a cross-mm aggregate free cannot drop it
+	 * before tlb_flush_rmap_batch runs the removal (the deferred-rmap UAF).
+	 */
+	if (delay_rmap)
+		pgcl143_pending_inc(page_to_pfn(page));
+#endif
 
 #ifdef CONFIG_MMU_GATHER_PAGE_SIZE
 	VM_WARN_ON(tlb->page_size != page_size);
