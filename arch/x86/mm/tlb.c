@@ -1713,6 +1713,18 @@ void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch)
 
 	info = get_flush_tlb_info(NULL, 0, TLB_FLUSH_ALL, 0, false,
 				  TLB_GENERATION_INVALID);
+#if PAGE_MMUSHIFT
+	/*
+	 * PGCL #143: a lazy / PCID-tagged CPU can retain a stale sub-MMUPAGE USER
+	 * TLB entry for a reclaimed cluster that the mm_cpumask-derived batch
+	 * misses and the switch-back tlb_gen flush fails to cover; the frame is
+	 * then freed and reused while still TLB-mapped (oracle:
+	 * FREE-WHILE-USER-MAPPED on a read-only code page -> wrong-code exec ->
+	 * invalid opcode).  Broadcast the deferred reclaim flush to every online
+	 * CPU to close that window.
+	 */
+	cpumask_copy(&batch->cpumask, cpu_online_mask);
+#endif
 	/*
 	 * flush_tlb_multi() is not optimized for the common case in which only
 	 * a local TLB flush is needed. Optimize this use-case by calling

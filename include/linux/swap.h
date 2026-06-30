@@ -456,6 +456,7 @@ sector_t swap_folio_sector(struct folio *folio);
  */
 int swap_dup_entry_direct(swp_entry_t entry);
 void swap_put_entries_direct(swp_entry_t entry, int nr);
+void swap_put_entries_direct_noreclaim(swp_entry_t entry, int nr);
 
 /*
  * folio_free_swap tries to free the swap entries pinned by a swap cache
@@ -504,6 +505,10 @@ static inline int swap_dup_entry_direct(swp_entry_t ent)
 }
 
 static inline void swap_put_entries_direct(swp_entry_t ent, int nr)
+{
+}
+
+static inline void swap_put_entries_direct_noreclaim(swp_entry_t ent, int nr)
 {
 }
 

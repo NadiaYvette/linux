@@ -2072,7 +2072,7 @@ bool folio_free_swap(struct folio *folio)
  * Context: Caller must ensure there is no race condition on the reference
  * owner. e.g., locking the PTL of a PTE containing the entry being released.
  */
-void swap_put_entries_direct(swp_entry_t entry, int nr)
+static void __swap_put_entries_direct(swp_entry_t entry, int nr, bool reclaim_cache)
 {
 	const unsigned long start_offset = swp_offset(entry);
 	const unsigned long end_offset = start_offset + nr;
@@ -2085,15 +2085,32 @@ void swap_put_entries_direct(swp_entry_t entry, int nr)
 	if (WARN_ON_ONCE(end_offset > si->max))
 		goto out;
 
-	/* Put entries and reclaim cache in each cluster */
+	/* Put entries (and optionally reclaim cache) in each cluster */
 	offset = start_offset;
 	do {
 		cluster_end = min(round_up(offset + 1, SWAPFILE_CLUSTER), end_offset);
-		swap_put_entries_cluster(si, offset, cluster_end - offset, true);
+		swap_put_entries_cluster(si, offset, cluster_end - offset, reclaim_cache);
 		offset = cluster_end;
 	} while (offset < end_offset);
 out:
 	put_swap_device(si);
+}
+
+void swap_put_entries_direct(swp_entry_t entry, int nr)
+{
+	__swap_put_entries_direct(entry, nr, true);
+}
+
+/*
+ * PGCL swap-in / unmap-abort put: decrement the swap count of the faulted-in
+ * fragment slots WITHOUT reclaiming the shared cluster folio from the swap
+ * cache -- it stays cached until fully unmapped (the original folio_put_swap
+ * path used reclaim_cache=false).  Reclaiming per fragment would chase
+ * swap_cache_get_folio on a folio still referenced by sibling fragments.
+ */
+void swap_put_entries_direct_noreclaim(swp_entry_t entry, int nr)
+{
+	__swap_put_entries_direct(entry, nr, false);
 }
 
 #ifdef CONFIG_HIBERNATION
@@ -2360,7 +2377,7 @@ static int unuse_pte(struct vm_area_struct *vma, pmd_t *pmd,
 		new_pte = pte_mkuffd_wp(new_pte);
 setpte:
 	set_pte_at(vma->vm_mm, addr, pte, new_pte);
-	swap_put_entries_direct(entry, 1);	/* PGCL: unuse restores one fragment slot */
+	swap_put_entries_direct_noreclaim(entry, 1);	/* PGCL: unuse restores one fragment slot */
 out:
 	if (pte)
 		pte_unmap_unlock(pte, ptl);
