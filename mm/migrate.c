@@ -540,6 +540,24 @@ static bool remove_migration_pte(struct folio *folio,
 						pvmw.address + (unsigned long)i * MMUPAGE_SIZE,
 						pvmw.pte + i, pte);
 			} else {
+#if PAGE_MMUSHIFT
+				/*
+				 * #143: restore each sub-PTE to the PHYSICAL sub-index
+				 * the migration entry CARRIED (in its reserved sub-offset
+				 * bits), not the virtual sub-index a PFN-stride imposes.
+				 * For a vsub!=psub cluster (relocate_vma_down) the two
+				 * differ; striding to vsub maps the wrong sub-frame and
+				 * overwrites a shared code page (#143 kill-init).
+				 */
+				for (i = 0; i < nr_pages; i++) {
+					pte_t oi = ptep_get(pvmw.pte + i);
+
+					set_pte_at(vma->vm_mm,
+						pvmw.address + (unsigned long)i * MMUPAGE_SIZE,
+						pvmw.pte + i,
+						pte_mksub(pte, pte_suboffset(oi)));
+				}
+#else
 				/*
 				 * Present PTEs: set_ptes auto-strides PFN to
 				 * reconstruct the original sub-page topology
@@ -548,6 +566,7 @@ static bool remove_migration_pte(struct folio *folio,
 				 */
 				set_ptes(vma->vm_mm, pvmw.address, pvmw.pte,
 					 pte, nr_pages);
+#endif
 			}
 		}
 		if (READ_ONCE(vma->vm_flags) & VM_LOCKED)

@@ -210,7 +210,19 @@ static inline void native_pgd_clear(pgd_t *pgd)
  */
 #define SWP_TYPE_BITS		5
 
+#if PAGE_MMUSHIFT
+/*
+ * pgcl: reserve the sub-MMUPAGE bits [MMUPAGE_SHIFT..PAGE_SHIFT) of a swap /
+ * migration PTE BELOW the offset, so pte_mksub()/pte_suboffset() can carry the
+ * physical sub-index (psub) through a migration entry.  Without this, migration
+ * of a vsub!=psub cluster re-aligns the restored PTE to the virtual sub-index
+ * and overwrites the wrong sub-frame (#143).  Costs a few high offset bits;
+ * still ample for swap slots / pfns.  Swap/device entries leave these bits 0.
+ */
+#define SWP_OFFSET_FIRST_BIT	PAGE_SHIFT
+#else
 #define SWP_OFFSET_FIRST_BIT	(_PAGE_BIT_PROTNONE + 1)
+#endif
 
 /* We always extract/encode the offset by shifting it all the way up, and then down again */
 #define SWP_OFFSET_SHIFT	(SWP_OFFSET_FIRST_BIT+SWP_TYPE_BITS)

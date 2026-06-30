@@ -3198,6 +3198,15 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 					swp_pte = pte_swp_mksoft_dirty(swp_pte);
 				if (pte_uffd_wp(pteval))
 					swp_pte = pte_swp_mkuffd_wp(swp_pte);
+#if PAGE_MMUSHIFT
+				/*
+				 * #143: carry the physical sub-index (psub) in the
+				 * migration entry's reserved sub-offset bits, so
+				 * remove_migration_pte restores this PTE to the SAME
+				 * sub-frame -- not the virtual sub-index from the address.
+				 */
+				swp_pte = pte_mksub(swp_pte, pte_suboffset(pteval));
+#endif
 			} else {
 				swp_pte = swp_entry_to_pte(entry);
 				if (pte_swp_soft_dirty(pteval))
