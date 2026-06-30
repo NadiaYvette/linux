@@ -2065,11 +2065,28 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 				}
 			}
 
-			if (nr > 1)
-				folio_ref_sub(folio, nr - 1);
-			if (unlikely(__tlb_remove_page_size(tlb,
-					page,
-					MMUPAGE_SIZE))) {
+			/*
+			 * PGCL #143 (Tessera Incarnation.pinned_inc_correct):
+			 * defer ALL nr sub-PTE refs to the gather rather than
+			 * dropping nr-1 eagerly here.  The eager drop un-pinned
+			 * the cluster across the batched TLB-flush+free window:
+			 * with only 1 ref left in the gather, a concurrent
+			 * cross-mm COW/unmap (wp_page_copy) could drive the
+			 * aggregate refcount to 0 while this gather still owed
+			 * the flush+free -> the pfn was freed and reused under
+			 * an in-flight teardown (the reincarnation UAF, seen as
+			 * free-while-mapped / stale-TLB / mapcount-underflow).
+			 * Holding all nr refs keeps refcount > 0 until
+			 * tlb_finish_mmu runs the flush then the free, so
+			 * owed <= refs and every deferred op is incarnation-
+			 * correct.  free_pages_and_swap_cache() reads the
+			 * encoded nr as a ref count on the single cluster folio
+			 * (no page+i walk), so this is safe for pgcl's
+			 * one-struct-page-per-cluster layout; rmap was already
+			 * removed above, so delay_rmap is false.
+			 */
+			if (unlikely(__tlb_remove_folio_pages(tlb, page, nr,
+							      false))) {
 				*force_flush = true;
 				*force_break = true;
 			}
