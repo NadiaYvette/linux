@@ -5701,6 +5701,16 @@ check_folio:
 		add_mm_counter(vma->vm_mm, MM_SWAPENTS, -nr_rss);
 	}
 	pte = mk_pte(page, vma->vm_page_prot);
+#if PAGE_MMUSHIFT
+	/*
+	 * swapfix: mk_pte(folio_file_page) masks the PTE to sub-page 0 of the
+	 * cluster; re-apply the FAULTING sub-MMUPAGE offset so the swapped-in
+	 * PTE maps the sub-page this fault is for (do_swap_page sub-page
+	 * misroute -- #143 swap facet).
+	 */
+	pte = pte_mksub(pte, ((vmf->address >> MMUPAGE_SHIFT) &
+			      (PAGE_MMUCOUNT - 1)) * (unsigned long)MMUPAGE_SIZE);
+#endif
 	if (pte_swp_soft_dirty(vmf->orig_pte))
 		pte = pte_mksoft_dirty(pte);
 	if (pte_swp_uffd_wp(vmf->orig_pte))
