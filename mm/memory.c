@@ -5702,14 +5702,8 @@ check_folio:
 	}
 	pte = mk_pte(page, vma->vm_page_prot);
 #if PAGE_MMUSHIFT
-	/*
-	 * swapfix: mk_pte(folio_file_page) masks the PTE to sub-page 0 of the
-	 * cluster; re-apply the FAULTING sub-MMUPAGE offset so the swapped-in
-	 * PTE maps the sub-page this fault is for (do_swap_page sub-page
-	 * misroute -- #143 swap facet).
-	 */
-	pte = pte_mksub(pte, ((vmf->address >> MMUPAGE_SHIFT) &
-			      (PAGE_MMUCOUNT - 1)) * (unsigned long)MMUPAGE_SIZE);
+	/* #143 (bisect): restore the carried physical sub-index from the swap entry. */
+	pte = pte_mksub(pte, pte_suboffset(vmf->orig_pte));
 #endif
 	if (pte_swp_soft_dirty(vmf->orig_pte))
 		pte = pte_mksoft_dirty(pte);
@@ -5799,8 +5793,8 @@ check_folio:
 	 * Do it after mapping, so raced page faults will likely see the folio
 	 * in swap cache and wait on the folio lock.
 	 */
-	if (!PAGE_MMUSHIFT && should_try_to_free_swap(si, folio, vma, nr_pages, vmf->flags))
-		folio_free_swap(folio);	/* pgcl143 BISECT: PGCL skips eager swap free (revert) */
+	if (should_try_to_free_swap(si, folio, vma, nr_pages, vmf->flags))
+		folio_free_swap(folio);	/* #143 count-correct free (bisect) */
 
 	/*
 	 * PGCL swap-in prefetch: with PAGE_MMUSHIFT>0, each sub-page within

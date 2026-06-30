@@ -2761,10 +2761,17 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 			{
 				unsigned long j;
 
-				for (j = 0; j < nr_pages; j++)
+				for (j = 0; j < nr_pages; j++) {
+					pte_t e = swp_pte;
+#if PAGE_MMUSHIFT
+					e = pte_mksub(swp_pte,
+						(((pte_suboffset(pteval) >> MMUPAGE_SHIFT) + j)
+						 & (PAGE_MMUCOUNT - 1)) << MMUPAGE_SHIFT);
+#endif
 					set_pte_at(mm,
 						   address + (j << MMUPAGE_SHIFT),
-						   pvmw.pte + j, swp_pte);
+						   pvmw.pte + j, e);
+				}
 			}
 		} else {
 			/*
