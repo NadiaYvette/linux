@@ -997,6 +997,25 @@ void folios_put_refs(struct folio_batch *folios, unsigned int *refs)
 			if (new_refs)
 				continue;
 			/*
+			 * PGCL #143 deferred-put gate (PROVEN: Tessera
+			 * property2/coq/rmap_defer.v no_free_while_referenced).  The
+			 * refcount reached 0, but folio_mapped() -- the kernel's own
+			 * witness for "still referenced" -- says a sub-PTE still maps
+			 * this cluster (a forked mapper's reference was not counted in
+			 * this aggregate put), so freeing now is the free-while-mapped
+			 * race (#143).  Undo this put; the still-live mapper's own put
+			 * frees it correctly later (leak-on-never beats corruption).
+			 * Broader than the pending/quarantine tracker below --
+			 * folio_mapped is the model witness for no_free_while_referenced.
+			 */
+			if (unlikely(folio_mapped(folio))) {
+				VM_WARN_ONCE(1, "pgcl143: deferred free of still-mapped folio (pfn %lx mapcount %d nr_refs %u)",
+					     folio_pfn(folio), folio_mapcount(folio),
+					     nr_refs);
+				folio_ref_add(folio, nr_refs);
+				continue;
+			}
+			/*
 			 * PGCL #143 ref-hold GATE (the real fix): the refcount reached
 			 * 0, but if a deferred rmap removal is still PENDING on this
 			 * cluster the free is premature -- the cross-mm early-drop /
