@@ -285,8 +285,8 @@ static int discard_swap(struct swap_info_struct *si)
 
 	/* Do not discard the swap header page! */
 	se = first_se(si);
-	start_block = (se->start_block + 1) << (PAGE_SHIFT - 9);
-	nr_blocks = ((sector_t)se->nr_pages - 1) << (PAGE_SHIFT - 9);
+	start_block = (se->start_block + 1) << (MMUPAGE_SHIFT - 9);
+	nr_blocks = ((sector_t)se->nr_pages - 1) << (MMUPAGE_SHIFT - 9);
 	if (nr_blocks) {
 		err = blkdev_issue_discard(si->bdev, start_block,
 				nr_blocks, GFP_KERNEL);
@@ -296,8 +296,8 @@ static int discard_swap(struct swap_info_struct *si)
 	}
 
 	for (se = next_se(se); se; se = next_se(se)) {
-		start_block = se->start_block << (PAGE_SHIFT - 9);
-		nr_blocks = (sector_t)se->nr_pages << (PAGE_SHIFT - 9);
+		start_block = se->start_block << (MMUPAGE_SHIFT - 9);
+		nr_blocks = (sector_t)se->nr_pages << (MMUPAGE_SHIFT - 9);
 
 		err = blkdev_issue_discard(si->bdev, start_block,
 				nr_blocks, GFP_KERNEL);
@@ -339,7 +339,7 @@ sector_t swap_folio_sector(struct folio *folio)
 	offset = swp_offset(folio->swap);
 	se = offset_to_swap_extent(sis, offset);
 	sector = se->start_block + (offset - se->start_page);
-	return sector << (PAGE_SHIFT - 9);
+	return sector << (MMUPAGE_SHIFT - 9);
 }
 
 /*
@@ -3376,7 +3376,7 @@ static unsigned long read_swap_header(struct swap_info_struct *si,
 
 	if (!maxpages)
 		return 0;
-	swapfilepages = i_size_read(inode) >> PAGE_SHIFT;
+	swapfilepages = i_size_read(inode) >> MMUPAGE_SHIFT;	/* PGCL: device in MMUPAGE slots */
 	if (swapfilepages && maxpages > swapfilepages) {
 		pr_warn("Swap area shorter than signature indicates\n");
 		return 0;
