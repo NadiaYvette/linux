@@ -2477,7 +2477,7 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 			VM_WARN_ON_FOLIO(folio_test_hugetlb(folio), folio);
 		}
 
-		subpage = folio_page(folio, pfn - folio_pfn(folio));
+		subpage = folio_page(folio, (pfn - folio_pfn(folio)) >> PAGE_MMUSHIFT);
 		address = pvmw.address;
 		anon_exclusive = folio_test_anon(folio) &&
 				 PageAnonExclusive(subpage);
@@ -2980,7 +2980,7 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 			else
 				pfn = softleaf_to_pfn(softleaf_from_pmd(pmdval));
 
-			subpage = folio_page(folio, pfn - folio_pfn(folio));
+			subpage = folio_page(folio, (pfn - folio_pfn(folio)) >> PAGE_MMUSHIFT);
 
 			VM_BUG_ON_FOLIO(folio_test_hugetlb(folio) ||
 					!folio_test_pmd_mappable(folio), folio);
@@ -3011,7 +3011,7 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 			VM_WARN_ON_FOLIO(folio_test_hugetlb(folio), folio);
 		}
 
-		subpage = folio_page(folio, pfn - folio_pfn(folio));
+		subpage = folio_page(folio, (pfn - folio_pfn(folio)) >> PAGE_MMUSHIFT);
 		address = pvmw.address;
 		anon_exclusive = folio_test_anon(folio) &&
 				 PageAnonExclusive(subpage);
