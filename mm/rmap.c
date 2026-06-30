@@ -2619,6 +2619,19 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 			swp_entry_t entry = page_swap_entry(subpage);
 			pte_t swp_pte;
 			/*
+			 * PGCL per-fragment swap: the nr_pages (== pvmw.nr_mmupages)
+			 * mapped sub-PTEs of this batch occupy DISTINCT MMUPAGE slots
+			 * e0 .. e0+nr_pages-1, where e0 = base + vsub0 (base ==
+			 * folio->swap; vsub0 = cluster sub-offset of the batch's first
+			 * sub-PTE).  One swap ref per slot, balanced by one swap-in put
+			 * per slot.  Eager-allocated unmapped slots stay count 0.
+			 * Identity for non-pgcl (PAGE_MMUCOUNT == 1 => vsub0 == 0).
+			 */
+			unsigned long vsub0 = (address >> MMUPAGE_SHIFT) &
+					      (PAGE_MMUCOUNT - 1);
+			swp_entry_t e0 = swp_entry(swp_type(entry),
+						   swp_offset(entry) + vsub0);
+			/*
 			 * Store the swap location in the pte.
 			 * See handle_pte_fault() ...
 			 */
@@ -2674,30 +2687,26 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 			}
 
 			/*
-			 * PGCL swap-entry batching: get_and_clear_ptes above
-			 * cleared nr_pages (== pvmw.nr_mmupages) sub-PTEs of one
-			 * cluster.  A cluster is a single struct page / single
-			 * order-0 swap slot (folio_alloc_swap allocates 1<<order
-			 * == 1 slot; every sub-PTE shares folio->swap, since
-			 * subpage == &folio->page so folio_page_idx() == 0).
-			 * Each future sub-PTE swap-in (do_swap_page, nr_ptes==1)
-			 * calls folio_put_swap(folio, page) which drops one
-			 * reference on that one slot, so the slot must hold
-			 * nr_pages references now to balance the nr_pages
-			 * swap-ins.  folio_dup_swap(folio, subpage) adds exactly
-			 * one reference at the slot, so loop it nr_pages times,
-			 * unwinding cleanly on the rare failure.
+			 * PGCL per-fragment swap: get_and_clear_ptes above cleared
+			 * nr_pages (== pvmw.nr_mmupages) sub-PTEs of one cluster.
+			 * Eager allocation reserved 1<<(order+PAGE_MMUSHIFT) slots for
+			 * the folio, and each mapped sub-PTE gets its OWN slot
+			 * e0+dupd; so dup one reference on each of the nr_pages slots.
+			 * Each future sub-PTE swap-in (do_swap_page) drops the one
+			 * reference on its own slot, balancing this.  Unwind cleanly on
+			 * the rare failure.
 			 */
 			{
 				unsigned long dupd;
 
 				for (dupd = 0; dupd < nr_pages; dupd++) {
-					if (folio_dup_swap(folio, subpage) < 0)
+					swp_entry_t ej = swp_entry(swp_type(entry),
+							swp_offset(e0) + dupd);
+					if (swap_dup_entry_direct(ej) < 0)
 						break;
 				}
 				if (dupd != nr_pages) {
-					while (dupd--)
-						folio_put_swap(folio, subpage);
+					swap_put_entries_direct(e0, dupd);
 					set_ptes(mm, address, pvmw.pte, pteval,
 						 nr_pages);
 					goto walk_abort;
@@ -2710,10 +2719,7 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 			 * so we'll not check/care.
 			 */
 			if (arch_unmap_one(mm, vma, address, pteval) < 0) {
-				unsigned long j;
-
-				for (j = 0; j < nr_pages; j++)
-					folio_put_swap(folio, subpage);
+				swap_put_entries_direct(e0, nr_pages);
 				set_ptes(mm, address, pvmw.pte, pteval, nr_pages);
 				goto walk_abort;
 			}
@@ -2721,10 +2727,7 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 			/* See folio_try_share_anon_rmap(): clear PTE first. */
 			if (anon_exclusive &&
 			    folio_try_share_anon_rmap_pte(folio, subpage)) {
-				unsigned long j;
-
-				for (j = 0; j < nr_pages; j++)
-					folio_put_swap(folio, subpage);
+				swap_put_entries_direct(e0, nr_pages);
 				set_ptes(mm, address, pvmw.pte, pteval, nr_pages);
 				goto walk_abort;
 			}
@@ -2735,14 +2738,12 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 				spin_unlock(&mmlist_lock);
 			}
 			/*
-			 * PGCL swap-entry batching: nr_pages sub-PTEs were
-			 * cleared by get_and_clear_ptes above and now each gets
-			 * its own swap entry.  All sub-PTEs of a cluster share
-			 * the single order-0 slot (folio->swap), so every
-			 * sub-PTE stores the SAME swp_pte (identical offset);
-			 * the nr_pages references taken via folio_dup_swap above
-			 * are consumed one-per-sub-PTE on swap-in.  nr_pages anon
-			 * pages removed, nr_pages swap entries installed.
+			 * PGCL per-fragment swap: nr_pages sub-PTEs were cleared by
+			 * get_and_clear_ptes above and now each gets its own swap
+			 * entry pointing at its OWN slot (e0+j).  The nr_pages
+			 * references taken above are consumed one-per-sub-PTE on
+			 * swap-in.  nr_pages anon pages removed, nr_pages swap
+			 * entries installed.
 			 */
 			add_mm_counter(mm, MM_ANONPAGES, -nr_pages);
 			add_mm_counter(mm, MM_SWAPENTS, nr_pages);
@@ -2761,13 +2762,14 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 					swp_pte = pte_swp_mkuffd_wp(swp_pte);
 			}
 			/*
-			 * One slot, one offset for the whole cluster: write the
-			 * identical swp_pte to each sub-PTE.  set_ptes() must NOT
-			 * be used here — under PGCL it advances the raw PTE value
-			 * by MMUPAGE_SIZE per entry, which would corrupt the
-			 * (non-present) swap-entry encoding.  pteval restores on
-			 * the abort paths above are present PTEs, so set_ptes()
-			 * striding by MMUPAGE is correct there but wrong here.
+			 * Per-fragment: each sub-PTE j references its OWN slot
+			 * e0+j (offset base+vsub0+j) and keeps its physical
+			 * sub-offset bits.  set_ptes() must NOT be used here — under
+			 * PGCL it advances the raw PTE value by MMUPAGE_SIZE per
+			 * entry, which would corrupt the (non-present) swap-entry
+			 * encoding; the pteval restores on the abort paths above are
+			 * present PTEs, so set_ptes() striding by MMUPAGE is correct
+			 * there but wrong here.
 			 */
 			{
 				unsigned long j;
@@ -2775,7 +2777,8 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 				for (j = 0; j < nr_pages; j++) {
 					pte_t e = swp_pte;
 #if PAGE_MMUSHIFT
-					e = pte_mksub(swp_pte,
+					e = pte_move_swp_offset(swp_pte, vsub0 + j);
+					e = pte_mksub(e,
 						(((pte_suboffset(pteval) >> MMUPAGE_SHIFT) + j)
 						 & (PAGE_MMUCOUNT - 1)) << MMUPAGE_SHIFT);
 #endif

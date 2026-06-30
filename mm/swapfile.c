@@ -1770,18 +1770,25 @@ again:
 int folio_dup_swap(struct folio *folio, struct page *subpage)
 {
 	swp_entry_t entry = folio->swap;
-	unsigned long nr_pages = folio_nr_pages(folio);
+	/*
+	 * PGCL: one swap ref per MMUPAGE slot; a cluster folio spans
+	 * folio_nr_pages << PAGE_MMUSHIFT slots.  A NULL subpage covers the whole
+	 * folio (all its slots) -- correct for shmem and whole-folio anon.  A
+	 * subpage covers one struct page == one cluster == PAGE_MMUCOUNT slots.
+	 * Identity for non-pgcl (PAGE_MMUSHIFT == 0).
+	 */
+	unsigned long nr_slots = (unsigned long)folio_nr_pages(folio) << PAGE_MMUSHIFT;
 
 	VM_WARN_ON_FOLIO(!folio_test_locked(folio), folio);
 	VM_WARN_ON_FOLIO(!folio_test_swapcache(folio), folio);
 
 	if (subpage) {
-		entry.val += folio_page_idx(folio, subpage);
-		nr_pages = 1;
+		entry.val += (unsigned long)folio_page_idx(folio, subpage) << PAGE_MMUSHIFT;
+		nr_slots = 1UL << PAGE_MMUSHIFT;
 	}
 
 	return swap_dup_entries_cluster(swap_entry_to_info(entry),
-					swp_offset(entry), nr_pages);
+					swp_offset(entry), nr_slots);
 }
 
 /**
@@ -1796,18 +1803,20 @@ int folio_dup_swap(struct folio *folio, struct page *subpage)
 void folio_put_swap(struct folio *folio, struct page *subpage)
 {
 	swp_entry_t entry = folio->swap;
-	unsigned long nr_pages = folio_nr_pages(folio);
+	/* PGCL: per-MMUPAGE-slot accounting; see folio_dup_swap().  NULL = whole
+	 * folio (all slots); subpage = one cluster = PAGE_MMUCOUNT slots. */
+	unsigned long nr_slots = (unsigned long)folio_nr_pages(folio) << PAGE_MMUSHIFT;
 	struct swap_info_struct *si = __swap_entry_to_info(entry);
 
 	VM_WARN_ON_FOLIO(!folio_test_locked(folio), folio);
 	VM_WARN_ON_FOLIO(!folio_test_swapcache(folio), folio);
 
 	if (subpage) {
-		entry.val += folio_page_idx(folio, subpage);
-		nr_pages = 1;
+		entry.val += (unsigned long)folio_page_idx(folio, subpage) << PAGE_MMUSHIFT;
+		nr_slots = 1UL << PAGE_MMUSHIFT;
 	}
 
-	swap_put_entries_cluster(si, swp_offset(entry), nr_pages, false);
+	swap_put_entries_cluster(si, swp_offset(entry), nr_slots, false);
 }
 
 /*
@@ -1982,7 +1991,7 @@ static bool folio_maybe_swapped(struct folio *folio)
 
 	ci = __swap_entry_to_cluster(entry);
 	ci_off = swp_cluster_offset(entry);
-	ci_end = ci_off + folio_nr_pages(folio);
+	ci_end = ci_off + (folio_nr_pages(folio) << PAGE_MMUSHIFT);	/* PGCL: slots */
 	/*
 	 * Extra locking not needed, folio lock ensures its swap entries
 	 * won't be released, the backing data won't be gone either.
@@ -2351,7 +2360,7 @@ static int unuse_pte(struct vm_area_struct *vma, pmd_t *pmd,
 		new_pte = pte_mkuffd_wp(new_pte);
 setpte:
 	set_pte_at(vma->vm_mm, addr, pte, new_pte);
-	folio_put_swap(swapcache, folio_file_page(swapcache, swp_offset(entry)));
+	swap_put_entries_direct(entry, 1);	/* PGCL: unuse restores one fragment slot */
 out:
 	if (pte)
 		pte_unmap_unlock(pte, ptl);

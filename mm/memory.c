@@ -5825,7 +5825,11 @@ check_folio:
 	if (unlikely(folio != swapcache)) {
 		folio_add_new_anon_rmap(folio, vma, address, RMAP_EXCLUSIVE);
 		folio_add_lru_vma(folio, vma);
-		folio_put_swap(swapcache, NULL);
+		/*
+		 * PGCL per-fragment: consume the nr_ptes faulted-in fragment
+		 * slots (entry .. entry+nr_ptes-1), not the whole folio.
+		 */
+		swap_put_entries_direct(entry, nr_ptes);
 	} else if (!folio_test_anon(folio)) {
 		/*
 		 * We currently only expect !anon folios that are fully
@@ -5834,12 +5838,12 @@ check_folio:
 		VM_WARN_ON_ONCE_FOLIO(folio_nr_pages(folio) != nr_pages, folio);
 		VM_WARN_ON_ONCE_FOLIO(folio_mapped(folio), folio);
 		folio_add_new_anon_rmap(folio, vma, address, rmap_flags);
-		folio_put_swap(folio, NULL);
+		swap_put_entries_direct(entry, nr_ptes);
 	} else {
 		VM_WARN_ON_ONCE(nr_pages != 1 && nr_pages != folio_nr_pages(folio));
 		folio_add_anon_rmap_ptes(folio, page, nr_pages, vma, address,
 					 rmap_flags);
-		folio_put_swap(folio, nr_pages == 1 ? page : NULL);
+		swap_put_entries_direct(entry, nr_ptes);
 	}
 	/*
 	 * PGCL MMUPAGE-uniform: the anon rmap calls above set the Contract-A
