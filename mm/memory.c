@@ -5381,70 +5381,6 @@ static void check_swap_exclusive(struct folio *folio, swp_entry_t entry,
 	} while (--nr_pages);
 }
 
-/* ===== PGCL #143 anon-exclusive flag-writer tracer (diagnostic, throwaway) ===== */
-struct pgcl_aex_rec {
-	unsigned long ip_set;	/* caller that last SET PG_anon_exclusive */
-	unsigned long ip_clr;	/* caller that last CLEARED it */
-	u32 seq_set;		/* global order of that set */
-	u32 seq_clr;		/* global order of that clear */
-};
-static struct pgcl_aex_rec *pgcl_aex_tab;
-static unsigned long pgcl_aex_maxpfn;
-static atomic_t pgcl_aex_seq = ATOMIC_INIT(0);
-
-noinline void __pgcl_aex_note(const struct page *page, enum pgcl_aex_op op)
-{
-	struct pgcl_aex_rec *r;
-	unsigned long pfn;
-	u32 seq;
-
-	if (!pgcl_aex_tab)
-		return;
-	pfn = page_to_pfn(page);
-	if (pfn >= pgcl_aex_maxpfn)
-		return;
-	r = &pgcl_aex_tab[pfn];
-	seq = (u32)atomic_inc_return(&pgcl_aex_seq);
-	if (op == PGCL_AEX_SET) {
-		r->ip_set = _RET_IP_;
-		r->seq_set = seq;
-	} else {
-		r->ip_clr = _RET_IP_;
-		r->seq_clr = seq;
-	}
-}
-
-static void pgcl_aex_dump(const struct page *page, const char *why)
-{
-	struct pgcl_aex_rec r;
-	unsigned long pfn;
-
-	if (!pgcl_aex_tab)
-		return;
-	pfn = page_to_pfn(page);
-	if (pfn >= pgcl_aex_maxpfn)
-		return;
-	r = pgcl_aex_tab[pfn];
-	pr_emerg("PGCL143 AEX %s pfn=%lx last_set=seq%u<%pS> last_clr=seq%u<%pS> %s\n",
-		 why, pfn, r.seq_set, (void *)r.ip_set,
-		 r.seq_clr, (void *)r.ip_clr,
-		 r.seq_set > r.seq_clr ? "[re-SET after clear]" :
-		 r.seq_clr ? "[clear was last - flag set untraced]" :
-		 "[NEVER cleared - swapout clear missed]");
-}
-
-static int __init pgcl_aex_init(void)
-{
-	pgcl_aex_maxpfn = max_pfn;
-	pgcl_aex_tab = vzalloc(pgcl_aex_maxpfn * sizeof(*pgcl_aex_tab));
-	pr_info("PGCL143 AEX tracer: tab=%px maxpfn=%lx (%llu KiB)\n",
-		pgcl_aex_tab, pgcl_aex_maxpfn,
-		(unsigned long long)(pgcl_aex_maxpfn * sizeof(*pgcl_aex_tab)) >> 10);
-	return 0;
-}
-late_initcall(pgcl_aex_init);
-/* ===== end PGCL #143 tracer ===== */
-
 /*
  * We enter with non-exclusive mmap_lock (to exclude vma changes,
  * but allow concurrent faults), and pte mapped but not yet locked.
@@ -5699,9 +5635,6 @@ check_folio:
 	 * page is.  Identity for non-pgcl (PAGE_MMUSHIFT == 0, folds to the
 	 * original).  See doc/to-pgcl-143-anonexcl-flag.md.
 	 */
-	if (folio_test_anon(folio) && PageAnonExclusive(page) &&
-	    !(PAGE_MMUSHIFT && pte_swp_exclusive(vmf->orig_pte)))
-		pgcl_aex_dump(page, "do_swap_page:5627 GENUINE");
 	BUG_ON(folio_test_anon(folio) && PageAnonExclusive(page) &&
 	       !(PAGE_MMUSHIFT && pte_swp_exclusive(vmf->orig_pte)));
 
