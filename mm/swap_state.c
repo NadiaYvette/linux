@@ -142,6 +142,13 @@ void __swap_cache_add_folio(struct swap_cluster_info *ci,
 {
 	unsigned int ci_off = swp_cluster_offset(entry), ci_end;
 	unsigned long nr_pages = folio_nr_pages(folio);
+	/*
+	 * PGCL: the swap table holds one entry per MMUPAGE slot, so a cluster
+	 * folio spans nr_pages << PAGE_MMUSHIFT slots.  Slot-range loops use
+	 * nr_slots; folio refcount and page stats stay nr_pages.  Identity for
+	 * non-pgcl (PAGE_MMUSHIFT == 0).
+	 */
+	unsigned long nr_slots = nr_pages << PAGE_MMUSHIFT;
 	unsigned long pfn = folio_pfn(folio);
 	unsigned long old_tb;
 
@@ -149,7 +156,7 @@ void __swap_cache_add_folio(struct swap_cluster_info *ci,
 	VM_WARN_ON_ONCE_FOLIO(folio_test_swapcache(folio), folio);
 	VM_WARN_ON_ONCE_FOLIO(!folio_test_swapbacked(folio), folio);
 
-	ci_end = ci_off + nr_pages;
+	ci_end = ci_off + nr_slots;
 	do {
 		old_tb = __swap_table_get(ci, ci_off);
 		VM_WARN_ON_ONCE(swp_tb_is_folio(old_tb));
@@ -184,10 +191,11 @@ static int swap_cache_add_folio(struct folio *folio, swp_entry_t entry,
 	struct swap_cluster_info *ci;
 	unsigned int ci_start, ci_off, ci_end;
 	unsigned long nr_pages = folio_nr_pages(folio);
+	unsigned long nr_slots = nr_pages << PAGE_MMUSHIFT;	/* PGCL: slots, not pages */
 
 	si = __swap_entry_to_info(entry);
 	ci_start = swp_cluster_offset(entry);
-	ci_end = ci_start + nr_pages;
+	ci_end = ci_start + nr_slots;
 	ci_off = ci_start;
 	ci = swap_cluster_lock(si, swp_offset(entry));
 	if (unlikely(!ci->table)) {
@@ -240,6 +248,7 @@ void __swap_cache_del_folio(struct swap_cluster_info *ci, struct folio *folio,
 	unsigned int ci_start, ci_off, ci_end;
 	bool folio_swapped = false, need_free = false;
 	unsigned long nr_pages = folio_nr_pages(folio);
+	unsigned long nr_slots = nr_pages << PAGE_MMUSHIFT;	/* PGCL: slots, not pages */
 
 	VM_WARN_ON_ONCE(__swap_entry_to_cluster(entry) != ci);
 	VM_WARN_ON_ONCE_FOLIO(!folio_test_locked(folio), folio);
@@ -248,7 +257,7 @@ void __swap_cache_del_folio(struct swap_cluster_info *ci, struct folio *folio,
 
 	si = __swap_entry_to_info(entry);
 	ci_start = swp_cluster_offset(entry);
-	ci_end = ci_start + nr_pages;
+	ci_end = ci_start + nr_slots;
 	ci_off = ci_start;
 	do {
 		old_tb = __swap_table_get(ci, ci_off);
@@ -269,7 +278,7 @@ void __swap_cache_del_folio(struct swap_cluster_info *ci, struct folio *folio,
 	lruvec_stat_mod_folio(folio, NR_SWAPCACHE, -nr_pages);
 
 	if (!folio_swapped) {
-		__swap_cluster_free_entries(si, ci, ci_start, nr_pages);
+		__swap_cluster_free_entries(si, ci, ci_start, nr_slots);
 	} else if (need_free) {
 		ci_off = ci_start;
 		do {
@@ -320,8 +329,9 @@ void __swap_cache_replace_folio(struct swap_cluster_info *ci,
 {
 	swp_entry_t entry = new->swap;
 	unsigned long nr_pages = folio_nr_pages(new);
+	unsigned long nr_slots = nr_pages << PAGE_MMUSHIFT;	/* PGCL: slots, not pages */
 	unsigned int ci_off = swp_cluster_offset(entry);
-	unsigned int ci_end = ci_off + nr_pages;
+	unsigned int ci_end = ci_off + nr_slots;
 	unsigned long pfn = folio_pfn(new);
 	unsigned long old_tb;
 
@@ -344,7 +354,7 @@ void __swap_cache_replace_folio(struct swap_cluster_info *ci,
 	if (IS_ENABLED(CONFIG_DEBUG_VM) &&
 	    folio_order(old) != folio_order(new)) {
 		ci_off = swp_cluster_offset(old->swap);
-		ci_end = ci_off + folio_nr_pages(old);
+		ci_end = ci_off + (folio_nr_pages(old) << PAGE_MMUSHIFT);
 		while (ci_off++ < ci_end)
 			WARN_ON_ONCE(swp_tb_to_folio(__swap_table_get(ci, ci_off)) != old);
 	}
@@ -576,8 +586,9 @@ struct folio *swapin_folio(swp_entry_t entry, struct folio *folio)
 	struct folio *swapcache;
 	pgoff_t offset = swp_offset(entry);
 	unsigned long nr_pages = folio_nr_pages(folio);
+	unsigned long nr_slots = nr_pages << PAGE_MMUSHIFT;	/* PGCL: slots, not pages */
 
-	entry = swp_entry(swp_type(entry), round_down(offset, nr_pages));
+	entry = swp_entry(swp_type(entry), round_down(offset, nr_slots));
 	swapcache = __swap_cache_prepare_and_add(entry, folio, 0, true);
 	if (swapcache == folio)
 		swap_read_folio(folio, NULL);
