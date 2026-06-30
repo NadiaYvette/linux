@@ -140,6 +140,18 @@ static void __dump_page(const struct page *page)
 
 void dump_page(const struct page *page, const char *reason)
 {
+#if PAGE_MMUSHIFT
+	/* #143: ring the QEMU cross-mm post-mortem walk (leaf 0x51430004): the
+	 * instrumented host walks every tracked guest pgd and counts USER PTEs
+	 * still mapping this cluster when it is dumped bad (freed-but-mapped). */
+	if (!PagePoisoned(page)) {
+		unsigned int a = 0x51430004u;
+		unsigned int b = (unsigned int)((unsigned long)page_to_pfn(page) << PAGE_MMUSHIFT);
+		unsigned int c = 0, d = 0;
+
+		asm volatile("cpuid" : "+a"(a), "+b"(b), "+c"(c), "+d"(d) :: "memory");
+	}
+#endif
 	if (PagePoisoned(page))
 		pr_warn("page:%p is uninitialized and poisoned\n", page);
 	else
