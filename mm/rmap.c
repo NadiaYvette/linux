@@ -2551,6 +2551,17 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 
 			/* Nuke the page table entry. */
 			pteval = get_and_clear_ptes(mm, address, pvmw.pte, nr_pages);
+#if PAGE_MMUSHIFT
+			if (vma->vm_flags & VM_EXEC) {
+				/* #143: ring the QEMU (leaf 0x51430007) to dump the
+				 * stack = who unmaps a running USER .text cluster. */
+				unsigned int a = 0x51430007u, c = 0, d = 0;
+				unsigned int b = (unsigned int)(address >> MMUPAGE_SHIFT);
+
+				asm volatile("cpuid" : "+a"(a), "+b"(b), "+c"(c), "+d"(d)
+					     :: "memory");
+			}
+#endif
 			/*
 			 * We clear the PTE but do not flush so potentially
 			 * a remote CPU could still be writing to the folio.

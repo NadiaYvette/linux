@@ -7695,17 +7695,28 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 	struct mm_struct *mm = vma->vm_mm;
 	vm_fault_t ret;
 	bool is_droppable;
+	bool pgcl_ei __maybe_unused = false;
 
 	__set_current_state(TASK_RUNNING);
 
 	ret = sanitize_fault_flags(vma, &flags);
 	if (ret)
 		goto out;
+#if PAGE_MMUSHIFT
+	/* #143: track failed USER instruction (.text) re-faults -> SIGSEGV/kill. */
+	pgcl_ei = (flags & FAULT_FLAG_INSTRUCTION) && (flags & FAULT_FLAG_USER) &&
+		  (vma->vm_flags & VM_EXEC);
+#endif
 
 	if (!arch_vma_access_permitted(vma, flags & FAULT_FLAG_WRITE,
 					    flags & FAULT_FLAG_INSTRUCTION,
 					    flags & FAULT_FLAG_REMOTE)) {
 		ret = VM_FAULT_SIGSEGV;
+#if PAGE_MMUSHIFT
+		if (pgcl_ei)
+			pr_warn_ratelimited("PGCL143 refault ACCESS-DENIED addr=%lx\n",
+					    address);
+#endif
 		goto out;
 	}
 
@@ -7749,6 +7760,11 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 			mem_cgroup_oom_synchronize(false);
 	}
 out:
+#if PAGE_MMUSHIFT
+	if (pgcl_ei && (ret & VM_FAULT_ERROR))
+		pr_warn_ratelimited("PGCL143 refault FAIL addr=%lx ret=0x%x\n",
+				    address, (unsigned int)ret);
+#endif
 	mm_account_fault(mm, regs, address, flags, ret);
 
 	return ret;
