@@ -912,11 +912,11 @@ unsigned long vm_commit_limit(void)
 			    << PAGE_MMUSHIFT)
 			   * sysctl_overcommit_ratio / 100);
 	/*
-	 * total_swap_pages counts swap slots, which are PAGE (cluster) sized;
-	 * the rest of this limit is in MMUPAGE units, so scale swap up too.
-	 * Identity at PAGE_MMUSHIFT == 0.
+	 * PGCL per-fragment swap: total_swap_pages now counts MMUPAGE-sized
+	 * slots (one per sub-MMUPAGE), the same unit as the rest of this limit,
+	 * so no scaling is needed.  (Identity at PAGE_MMUSHIFT == 0 regardless.)
 	 */
-	allowed += total_swap_pages << PAGE_MMUSHIFT;
+	allowed += total_swap_pages;
 
 	return allowed;
 }

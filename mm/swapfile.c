@@ -890,6 +890,17 @@ static bool cluster_scan_range(struct swap_info_struct *si,
 	return true;
 }
 
+/*
+ * PGCL per-fragment swap: a folio spans folio_nr_pages struct-page CLUSTERS,
+ * each holding PAGE_MMUCOUNT sub-MMUPAGE swap slots, so its swap allocation
+ * order is the struct-page order plus PAGE_MMUSHIFT.  Identity for non-PGCL
+ * (PAGE_MMUSHIFT == 0).  1 << folio_swap_order(folio) is the folio's slot count.
+ */
+static inline unsigned int folio_swap_order(struct folio *folio)
+{
+	return folio_order(folio) + PAGE_MMUSHIFT;
+}
+
 static bool __swap_cluster_alloc_entries(struct swap_info_struct *si,
 					 struct swap_cluster_info *ci,
 					 struct folio *folio,
@@ -913,7 +924,7 @@ static bool __swap_cluster_alloc_entries(struct swap_info_struct *si,
 	 * The slot starts with count == 1 and never increases.
 	 */
 	if (likely(folio)) {
-		order = folio_order(folio);
+		order = folio_swap_order(folio);
 		nr_pages = 1 << order;
 		swap_cluster_assert_empty(ci, ci_off, nr_pages, false);
 		__swap_cache_add_folio(ci, folio, swp_entry(si->type,
@@ -949,7 +960,7 @@ static unsigned int alloc_swap_scan_cluster(struct swap_info_struct *si,
 {
 	unsigned int next = SWAP_ENTRY_INVALID, found = SWAP_ENTRY_INVALID;
 	unsigned long start = ALIGN_DOWN(offset, SWAPFILE_CLUSTER);
-	unsigned int order = likely(folio) ? folio_order(folio) : 0;
+	unsigned int order = likely(folio) ? folio_swap_order(folio) : 0;
 	unsigned long end = start + SWAPFILE_CLUSTER;
 	unsigned int nr_pages = 1 << order;
 	bool need_reclaim, ret, usable;
@@ -1074,7 +1085,7 @@ static unsigned long cluster_alloc_swap_entry(struct swap_info_struct *si,
 					      struct folio *folio)
 {
 	struct swap_cluster_info *ci;
-	unsigned int order = likely(folio) ? folio_order(folio) : 0;
+	unsigned int order = likely(folio) ? folio_swap_order(folio) : 0;
 	unsigned int offset = SWAP_ENTRY_INVALID, found = SWAP_ENTRY_INVALID;
 
 	/*
@@ -1347,7 +1358,7 @@ static bool get_swap_device_info(struct swap_info_struct *si)
  */
 static bool swap_alloc_fast(struct folio *folio)
 {
-	unsigned int order = folio_order(folio);
+	unsigned int order = folio_swap_order(folio);
 	struct swap_cluster_info *ci;
 	struct swap_info_struct *si;
 	unsigned int offset;
@@ -1694,7 +1705,7 @@ failed:
  */
 int folio_alloc_swap(struct folio *folio)
 {
-	unsigned int order = folio_order(folio);
+	unsigned int order = folio_swap_order(folio);
 	unsigned int size = 1 << order;
 
 	VM_BUG_ON_FOLIO(!folio_test_locked(folio), folio);
@@ -3331,19 +3342,17 @@ static unsigned long read_swap_header(struct swap_info_struct *si,
 	}
 	if (PAGE_MMUSHIFT) {
 		/*
-		 * mkswap counted slots in MMUPAGE units; the kernel swaps whole
-		 * PAGE-sized clusters.  Fold the area down to whole clusters,
-		 * discarding the sub-cluster slack (the rest of the header
-		 * cluster and any partial tail cluster).  last_page is the index
-		 * of the last slot, so total slots == last_page + 1.
+		 * PGCL per-fragment swap: keep the MMUPAGE-granular slots that
+		 * mkswap laid down -- each sub-MMUPAGE owns a swap slot.  A cluster
+		 * is PAGE_MMUCOUNT contiguous slots (allocated as one order-
+		 * PAGE_MMUSHIFT block by folio_alloc_swap); last_page stays in
+		 * MMUPAGE units (no fold to clusters).  Require at least one whole
+		 * cluster of slots.
 		 */
-		unsigned long clusters = (last_page + 1) >> PAGE_MMUSHIFT;
-
-		if (!clusters) {
+		if (((last_page + 1) >> PAGE_MMUSHIFT) == 0) {
 			pr_warn("Swap area smaller than one kernel page\n");
 			return 0;
 		}
-		last_page = clusters - 1;
 	}
 	if (last_page > maxpages) {
 		pr_warn("Truncating oversized swap area, only using %luk out of %luk\n",

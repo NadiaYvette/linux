@@ -1139,6 +1139,14 @@ static inline bool page_has_movable_ops(const struct page *page)
 	       (PageOffline(page) || PageZsmalloc(page));
 }
 
+/*
+ * PGCL #143 diagnostic: trace every writer of PG_anon_exclusive into a
+ * pfn-keyed table (defined in mm/memory.c) so do_swap_page's BUG_ON can report
+ * who last set/cleared the cluster-head flag.  Throwaway instrumentation.
+ */
+enum pgcl_aex_op { PGCL_AEX_SET = 1, PGCL_AEX_CLR, PGCL_AEX_CLR_ATOMIC };
+void __pgcl_aex_note(const struct page *page, enum pgcl_aex_op op);
+
 static __always_inline int PageAnonExclusive(const struct page *page)
 {
 	VM_BUG_ON_PGFLAGS(!PageAnon(page), page);
@@ -1156,6 +1164,7 @@ static __always_inline void SetPageAnonExclusive(struct page *page)
 	VM_BUG_ON_PGFLAGS(!PageAnonNotKsm(page), page);
 	VM_BUG_ON_PGFLAGS(PageHuge(page) && !PageHead(page), page);
 	set_bit(PG_anon_exclusive, &PF_ANY(page, 1)->flags.f);
+	__pgcl_aex_note(page, PGCL_AEX_SET);
 }
 
 static __always_inline void ClearPageAnonExclusive(struct page *page)
@@ -1163,6 +1172,7 @@ static __always_inline void ClearPageAnonExclusive(struct page *page)
 	VM_BUG_ON_PGFLAGS(!PageAnonNotKsm(page), page);
 	VM_BUG_ON_PGFLAGS(PageHuge(page) && !PageHead(page), page);
 	clear_bit(PG_anon_exclusive, &PF_ANY(page, 1)->flags.f);
+	__pgcl_aex_note(page, PGCL_AEX_CLR);
 }
 
 static __always_inline void __ClearPageAnonExclusive(struct page *page)
@@ -1170,6 +1180,7 @@ static __always_inline void __ClearPageAnonExclusive(struct page *page)
 	VM_BUG_ON_PGFLAGS(!PageAnon(page), page);
 	VM_BUG_ON_PGFLAGS(PageHuge(page) && !PageHead(page), page);
 	__clear_bit(PG_anon_exclusive, &PF_ANY(page, 1)->flags.f);
+	__pgcl_aex_note(page, PGCL_AEX_CLR_ATOMIC);
 }
 
 #ifdef CONFIG_MMU
