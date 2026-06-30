@@ -1303,6 +1303,29 @@ static inline void pgalloc_tag_sub_pages(struct alloc_tag *tag, unsigned int nr)
 
 #endif /* CONFIG_MEM_ALLOC_PROFILING */
 
+#if PAGE_MMUSHIFT
+/*
+ * pgcl143 instrumentation: magic CPUID to the instrumented QEMU TLB-scan
+ * (FREE-WHILE-USER-MAPPED detector, accel/tcg/cputlb.c).  leaf 0x51430000|freed,
+ * EBX = 4K-frame base (pfn << PAGE_MMUSHIFT), ECX = 4K-frame count.  freed=1 ->
+ * pgcl_ts_on_free (dangler/stale-TLB), freed=0 -> pgcl_ts_on_alloc (reuse).
+ * Armed guest-side unconditionally; QEMU side is gated by env PGCL_TLBSCAN.
+ */
+static __always_inline void pgcl143_qsig(struct page *page, unsigned int order,
+					 int freed)
+{
+	unsigned int a = 0x51430000u | (unsigned int)(freed & 1);
+	unsigned int b = (unsigned int)((unsigned long)page_to_pfn(page) << PAGE_MMUSHIFT);
+	unsigned int c = (unsigned int)((1UL << order) << PAGE_MMUSHIFT);
+	unsigned int d = 0;
+
+	asm volatile("cpuid" : "+a"(a), "+b"(b), "+c"(c), "+d"(d) :: "memory");
+}
+#else
+static __always_inline void pgcl143_qsig(struct page *page, unsigned int order,
+					 int freed) { }
+#endif
+
 __always_inline bool __free_pages_prepare(struct page *page,
 					  unsigned int order, fpi_t fpi_flags)
 {
@@ -1315,6 +1338,7 @@ __always_inline bool __free_pages_prepare(struct page *page,
 	VM_BUG_ON_PAGE(PageTail(page), page);
 
 	trace_mm_page_free(page, order);
+	pgcl143_qsig(page, order, 1);	/* pgcl143: signal QEMU TLB-scan free detector */
 	kmsan_free_page(page, order);
 
 	if (memcg_kmem_online() && PageMemcgKmem(page))
@@ -1853,6 +1877,7 @@ inline void post_alloc_hook(struct page *page, unsigned int order,
 	set_page_owner(page, order, gfp_flags);
 	page_table_check_alloc(page, order);
 	pgalloc_tag_add(page, current, 1 << order);
+	pgcl143_qsig(page, order, 0);	/* pgcl143: signal QEMU TLB-scan alloc/reuse detector */
 }
 
 static void prep_new_page(struct page *page, unsigned int order, gfp_t gfp_flags,
