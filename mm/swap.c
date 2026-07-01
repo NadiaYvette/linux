@@ -106,6 +106,38 @@ void __folio_put(struct folio *folio)
 		return;
 	}
 
+#if PAGE_MMUSHIFT
+	/*
+	 * #143 CACHE-FLOOR guard at the single-folio put chokepoint (Tessera
+	 * FileCacheRef.rehold_floorOk) -- the twin of the folios_put_refs guard,
+	 * covering the path the batch guard misses.  __folio_put runs at refcount 0;
+	 * a still-CACHED file folio here (mapping != NULL, !anon, !swapbacked) means
+	 * its cache ref was over-dropped -- a double-drop racing the gather's
+	 * deferred drop (reinc #38 CACHEFLOOR: nr_refs=1, refcount 1->0 on a
+	 * cache-only file folio).  Freeing it reuses a shared page-cache page (e.g. a
+	 * libcef.so code page) -> userspace wrong-data (Electron int3 CHECK-fail,
+	 * segfaults).  Enforce cachedPinned: re-hold to the cache floor and skip the
+	 * free; the ratelimited PGCL143-CACHEFLOOR + dump_stack NAMES the racing put
+	 * (the shadow that pins the double-drop's source).  A legit eviction clears
+	 * mapping first (delete_from_page_cache), so this never fires on a correct
+	 * free -- leak-on-race beats shared-page corruption.
+	 */
+	if (unlikely(folio->mapping && !folio_test_anon(folio) &&
+		     !folio_test_swapbacked(folio))) {
+		long cfloor = folio_nr_pages(folio);
+		static DEFINE_RATELIMIT_STATE(rs_cf2, HZ, 4);
+
+		if (__ratelimit(&rs_cf2)) {
+			pr_warn("PGCL143-CACHEFLOOR: __folio_put freeing cached file folio pfn=%#lx refcount=%d floor=%ld (mapping=%px); over-drop site:\n",
+				folio_pfn(folio), folio_ref_count(folio), cfloor,
+				folio->mapping);
+			dump_stack();
+		}
+		folio_ref_add(folio, cfloor);
+		return;
+	}
+#endif
+
 	page_cache_release(folio);
 	folio_unqueue_deferred_split(folio);
 	mem_cgroup_uncharge(folio);
