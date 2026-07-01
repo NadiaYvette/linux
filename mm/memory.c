@@ -1838,6 +1838,50 @@ zap_install_uffd_wp_if_needed(struct vm_area_struct *vma,
 	return was_installed;
 }
 
+#if PAGE_MMUSHIFT
+/*
+ * #143 FILE cache-ref over-put detector (Tessera FileCacheRef.cachedPinned).
+ * The zap is about to defer-drop @nr mapping refs for this cluster.  For a FILE
+ * page-cache folio (mapping != NULL, !anon, !swapcache) still holding only @nr or
+ * fewer refs, that drop reaches 0 while STILL cached -> the page cache's own ref
+ * is eaten -> free-while-cached (the observed bad_page via free_pages_and_swap_cache).
+ * @present_before is an INDEPENDENT ground-truth scan of this cluster's present
+ * sub-PTEs in this table taken BEFORE the clear (immune to any _mapcount miscount):
+ *   present_before == 0  -> the cluster is genuinely unmapped here; the fault is the
+ *                           cache ref alone (refcount ledger) -- R17 (per-cluster
+ *                           _mapcount) has no lever, the fix is cache-ref preservation.
+ *   present_before  > 0  -> we are freeing a STILL-mapped cluster (free-while-mapped);
+ *                           a folio_mapped()-honest _mapcount (full R17) WOULD gate it.
+ * mapcount (the possibly-miscounted ledger) is reported alongside so the two can be
+ * compared directly.
+ */
+static void pgcl143_file_overput_report(struct folio *folio, unsigned int nr,
+					int present_before)
+{
+	int rc;
+
+	if (folio_test_anon(folio) || folio_test_swapcache(folio) || !folio->mapping)
+		return;
+	rc = folio_ref_count(folio);
+	if (rc > (int)nr)		/* drop leaves >=1 for the cache ref: fine */
+		return;
+	{
+		static DEFINE_RATELIMIT_STATE(rs_fop, HZ, 20);
+
+		if (__ratelimit(&rs_fop)) {
+			pr_warn("PGCL143-FILE-OVERPUT rc=%d nr=%u present_before=%d mapcount=%d idx=%#lx %s comm=%s\n",
+				rc, nr, present_before, folio_mapcount(folio),
+				folio->index,
+				present_before > 0 ? "STILL-MAPPED(R17-relevant)"
+						   : "unmapped(cache-ref-only)",
+				current->comm);
+			dump_page(&folio->page, "pgcl143 file cache-ref over-put");
+			dump_stack();
+		}
+	}
+}
+#endif
+
 static __always_inline void zap_present_folio_ptes(struct mmu_gather *tlb,
 		struct vm_area_struct *vma, struct folio *folio,
 		struct page *page, pte_t *pte, pte_t ptent, unsigned int nr,
@@ -1846,6 +1890,11 @@ static __always_inline void zap_present_folio_ptes(struct mmu_gather *tlb,
 {
 	struct mm_struct *mm = tlb->mm;
 	bool delay_rmap = false;
+#if PAGE_MMUSHIFT
+	/* ground-truth present count BEFORE the clear below (file folios only). */
+	int pgcl_ph_before = folio_test_anon(folio) ? 0 :
+		pgcl143_present_count(pte, addr, pte_pfn(ptent));
+#endif
 
 	if (!folio_test_anon(folio)) {
 		ptent = get_and_clear_full_ptes(mm, addr, pte, nr, tlb->fullmm);
@@ -1898,7 +1947,7 @@ static __always_inline void zap_present_folio_ptes(struct mmu_gather *tlb,
 	}
 #if PAGE_MMUSHIFT
 	/* #143 FILE cache-ref over-put detector (Tessera FileCacheRef). */
-	pgcl143_check_file_overput(folio, nr);
+	pgcl143_file_overput_report(folio, nr, pgcl_ph_before);
 #endif
 	if (unlikely(__tlb_remove_folio_pages(tlb, page, nr, delay_rmap))) {
 		*force_flush = true;
@@ -1983,6 +2032,11 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 		 */
 		if (nr > 1 || folio_test_large(folio)) {
 			int i;
+#if PAGE_MMUSHIFT
+			/* ground-truth present count BEFORE the clear below. */
+			int ph_before = folio_test_anon(folio) ? 0 :
+				pgcl143_present_count(pte, addr, pte_pfn(ptent));
+#endif
 
 			clear_full_ptes(mm, addr, pte, nr, tlb->fullmm);
 			rss[mm_counter(folio)] -= nr;
@@ -2054,7 +2108,7 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 			 */
 #if PAGE_MMUSHIFT
 			/* #143 FILE cache-ref over-put detector (Tessera FileCacheRef). */
-			pgcl143_check_file_overput(folio, nr);
+			pgcl143_file_overput_report(folio, nr, ph_before);
 #endif
 			if (unlikely(__tlb_remove_folio_pages(tlb, page, nr,
 							      false))) {
