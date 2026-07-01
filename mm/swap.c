@@ -994,6 +994,37 @@ void folios_put_refs(struct folio_batch *folios, unsigned int *refs)
 			do {
 				new_refs = old > (int)nr_refs ? old - (int)nr_refs : 0;
 			} while (!atomic_try_cmpxchg(&folio->_refcount, &old, new_refs));
+			/*
+			 * #143 CACHE-FLOOR detector + enforcement (Tessera
+			 * FileCacheRef.rehold_floorOk / violated_iff_not_floorOk).  A FILE
+			 * page-cache folio holds >= folio_nr_pages structural refs while
+			 * cached (mapping != NULL): filemap_add_folio takes them, dropped
+			 * only by truncate/__remove_mapping AFTER clearing mapping.  reinc
+			 * #37 showed the gather / lru_add-drain put dropping such a folio
+			 * BELOW that floor WHILE STILL cached -> freed with mapping/private
+			 * set -> pcp free-list corruption (__rmqueue_pcplist /
+			 * free_frozen_page_commit) -> allocator wedge -> GUI freeze.  Detect
+			 * (PGCL143-CACHEFLOOR names the racing put) and ENFORCE cachedPinned:
+			 * re-hold to the floor and skip the free.  Anon/swap excluded
+			 * (mapping is anon_vma / auto-cleared at free); a legit eviction
+			 * clears mapping first, so this never fires on a correct free --
+			 * leak-on-race beats corruption.
+			 */
+			if (unlikely(new_refs < (int)folio_nr_pages(folio) &&
+				     folio->mapping && !folio_test_anon(folio) &&
+				     !folio_test_swapbacked(folio))) {
+				long cfloor = folio_nr_pages(folio);
+				static DEFINE_RATELIMIT_STATE(rs_cf, HZ, 4);
+
+				if (__ratelimit(&rs_cf)) {
+					pr_warn("PGCL143-CACHEFLOOR: cached file folio pfn=%#lx dropped to %d < floor %ld while cached (mapping=%px nr_refs=%u); over-drop:\n",
+						folio_pfn(folio), new_refs, cfloor,
+						folio->mapping, nr_refs);
+					dump_stack();
+				}
+				folio_ref_add(folio, cfloor - new_refs);
+				continue;
+			}
 			if (new_refs)
 				continue;
 			/*
