@@ -1026,6 +1026,38 @@ void folios_put_refs(struct folio_batch *folios, unsigned int *refs)
 				new_refs = old > (int)nr_refs ? old - (int)nr_refs : 0;
 			} while (!atomic_try_cmpxchg(&folio->_refcount, &old, new_refs));
 			/*
+			 * #143 DOUBLE-DROP detector (task #17, the reinc #40 residual): a
+			 * file/shmem folio the mmu_gather still OWES a deferred free for
+			 * (pgcl143_gather_owes stamp set) is being ref-dropped HERE by a
+			 * NON-gather path (!in_gflush).  If this drop takes it to/below the
+			 * cache floor -- all mapping refs gone -- the gather's later deferred
+			 * drop DOUBLE-FREES it: the page lands on the pcp free-list twice ->
+			 * list_del/add corruption, shared-lib page reuse -> Electron int3 /
+			 * segfault.  bad_page stays 0 (mapping cleared by then), so only this
+			 * names it.  Report the eager-dropper (dump_stack) + the zap that
+			 * deferred (gather_ip); WARN-only, the CACHE-FLOOR guard below still
+			 * re-holds to prevent the actual double-free.
+			 */
+			{
+				unsigned long ddpfn = folio_pfn(folio);
+				unsigned int ddi = pgcl143_pending_idx(ddpfn);
+
+				if (unlikely(new_refs <= (int)folio_nr_pages(folio) &&
+					     folio->mapping && !folio_test_anon(folio) &&
+					     !this_cpu_read(pgcl143_in_gflush) &&
+					     pgcl143_gather_owes[ddi] == ddpfn)) {
+					static DEFINE_RATELIMIT_STATE(rs_dd, HZ, 4);
+
+					if (__ratelimit(&rs_dd)) {
+						pr_warn("PGCL143-DOUBLEDROP: file/shmem folio pfn=%#lx ref-dropped to %d (floor %ld) by non-gather path while gather owes it (deferred-by=%pS); eager-dropper:\n",
+							ddpfn, new_refs,
+							folio_nr_pages(folio),
+							(void *)pgcl143_gather_ip[ddi]);
+						dump_stack();
+					}
+				}
+			}
+			/*
 			 * #143 CACHE-FLOOR detector + enforcement (Tessera
 			 * FileCacheRef.rehold_floorOk / violated_iff_not_floorOk).  A FILE
 			 * page-cache folio holds >= folio_nr_pages structural refs while
