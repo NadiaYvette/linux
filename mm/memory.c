@@ -1896,6 +1896,10 @@ static __always_inline void zap_present_folio_ptes(struct mmu_gather *tlb,
 		if (unlikely(folio_mapcount(folio) < 0))
 			print_bad_pte(vma, addr, ptent, page);
 	}
+#if PAGE_MMUSHIFT
+	/* #143 FILE cache-ref over-put detector (Tessera FileCacheRef). */
+	pgcl143_check_file_overput(folio, nr);
+#endif
 	if (unlikely(__tlb_remove_folio_pages(tlb, page, nr, delay_rmap))) {
 		*force_flush = true;
 		*force_break = true;
@@ -2048,6 +2052,10 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 			 * one-struct-page-per-cluster layout; rmap was already
 			 * removed above, so delay_rmap is false.
 			 */
+#if PAGE_MMUSHIFT
+			/* #143 FILE cache-ref over-put detector (Tessera FileCacheRef). */
+			pgcl143_check_file_overput(folio, nr);
+#endif
 			if (unlikely(__tlb_remove_folio_pages(tlb, page, nr,
 							      false))) {
 				*force_flush = true;

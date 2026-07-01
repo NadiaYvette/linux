@@ -706,6 +706,40 @@ static inline bool pgcl143_floor_remove(struct folio *folio, struct page *page,
 	folio_remove_rmap_pte(folio, page, vma);
 	return true;
 }
+
+/**
+ * pgcl143_check_file_overput - DIAGNOSTIC (Tessera FileCacheRef.cachedPinned).
+ * A FILE page-cache folio's refcount = cacheRef(1 while mapping!=NULL) + Σ mapping
+ * refs.  The zap is about to defer-drop @nr mapping refs for this cluster; if the
+ * folio still has @nr or fewer refs, that drop reaches 0 while the folio is STILL
+ * cached (mapping!=NULL) -- the cache ref is eaten -> free-while-cached (the
+ * observed bad_page via free_pages_and_swap_cache).  Fire at the culprit zap with
+ * the page_owner alloc stack + this stack, so we can tell a map-side under-add
+ * (rc==nr, cache ref already gone) from a zap-side over-count (nr > present here).
+ * Self-filters to cached file folios; no-op for anon/swapcache/uncached.
+ */
+static inline void pgcl143_check_file_overput(struct folio *folio, unsigned int nr)
+{
+	int rc;
+
+	if (folio_test_anon(folio) || folio_test_swapcache(folio) ||
+	    !folio->mapping)
+		return;
+	rc = folio_ref_count(folio);
+	if (rc > (int)nr)		/* drop leaves >=1 for the cache ref: fine */
+		return;
+	{
+		static DEFINE_RATELIMIT_STATE(rs_fop, HZ, 20);
+
+		if (__ratelimit(&rs_fop)) {
+			pr_warn("PGCL143-FILE-OVERPUT rc=%d nr=%u mapcount=%d idx=%#lx comm=%s\n",
+				rc, nr, folio_mapcount(folio),
+				folio->index, current->comm);
+			dump_page(&folio->page, "pgcl143 file cache-ref over-put");
+			dump_stack();
+		}
+	}
+}
 #endif /* PAGE_MMUSHIFT */
 
 /**
