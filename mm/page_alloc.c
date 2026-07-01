@@ -1366,6 +1366,15 @@ __always_inline bool __free_pages_prepare(struct page *page,
 					dfpfn, (void *)pgcl143_free_ip[dfi]);
 				dump_stack();
 			}
+			/*
+			 * ENFORCE: the pfn is already on the free list from its 1st free
+			 * (root #42: the same cluster folio in >1 mmu_gather encoded entry,
+			 * gapped-cluster madvise zap).  Skip this 2nd free so it is not
+			 * added to the pcp list twice -- return false, the callers'
+			 * "bad page, don't free" path.  The page stays on the list exactly
+			 * once: leak-free, corruption-free, mechanism-agnostic.
+			 */
+			return false;
 		} else {
 			pgcl143_freed[dfi] = dfpfn;
 			pgcl143_free_ip[dfi] = _RET_IP_;
