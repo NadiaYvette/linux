@@ -122,13 +122,12 @@ void __folio_put(struct folio *folio)
 	 * mapping first (delete_from_page_cache), so this never fires on a correct
 	 * free -- leak-on-race beats shared-page corruption.
 	 */
-	if (unlikely(folio->mapping && !folio_test_anon(folio) &&
-		     !folio_test_swapbacked(folio))) {
+	if (unlikely(folio->mapping && !folio_test_anon(folio))) {
 		long cfloor = folio_nr_pages(folio);
 		static DEFINE_RATELIMIT_STATE(rs_cf2, HZ, 4);
 
 		if (__ratelimit(&rs_cf2)) {
-			pr_warn("PGCL143-CACHEFLOOR: __folio_put freeing cached file folio pfn=%#lx refcount=%d floor=%ld (mapping=%px); over-drop site:\n",
+			pr_warn("PGCL143-CACHEFLOOR: __folio_put freeing cached file/shmem folio pfn=%#lx refcount=%d floor=%ld (mapping=%px); over-drop site:\n",
 				folio_pfn(folio), folio_ref_count(folio), cfloor,
 				folio->mapping);
 			dump_stack();
@@ -1043,13 +1042,12 @@ void folios_put_refs(struct folio_batch *folios, unsigned int *refs)
 			 * leak-on-race beats corruption.
 			 */
 			if (unlikely(new_refs < (int)folio_nr_pages(folio) &&
-				     folio->mapping && !folio_test_anon(folio) &&
-				     !folio_test_swapbacked(folio))) {
+				     folio->mapping && !folio_test_anon(folio))) {
 				long cfloor = folio_nr_pages(folio);
 				static DEFINE_RATELIMIT_STATE(rs_cf, HZ, 4);
 
 				if (__ratelimit(&rs_cf)) {
-					pr_warn("PGCL143-CACHEFLOOR: cached file folio pfn=%#lx dropped to %d < floor %ld while cached (mapping=%px nr_refs=%u); over-drop:\n",
+					pr_warn("PGCL143-CACHEFLOOR: cached file/shmem folio pfn=%#lx dropped to %d < floor %ld while cached (mapping=%px nr_refs=%u); over-drop:\n",
 						folio_pfn(folio), new_refs, cfloor,
 						folio->mapping, nr_refs);
 					dump_stack();
