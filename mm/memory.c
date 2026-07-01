@@ -1881,15 +1881,18 @@ static void pgcl143_file_overput_report(struct folio *folio, unsigned int nr,
 		static DEFINE_RATELIMIT_STATE(rs_fop, HZ, 20);
 
 		if (__ratelimit(&rs_fop)) {
-			unsigned int zi = pgcl143_pending_idx(folio_pfn(folio));
+			unsigned long pfn = folio_pfn(folio);
+			unsigned int zi = pgcl143_pending_idx(pfn);
+			bool zvalid = pgcl143_zero_pfn[zi] == pfn;
 
-			pr_warn("PGCL143-FILE-OVERPUT rc=%d nr=%u present_before=%d mapcount=%d idx=%#lx %s comm=%s pfn=%#lx zeroer=%pS viafloor=%d\n",
+			pr_warn("PGCL143-FILE-OVERPUT rc=%d nr=%u present_before=%d mapcount=%d idx=%#lx %s comm=%s pfn=%#lx zeroer=%s%pS viafloor=%d\n",
 				rc, nr, present_before, mc, folio->index,
 				undercount ? "STILL-MAPPED(R17-relevant)"
 					   : "unmapped(cache-ref-only)",
-				current->comm, folio_pfn(folio),
-				(void *)pgcl143_zero_ip[zi],
-				pgcl143_zero_viafloor[zi]);
+				current->comm, pfn,
+				zvalid ? "" : "(stale/collision)",
+				zvalid ? (void *)pgcl143_zero_ip[zi] : NULL,
+				zvalid ? pgcl143_zero_viafloor[zi] : -1);
 			dump_page(&folio->page, "pgcl143 file undercount/over-put");
 		}
 	}

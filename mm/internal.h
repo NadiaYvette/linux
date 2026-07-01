@@ -37,8 +37,11 @@ struct folio_batch;
  */
 #define PGCL143_PENDING_BITS 18
 extern atomic_t pgcl143_pending[1 << PGCL143_PENDING_BITS];
-/* Option B quiet correlator: per-pfn last file-mapcount-zeroing caller. */
+/* Option B quiet correlator: per-pfn last file-mapcount-zeroing caller.
+ * pgcl143_zero_pfn holds the folio_pfn that wrote the slot, so the surfacing
+ * printer can verify the slot wasn't stolen by a hash-colliding pfn. */
 extern unsigned long pgcl143_zero_ip[1 << PGCL143_PENDING_BITS];
+extern unsigned long pgcl143_zero_pfn[1 << PGCL143_PENDING_BITS];
 extern u8 pgcl143_zero_viafloor[1 << PGCL143_PENDING_BITS];
 static inline unsigned int pgcl143_pending_idx(unsigned long pfn)
 {

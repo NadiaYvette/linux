@@ -1950,6 +1950,7 @@ DEFINE_PER_CPU(u8, pgcl143_via_floor);
  * Printed ONLY at the rare UNDERCOUNT surfacing in the zap (mm/memory.c).
  */
 unsigned long pgcl143_zero_ip[1 << PGCL143_PENDING_BITS];
+unsigned long pgcl143_zero_pfn[1 << PGCL143_PENDING_BITS];
 u8 pgcl143_zero_viafloor[1 << PGCL143_PENDING_BITS];
 
 /*
@@ -2164,10 +2165,11 @@ static __always_inline void __folio_remove_rmap(struct folio *folio,
 			 * the over-discharge that undercounted a still-mapped cluster.
 			 */
 			if (!folio_test_anon(folio) && mc <= 0) {
-				unsigned int zi =
-					pgcl143_pending_idx(folio_pfn(folio));
+				unsigned long pfn = folio_pfn(folio);
+				unsigned int zi = pgcl143_pending_idx(pfn);
 
 				pgcl143_zero_ip[zi] = _RET_IP_;
+				pgcl143_zero_pfn[zi] = pfn;
 				pgcl143_zero_viafloor[zi] =
 					(u8)this_cpu_read(pgcl143_via_floor);
 			}
