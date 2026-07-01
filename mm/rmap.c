@@ -2125,23 +2125,30 @@ static __always_inline void __folio_remove_rmap(struct folio *folio,
 				nr = (mc - 1 < 0);
 			}
 			/*
-			 * Option B SPURIOUS-REMOVE CATCHER: a FILE (!anon) cluster
+			 * Option B SPURIOUS-REMOVE CATCHER: a FILE/SHMEM cluster
 			 * whose _mapcount is driven to 0/negative (mc pre-decrement
 			 * <= 0 => folio_mapcount was <= 1) by a remove that did NOT
-			 * come through the floor.  Every legit file unmap (zap /
+			 * come through the floor.  Every legit file/shmem unmap (zap /
 			 * reclaim / migrate) is floored (via_floor=1); an unfloored
-			 * path zeroing a file mapcount is the over-discharge that
+			 * path zeroing such a mapcount is the over-discharge that
 			 * undercounts a still-mapped cluster (the #143 root the fop
-			 * boot surfaced).  Dump its stack to name the caller.
+			 * boot surfaced -- on a shmem_aops folio).  Trigger on !anon
+			 * (file+shmem) OR swapcache (the tmpfs "becoming anonymous"
+			 * transition through do_swap_page); report the flags so we can
+			 * see the shmem/anon state, and dump the stack to name it.
 			 */
-			if (!folio_test_anon(folio) && mc <= 0 &&
-			    !this_cpu_read(pgcl143_via_floor)) {
+			if (mc <= 0 && !this_cpu_read(pgcl143_via_floor) &&
+			    (!folio_test_anon(folio) || folio_test_swapcache(folio))) {
 				static DEFINE_RATELIMIT_STATE(rs_spur, HZ, 12);
 
 				if (__ratelimit(&rs_spur)) {
-					pr_warn("PGCL143-SPURFILE mc_pre=%d idx=%#lx mapping=%p comm=%s pfn=%#lx\n",
-						mc, folio->index, folio->mapping,
-						current->comm, folio_pfn(folio));
+					pr_warn("PGCL143-SPURFILE mc_pre=%d idx=%#lx anon=%d swapbk=%d swapcache=%d mapping=%p comm=%s pfn=%#lx\n",
+						mc, folio->index,
+						folio_test_anon(folio),
+						folio_test_swapbacked(folio),
+						folio_test_swapcache(folio),
+						folio->mapping, current->comm,
+						folio_pfn(folio));
 					dump_stack();
 				}
 			}
