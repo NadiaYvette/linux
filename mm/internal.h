@@ -51,6 +51,9 @@ extern u8 pgcl143_zero_viafloor[1 << PGCL143_PENDING_BITS];
  * its legitimate free does not self-trip. */
 extern unsigned long pgcl143_gather_owes[1 << PGCL143_PENDING_BITS];
 extern unsigned long pgcl143_gather_ip[1 << PGCL143_PENDING_BITS];
+/* #143 general double-free detector (task #17): pfn-verified freed-stamp + 1st-free IP. */
+extern unsigned long pgcl143_freed[1 << PGCL143_PENDING_BITS];
+extern unsigned long pgcl143_free_ip[1 << PGCL143_PENDING_BITS];
 DECLARE_PER_CPU(u8, pgcl143_in_gflush);
 static inline unsigned int pgcl143_pending_idx(unsigned long pfn)
 {

@@ -1341,6 +1341,38 @@ __always_inline bool __free_pages_prepare(struct page *page,
 	pgcl143_qsig(page, order, 1);	/* pgcl143: signal QEMU TLB-scan free detector */
 	kmsan_free_page(page, order);
 
+#if PAGE_MMUSHIFT
+	/*
+	 * #143 GENERAL DOUBLE-FREE detector (task #17, the reinc #40/#41 residual):
+	 * stamp each pfn freed here (the common chokepoint for ALL free paths); the
+	 * stamp is cleared at post_alloc_hook.  A 2nd free before re-alloc is a
+	 * DOUBLE-FREE -> the page lands on the pcp free-list twice (list_del/add
+	 * corruption at free_frozen_page_commit / __rmqueue_pcplist) -> shared-lib
+	 * page reuse -> Electron int3 / segfault.  bad_page stays 0 (flags/mapping
+	 * clear on the 2nd free), so ONLY this names it.  dump_stack = the 2nd freer;
+	 * pgcl143_free_ip = the 1st free.  Unlike PGCL143-DOUBLEDROP this makes NO
+	 * mechanism assumption (not keyed on gather_owes).  order-0 only (pgcl
+	 * clusters); pfn-verified hash -> collisions only MISS, never false-positive.
+	 */
+	if (likely(!order)) {
+		unsigned long dfpfn = page_to_pfn(page);
+		unsigned int dfi = pgcl143_pending_idx(dfpfn);
+
+		if (unlikely(pgcl143_freed[dfi] == dfpfn)) {
+			static DEFINE_RATELIMIT_STATE(rs_df, HZ, 4);
+
+			if (__ratelimit(&rs_df)) {
+				pr_warn("PGCL143-DOUBLEFREE pfn=%#lx freed AGAIN without re-alloc; first-freed-by=%pS; 2nd freer:\n",
+					dfpfn, (void *)pgcl143_free_ip[dfi]);
+				dump_stack();
+			}
+		} else {
+			pgcl143_freed[dfi] = dfpfn;
+			pgcl143_free_ip[dfi] = _RET_IP_;
+		}
+	}
+#endif
+
 	if (memcg_kmem_online() && PageMemcgKmem(page))
 		__memcg_kmem_uncharge_page(page, order);
 
@@ -1833,6 +1865,18 @@ inline void post_alloc_hook(struct page *page, unsigned int order,
 	int i;
 
 	set_page_private(page, 0);
+
+#if PAGE_MMUSHIFT
+	/* #143 double-free detector (task #17): this pfn is now (re)allocated -- clear
+	 * its freed-stamp so its next free is not misread as a double-free. */
+	if (likely(!order)) {
+		unsigned long dfpfn = page_to_pfn(page);
+		unsigned int dfi = pgcl143_pending_idx(dfpfn);
+
+		if (pgcl143_freed[dfi] == dfpfn)
+			pgcl143_freed[dfi] = 0;
+	}
+#endif
 
 	arch_alloc_page(page, order);
 	debug_pagealloc_map_pages(page, 1 << order);
