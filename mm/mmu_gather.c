@@ -152,6 +152,37 @@ static void __tlb_batch_free_encoded_pages(struct mmu_gather_batch *batch)
 		this_cpu_write(pgcl143_in_gflush, 1);
 		free_pages_and_swap_cache(pages, nr);
 		this_cpu_write(pgcl143_in_gflush, 0);
+#if PAGE_MMUSHIFT
+		/*
+		 * #143 Option-B DISCHARGE-CLEAR (Tessera GatherLedger.dischargeFix,
+		 * stamp_false_positive).  free_pages_and_swap_cache() just dropped this
+		 * gather's deferred nr refs, so the gather no longer OWES these pfns.
+		 * Clear their owes-stamps whether or not the drop freed them: a SURVIVOR
+		 * (still held by another mm / swapcache / LRU) must not keep a stale
+		 * stamp, or a later LEGITIMATE non-gather free (LRU batch drain, shmem
+		 * eviction) would misread it as a reincarnation -- the false positive
+		 * that fired PGCL143-REINCARN ~1840x against ~0 real bad_page.  A GENUINE
+		 * reincarnation frees the pfn BEFORE this discharge, so its stamp is
+		 * still set when the racer reaches free_unref_folios and is still caught.
+		 */
+		{
+			unsigned int k;
+
+			for (k = 0; k < nr; k++) {
+				unsigned long pfn =
+					page_to_pfn(encoded_page_ptr(pages[k]));
+				unsigned int gi = pgcl143_pending_idx(pfn);
+
+				if (pgcl143_gather_owes[gi] == pfn)
+					pgcl143_gather_owes[gi] = 0;
+				/* an ENCODED_PAGE_BIT_NR_PAGES_NEXT entry is followed by an
+				 * encoded nr_pages count, not a page -- skip it. */
+				if (unlikely(encoded_page_flags(pages[k]) &
+					     ENCODED_PAGE_BIT_NR_PAGES_NEXT))
+					k++;
+			}
+		}
+#endif
 		pages += nr;
 		batch->nr -= nr;
 
