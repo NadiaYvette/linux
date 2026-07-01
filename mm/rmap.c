@@ -1730,6 +1730,31 @@ void folio_add_new_anon_rmap(struct folio *folio, struct vm_area_struct *vma,
 	__folio_set_anon(folio, vma, address, exclusive);
 
 	if (likely(!folio_test_large(folio))) {
+#if PAGE_MMUSHIFT
+		/*
+		 * Option B ANON-RESET CLOBBER CATCHER (the tmpfs hypothesis):
+		 * folio_add_new_anon_rmap RESETS _mapcount to 0.  For a genuinely
+		 * new folio _mapcount is -1, so this is a +1.  But if it is called
+		 * on a folio that is ALREADY mapped (_mapcount >= 0) -- e.g. a
+		 * shmem/tmpfs folio still file-mapped that do_swap_page brings in as
+		 * anon (folio "becomes anonymous") -- the reset CLOBBERS the
+		 * existing count to 0, undercounting a still-mapped cluster.  Same
+		 * shape as the split-reset bug, now on the swap-in/anon transition.
+		 */
+		int mc0 = atomic_read(&folio->_mapcount);
+
+		if (unlikely(mc0 >= 0)) {
+			static DEFINE_RATELIMIT_STATE(rs_clob, HZ, 12);
+
+			if (__ratelimit(&rs_clob)) {
+				pr_warn("PGCL143-ANONRESET mc_pre=%d swapbk=%d swapcache=%d comm=%s pfn=%#lx\n",
+					mc0, folio_test_swapbacked(folio),
+					folio_test_swapcache(folio),
+					current->comm, folio_pfn(folio));
+				dump_stack();
+			}
+		}
+#endif
 		/* increment count (starts at -1) */
 		atomic_set(&folio->_mapcount, 0);
 		if (exclusive)
