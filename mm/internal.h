@@ -37,6 +37,9 @@ struct folio_batch;
  */
 #define PGCL143_PENDING_BITS 18
 extern atomic_t pgcl143_pending[1 << PGCL143_PENDING_BITS];
+/* Option B quiet correlator: per-pfn last file-mapcount-zeroing caller. */
+extern unsigned long pgcl143_zero_ip[1 << PGCL143_PENDING_BITS];
+extern u8 pgcl143_zero_viafloor[1 << PGCL143_PENDING_BITS];
 static inline unsigned int pgcl143_pending_idx(unsigned long pfn)
 {
 	return (unsigned int)((pfn >> PAGE_MMUSHIFT) &

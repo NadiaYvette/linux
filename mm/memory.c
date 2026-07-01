@@ -1858,25 +1858,39 @@ zap_install_uffd_wp_if_needed(struct vm_area_struct *vma,
 static void pgcl143_file_overput_report(struct folio *folio, unsigned int nr,
 					int present_before)
 {
-	int rc;
+	int rc, mc;
+	bool undercount, overput;
 
 	if (folio_test_anon(folio) || folio_test_swapcache(folio) || !folio->mapping)
 		return;
+	mc = folio_mapcount(folio);
 	rc = folio_ref_count(folio);
-	if (rc > (int)nr)		/* drop leaves >=1 for the cache ref: fine */
+	/*
+	 * Two surfacings, both RARE (so a dump here does not flood):
+	 *  - UNDERCOUNT: this mm still has present sub-PTEs (present_before > 0)
+	 *    but folio_mapcount reads 0 -- the #143 undercount that defeats the
+	 *    folio_mapped() gate.  Print the QUIET correlator's recorded caller
+	 *    (pgcl143_zero_ip) that drove this pfn's file mapcount to 0.
+	 *  - OVER-PUT: the aggregate put would free while cached (rc <= nr).
+	 */
+	undercount = (present_before > 0 && mc == 0);
+	overput = (rc <= (int)nr);
+	if (!undercount && !overput)
 		return;
 	{
 		static DEFINE_RATELIMIT_STATE(rs_fop, HZ, 20);
 
 		if (__ratelimit(&rs_fop)) {
-			pr_warn("PGCL143-FILE-OVERPUT rc=%d nr=%u present_before=%d mapcount=%d idx=%#lx %s comm=%s\n",
-				rc, nr, present_before, folio_mapcount(folio),
-				folio->index,
-				present_before > 0 ? "STILL-MAPPED(R17-relevant)"
-						   : "unmapped(cache-ref-only)",
-				current->comm);
-			dump_page(&folio->page, "pgcl143 file cache-ref over-put");
-			dump_stack();
+			unsigned int zi = pgcl143_pending_idx(folio_pfn(folio));
+
+			pr_warn("PGCL143-FILE-OVERPUT rc=%d nr=%u present_before=%d mapcount=%d idx=%#lx %s comm=%s pfn=%#lx zeroer=%pS viafloor=%d\n",
+				rc, nr, present_before, mc, folio->index,
+				undercount ? "STILL-MAPPED(R17-relevant)"
+					   : "unmapped(cache-ref-only)",
+				current->comm, folio_pfn(folio),
+				(void *)pgcl143_zero_ip[zi],
+				pgcl143_zero_viafloor[zi]);
+			dump_page(&folio->page, "pgcl143 file undercount/over-put");
 		}
 	}
 }

@@ -1743,17 +1743,13 @@ void folio_add_new_anon_rmap(struct folio *folio, struct vm_area_struct *vma,
 		 */
 		int mc0 = atomic_read(&folio->_mapcount);
 
-		if (unlikely(mc0 >= 0)) {
-			static DEFINE_RATELIMIT_STATE(rs_clob, HZ, 12);
-
-			if (__ratelimit(&rs_clob)) {
-				pr_warn("PGCL143-ANONRESET mc_pre=%d swapbk=%d swapcache=%d comm=%s pfn=%#lx\n",
-					mc0, folio_test_swapbacked(folio),
-					folio_test_swapcache(folio),
-					current->comm, folio_pfn(folio));
-				dump_stack();
-			}
-		}
+		if (unlikely(mc0 >= 0))
+			/* QUIET (no dump_stack): ruled out at boot, keep a light
+			 * ratelimited line in case the app-login load provokes it. */
+			pr_warn_ratelimited("PGCL143-ANONRESET mc_pre=%d swapbk=%d swapcache=%d comm=%s pfn=%#lx\n",
+					    mc0, folio_test_swapbacked(folio),
+					    folio_test_swapcache(folio),
+					    current->comm, folio_pfn(folio));
 #endif
 		/* increment count (starts at -1) */
 		atomic_set(&folio->_mapcount, 0);
@@ -1946,6 +1942,15 @@ u8 pgcl143_lastsite[1 << PGCL143_PENDING_BITS];
 
 /* Option B spurious-remove catcher: set by pgcl143_floor_remove (internal.h). */
 DEFINE_PER_CPU(u8, pgcl143_via_floor);
+
+/*
+ * Option B QUIET CORRELATOR tables (per-pfn, indexed by pgcl143_pending_idx):
+ * pgcl143_zero_ip = the caller (_RET_IP_) that last drove this file folio's
+ * mapcount to <= 0; pgcl143_zero_viafloor = whether it came through the floor.
+ * Printed ONLY at the rare UNDERCOUNT surfacing in the zap (mm/memory.c).
+ */
+unsigned long pgcl143_zero_ip[1 << PGCL143_PENDING_BITS];
+u8 pgcl143_zero_viafloor[1 << PGCL143_PENDING_BITS];
 
 /*
  * PGCL #143 add-edge namer (Tessera SingleRoot): at a cluster install the rmap
@@ -2150,32 +2155,21 @@ static __always_inline void __folio_remove_rmap(struct folio *folio,
 				nr = (mc - 1 < 0);
 			}
 			/*
-			 * Option B SPURIOUS-REMOVE CATCHER: a FILE/SHMEM cluster
-			 * whose _mapcount is driven to 0/negative (mc pre-decrement
-			 * <= 0 => folio_mapcount was <= 1) by a remove that did NOT
-			 * come through the floor.  Every legit file/shmem unmap (zap /
-			 * reclaim / migrate) is floored (via_floor=1); an unfloored
-			 * path zeroing such a mapcount is the over-discharge that
-			 * undercounts a still-mapped cluster (the #143 root the fop
-			 * boot surfaced -- on a shmem_aops folio).  Trigger on !anon
-			 * (file+shmem) OR swapcache (the tmpfs "becoming anonymous"
-			 * transition through do_swap_page); report the flags so we can
-			 * see the shmem/anon state, and dump the stack to name it.
+			 * Option B QUIET CORRELATOR: record (per-pfn) the caller
+			 * that drives a FILE folio's _mapcount to 0 or below
+			 * (mc pre-decrement <= 0), and whether it came through the
+			 * floor.  NO dump_stack here (that floods+wedges under the
+			 * PTL on legit early-boot RELRO COW).  The rare UNDERCOUNT
+			 * surfacing at the zap prints this recorded caller to name
+			 * the over-discharge that undercounted a still-mapped cluster.
 			 */
-			if (mc <= 0 && !this_cpu_read(pgcl143_via_floor) &&
-			    (!folio_test_anon(folio) || folio_test_swapcache(folio))) {
-				static DEFINE_RATELIMIT_STATE(rs_spur, HZ, 12);
+			if (!folio_test_anon(folio) && mc <= 0) {
+				unsigned int zi =
+					pgcl143_pending_idx(folio_pfn(folio));
 
-				if (__ratelimit(&rs_spur)) {
-					pr_warn("PGCL143-SPURFILE mc_pre=%d idx=%#lx anon=%d swapbk=%d swapcache=%d mapping=%p comm=%s pfn=%#lx\n",
-						mc, folio->index,
-						folio_test_anon(folio),
-						folio_test_swapbacked(folio),
-						folio_test_swapcache(folio),
-						folio->mapping, current->comm,
-						folio_pfn(folio));
-					dump_stack();
-				}
+				pgcl143_zero_ip[zi] = _RET_IP_;
+				pgcl143_zero_viafloor[zi] =
+					(u8)this_cpu_read(pgcl143_via_floor);
 			}
 #else
 			nr = atomic_add_negative(-1, &folio->_mapcount);
