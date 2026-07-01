@@ -2832,7 +2832,22 @@ discard:
 			 */
 			unsigned int i;
 			for (i = 0; i < nr_pages; i++)
+#if PAGE_MMUSHIFT
+				/*
+				 * R17 phase-1 floor-at-present: never drive the
+				 * cluster _mapcount below the sub-PTEs still
+				 * present in this table.  Healthy reclaim (all of
+				 * the cluster's sub-PTEs cleared here) is
+				 * unaffected; a spurious remove on an already-low
+				 * counter is skipped, keeping folio_mapped() exact.
+				 */
+				if (!pgcl143_floor_remove(folio, subpage, vma,
+							  pvmw.pte, address,
+							  folio_pfn(folio)))
+					break;
+#else
 				folio_remove_rmap_pte(folio, subpage, vma);
+#endif
 		}
 		if (vma->vm_flags & VM_LOCKED)
 			mlock_drain_local();
@@ -3286,7 +3301,21 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 			 */
 			unsigned int i;
 			for (i = 0; i < nr_pages; i++)
+#if PAGE_MMUSHIFT
+				/*
+				 * R17 phase-1 floor-at-present.  The migration
+				 * remove/restore facet (vsub!=psub) is the
+				 * mapcount-only spurious -1 the model pins; the
+				 * floor makes it a no-op once the counter is at
+				 * present_here, so it cannot underflow.
+				 */
+				if (!pgcl143_floor_remove(folio, subpage, vma,
+							  pvmw.pte, address,
+							  folio_pfn(folio)))
+					break;
+#else
 				folio_remove_rmap_pte(folio, subpage, vma);
+#endif
 		}
 		if (vma->vm_flags & VM_LOCKED)
 			mlock_drain_local();

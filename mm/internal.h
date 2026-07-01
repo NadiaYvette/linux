@@ -651,6 +651,61 @@ static inline bool pgcl_rmap_fire_kpage_event(pte_t *ptep, unsigned long address
 	}
 	return true;
 }
+
+/**
+ * pgcl143_present_count - count present sub-PTEs of the cluster at @ptep/@addr
+ * that still map kernel PFN @kpfn, within this pte table.  This is the
+ * GROUND-TRUTH lower bound `present_here` for the cluster's _mapcount in this
+ * mm (R20): `_mapcount + 1 >= present_here` is the invariant a faithful
+ * counter satisfies; a violation is a real over-discharge.
+ */
+static inline int pgcl143_present_count(pte_t *ptep, unsigned long addr,
+					unsigned long kpfn)
+{
+	unsigned int sub = (unsigned int)((addr >> MMUPAGE_SHIFT) &
+					  (PAGE_MMUCOUNT - 1));
+	long idx = (long)((addr >> MMUPAGE_SHIFT) & (PTRS_PER_PTE - 1));
+	long base_idx = idx - (long)sub;
+	pte_t *base = ptep - sub;
+	int j, n = 0;
+
+	for (j = 0; j < PAGE_MMUCOUNT; j++) {
+		long t = base_idx + j;
+		pte_t pj;
+
+		if (t < 0 || t >= PTRS_PER_PTE)		/* straddler half only */
+			continue;
+		pj = ptep_get(base + j);
+		if (pte_present(pj) && pte_pfn(pj) == kpfn)
+			n++;
+	}
+	return n;
+}
+
+/**
+ * pgcl143_floor_remove - R17 phase-1 FLOOR-AT-PRESENT (Tessera FloorAtPresent).
+ * Remove one cluster _mapcount edge for @folio at @ptep/@addr, but ONLY while
+ * that keeps `folio_mapcount(folio) > present_here` -- i.e. never drive the
+ * per-cluster counter below the sub-PTEs still present in this table.  A
+ * spurious/over remove (the one that undercounts and defeats the
+ * folio_mapped() free-while-mapped gate) is skipped; skipping the
+ * folio_remove_rmap edge also skips its coupled NR_*_MAPPED / _nr_pages_mapped
+ * stat, so the reclaim stats stay exact (zero blast radius).  @kpfn is the
+ * cluster's (pte_pfn-aliased) kernel PFN; the caller must have cleared this
+ * run's PTEs already, so present_here is the REMAINING present count.
+ * Returns true if the edge fired.
+ */
+static inline bool pgcl143_floor_remove(struct folio *folio, struct page *page,
+					struct vm_area_struct *vma, pte_t *ptep,
+					unsigned long addr, unsigned long kpfn)
+{
+	int ph = pgcl143_present_count(ptep, addr, kpfn);
+
+	if (folio_mapcount(folio) <= ph)
+		return false;		/* would underflow below present_here */
+	folio_remove_rmap_pte(folio, page, vma);
+	return true;
+}
 #endif /* PAGE_MMUSHIFT */
 
 /**
