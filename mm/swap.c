@@ -1032,6 +1032,29 @@ void folios_put_refs(struct folio_batch *folios, unsigned int *refs)
 				folio_ref_inc(folio);
 				continue;
 			}
+			/*
+			 * PGCL #143 freed-while-on-LRU GATE (Tessera LruIsolation,
+			 * isolate-before-free).  The refcount reached 0, but the folio
+			 * is PG_active with PG_lru CLEAR: it is PENDING on a per-cpu
+			 * lru_add batch (folio_add_lru queued it; it has not drained
+			 * onto the real LRU yet).  The floor above can drive such a
+			 * folio to 0 PAST the batch's own reference; freeing it now (a)
+			 * reaches the buddy with PG_active set -- PAGE_FLAGS_CHECK_AT_FREE
+			 * bad_page -- and (b) leaves the batch a dangling pointer, so
+			 * when it drains it touches a freed/reused page and corrupts the
+			 * pcp free-list (list_del in __rmqueue_pcplist / list_add in
+			 * free_frozen_page_commit) -> allocator spins on pcp->lock ->
+			 * soft-lockup/RCU-stall -> the GUI freeze.  Re-hold and skip; the
+			 * lru_add drain sets PG_lru and frees it correctly (isolated)
+			 * later.  Leak-on-never beats corruption.
+			 */
+			if (unlikely(folio_test_active(folio) &&
+				     !folio_test_lru(folio))) {
+				VM_WARN_ONCE(1, "pgcl143: deferred free of lru_add-pending folio (pfn %lx active !lru nr_refs %u)",
+					     folio_pfn(folio), nr_refs);
+				folio_ref_inc(folio);
+				continue;
+			}
 		}
 #else
 		if (!folio_ref_sub_and_test(folio, nr_refs))
