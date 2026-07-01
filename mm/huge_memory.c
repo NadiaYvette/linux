@@ -3692,7 +3692,19 @@ static void __split_folio_to_order(struct folio *folio, int old_order,
 					folio_large_mapcount(folio));
 		}
 #endif
-		if (PAGE_MMUSHIFT > 0 && IS_ENABLED(CONFIG_PAGE_MAPCOUNT))
+		/*
+		 * #143 FIX: reset ONLY anon tails.  The reset erases the
+		 * folio_add_new_anon_rmap() bulk-init phantom (anon-only), and
+		 * remap_page() restores anon tails from their migration entries.
+		 * A FILE tail has no phantom and is never restored by remap_page(),
+		 * so resetting it CLOBBERS a real, still-mapped mapcount -> the
+		 * order-0 zap then underflows by N (the #143 undercount that drives
+		 * folio_mapcount()==0 while sub-PTEs still map the cluster, defeating
+		 * the folio_mapped free-while-mapped gate).  Preserve the FILE tail's
+		 * real mapcount.
+		 */
+		if (PAGE_MMUSHIFT > 0 && IS_ENABLED(CONFIG_PAGE_MAPCOUNT) &&
+		    folio_test_anon(folio))
 			atomic_set(&new_folio->_mapcount, -1);
 
 		/*
@@ -3806,7 +3818,14 @@ static void __split_folio_to_order(struct folio *folio, int old_order,
 				folio_pfn(folio), pre);
 	}
 #endif
-	if (PAGE_MMUSHIFT > 0 && !new_order && IS_ENABLED(CONFIG_PAGE_MAPCOUNT))
+	/*
+	 * #143 FIX: reset ONLY the anon head (see the tail site).  A FILE head
+	 * has no folio_add_new_anon_rmap phantom and is never restored by
+	 * remap_page(), so resetting it clobbers a real, still-mapped mapcount
+	 * -> the #143 undercount.  Preserve the FILE head's real mapcount.
+	 */
+	if (PAGE_MMUSHIFT > 0 && !new_order && IS_ENABLED(CONFIG_PAGE_MAPCOUNT) &&
+	    folio_test_anon(folio))
 		atomic_set(&folio->page._mapcount, -1);
 }
 
