@@ -695,6 +695,15 @@ static inline int pgcl143_present_count(pte_t *ptep, unsigned long addr,
  * run's PTEs already, so present_here is the REMAINING present count.
  * Returns true if the edge fired.
  */
+/*
+ * SPURIOUS-REMOVE CATCHER (Option B): a per-cpu flag marking that the current
+ * folio_remove_rmap_pte() came through the floor (a floored, present-checked,
+ * legit remove).  __folio_remove_rmap uses it to dump the stack of any FILE
+ * remove that drives mapcount <= 0 WITHOUT going through the floor -- i.e. the
+ * unfloored path that over-discharges a still-mapped file cluster (#143).
+ */
+DECLARE_PER_CPU(u8, pgcl143_via_floor);
+
 static inline bool pgcl143_floor_remove(struct folio *folio, struct page *page,
 					struct vm_area_struct *vma, pte_t *ptep,
 					unsigned long addr, unsigned long kpfn)
@@ -703,7 +712,9 @@ static inline bool pgcl143_floor_remove(struct folio *folio, struct page *page,
 
 	if (folio_mapcount(folio) <= ph)
 		return false;		/* would underflow below present_here */
+	this_cpu_write(pgcl143_via_floor, 1);
 	folio_remove_rmap_pte(folio, page, vma);
+	this_cpu_write(pgcl143_via_floor, 0);
 	return true;
 }
 

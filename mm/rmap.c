@@ -1919,6 +1919,9 @@ DEFINE_PER_CPU(int, pgcl143_in_deferred_flush);
 DEFINE_PER_CPU(int, pgcl143_rmsite);
 u8 pgcl143_lastsite[1 << PGCL143_PENDING_BITS];
 
+/* Option B spurious-remove catcher: set by pgcl143_floor_remove (internal.h). */
+DEFINE_PER_CPU(u8, pgcl143_via_floor);
+
 /*
  * PGCL #143 add-edge namer (Tessera SingleRoot): at a cluster install the rmap
  * count ADDED must equal the sub-PTEs PRESENT (added==present -- CallBalance for
@@ -2120,6 +2123,27 @@ static __always_inline void __folio_remove_rmap(struct folio *folio,
 				nr = 0;
 			} else {
 				nr = (mc - 1 < 0);
+			}
+			/*
+			 * Option B SPURIOUS-REMOVE CATCHER: a FILE (!anon) cluster
+			 * whose _mapcount is driven to 0/negative (mc pre-decrement
+			 * <= 0 => folio_mapcount was <= 1) by a remove that did NOT
+			 * come through the floor.  Every legit file unmap (zap /
+			 * reclaim / migrate) is floored (via_floor=1); an unfloored
+			 * path zeroing a file mapcount is the over-discharge that
+			 * undercounts a still-mapped cluster (the #143 root the fop
+			 * boot surfaced).  Dump its stack to name the caller.
+			 */
+			if (!folio_test_anon(folio) && mc <= 0 &&
+			    !this_cpu_read(pgcl143_via_floor)) {
+				static DEFINE_RATELIMIT_STATE(rs_spur, HZ, 12);
+
+				if (__ratelimit(&rs_spur)) {
+					pr_warn("PGCL143-SPURFILE mc_pre=%d idx=%#lx mapping=%p comm=%s pfn=%#lx\n",
+						mc, folio->index, folio->mapping,
+						current->comm, folio_pfn(folio));
+					dump_stack();
+				}
 			}
 #else
 			nr = atomic_add_negative(-1, &folio->_mapcount);
