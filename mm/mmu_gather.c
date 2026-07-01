@@ -149,7 +149,9 @@ static void __tlb_batch_free_encoded_pages(struct mmu_gather_batch *batch)
 			}
 		}
 
+		this_cpu_write(pgcl143_in_gflush, 1);
 		free_pages_and_swap_cache(pages, nr);
+		this_cpu_write(pgcl143_in_gflush, 0);
 		pages += nr;
 		batch->nr -= nr;
 
@@ -195,6 +197,19 @@ static bool __tlb_remove_folio_pages_size(struct mmu_gather *tlb,
 	 */
 	if (delay_rmap)
 		pgcl143_pending_inc(page_to_pfn(page));
+	/*
+	 * Option B incarnation stamp: this gather now owes a deferred free for
+	 * this pfn.  If the aggregate refcount nonetheless hits 0 (a NON-flush
+	 * free) or the page is reused before we flush, the deferred nr refs were
+	 * phantom -- the reincarnation UAF.  _RET_IP_ names the zap that deferred.
+	 */
+	{
+		unsigned long pfn = page_to_pfn(page);
+		unsigned int gi = pgcl143_pending_idx(pfn);
+
+		pgcl143_gather_owes[gi] = pfn;
+		pgcl143_gather_ip[gi] = _RET_IP_;
+	}
 #endif
 
 #ifdef CONFIG_MMU_GATHER_PAGE_SIZE

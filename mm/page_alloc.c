@@ -3021,6 +3021,34 @@ void free_unref_folios(struct folio_batch *folios)
 		unsigned long pfn = folio_pfn(folio);
 		unsigned int order = folio_order(folio);
 
+#if PAGE_MMUSHIFT
+		/*
+		 * Option B INCARNATION CATCH: this pfn is being freed.  If a
+		 * mmu_gather still OWES a deferred free for it (owes slot names
+		 * this pfn) and this is NOT that gather's own flush, then the
+		 * aggregate refcount reached 0 despite the gather's deferred nr
+		 * refs -- the phantom-ref over-drop that lets the page reincarnate
+		 * under the gather.  Name the freer (stack) + the gather (the zap
+		 * that deferred).  Quiet: fires only on the actual racer.
+		 */
+		{
+			unsigned int gi = pgcl143_pending_idx(pfn);
+
+			if (pgcl143_gather_owes[gi] == pfn) {
+				pgcl143_gather_owes[gi] = 0;
+				if (!this_cpu_read(pgcl143_in_gflush)) {
+					static DEFINE_RATELIMIT_STATE(rs_rc, HZ, 8);
+
+					if (__ratelimit(&rs_rc)) {
+						pr_warn("PGCL143-REINCARN pfn=%#lx freed while gather owes it; gather-deferred-by=%pS; freer:\n",
+							pfn,
+							(void *)pgcl143_gather_ip[gi]);
+						dump_stack();
+					}
+				}
+			}
+		}
+#endif
 		if (!__free_pages_prepare(&folio->page, order, FPI_NONE))
 			continue;
 		/*

@@ -1858,44 +1858,18 @@ zap_install_uffd_wp_if_needed(struct vm_area_struct *vma,
 static void pgcl143_file_overput_report(struct folio *folio, unsigned int nr,
 					int present_before)
 {
-	int rc, mc;
-	bool undercount, overput;
-
-	if (folio_test_anon(folio) || folio_test_swapcache(folio) || !folio->mapping)
-		return;
-	mc = folio_mapcount(folio);
-	rc = folio_ref_count(folio);
 	/*
-	 * Two surfacings, both RARE (so a dump here does not flood):
-	 *  - UNDERCOUNT: this mm still has present sub-PTEs (present_before > 0)
-	 *    but folio_mapcount reads 0 -- the #143 undercount that defeats the
-	 *    folio_mapped() gate.  Print the QUIET correlator's recorded caller
-	 *    (pgcl143_zero_ip) that drove this pfn's file mapcount to 0.
-	 *  - OVER-PUT: the aggregate put would free while cached (rc <= nr).
+	 * DISABLED for the REINCARN boot.  The STILL-MAPPED "undercount" this
+	 * used to report was a DETECTOR ARTIFACT: present_before is measured at
+	 * zap entry BEFORE the clear, so every normal last-unmap (clear the
+	 * cluster, floor removes mapcount 1->0) tripped present_before>0 &&
+	 * mapcount==0.  The real bug is the reincarnation UAF, caught by
+	 * PGCL143-REINCARN in page_alloc.c.  No-op stub (kept to avoid churning
+	 * the two call sites).
 	 */
-	undercount = (present_before > 0 && mc == 0);
-	overput = (rc <= (int)nr);
-	if (!undercount && !overput)
-		return;
-	{
-		static DEFINE_RATELIMIT_STATE(rs_fop, HZ, 20);
-
-		if (__ratelimit(&rs_fop)) {
-			unsigned long pfn = folio_pfn(folio);
-			unsigned int zi = pgcl143_pending_idx(pfn);
-			bool zvalid = pgcl143_zero_pfn[zi] == pfn;
-
-			pr_warn("PGCL143-FILE-OVERPUT rc=%d nr=%u present_before=%d mapcount=%d idx=%#lx %s comm=%s pfn=%#lx zeroer=%s%pS viafloor=%d\n",
-				rc, nr, present_before, mc, folio->index,
-				undercount ? "STILL-MAPPED(R17-relevant)"
-					   : "unmapped(cache-ref-only)",
-				current->comm, pfn,
-				zvalid ? "" : "(stale/collision)",
-				zvalid ? (void *)pgcl143_zero_ip[zi] : NULL,
-				zvalid ? pgcl143_zero_viafloor[zi] : -1);
-			dump_page(&folio->page, "pgcl143 file undercount/over-put");
-		}
-	}
+	(void)folio;
+	(void)nr;
+	(void)present_before;
 }
 #endif
 

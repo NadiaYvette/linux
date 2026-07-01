@@ -43,6 +43,15 @@ extern atomic_t pgcl143_pending[1 << PGCL143_PENDING_BITS];
 extern unsigned long pgcl143_zero_ip[1 << PGCL143_PENDING_BITS];
 extern unsigned long pgcl143_zero_pfn[1 << PGCL143_PENDING_BITS];
 extern u8 pgcl143_zero_viafloor[1 << PGCL143_PENDING_BITS];
+
+/* Option B INCARNATION STAMP: per-pfn, the pfn a mmu_gather owes a deferred
+ * free for + the recording (zap) IP.  A NON-flush free of a page whose slot
+ * still names it == the phantom-ref over-drop that lets the page reincarnate
+ * under the gather (the #143 UAF).  in_gflush marks the gather's own flush so
+ * its legitimate free does not self-trip. */
+extern unsigned long pgcl143_gather_owes[1 << PGCL143_PENDING_BITS];
+extern unsigned long pgcl143_gather_ip[1 << PGCL143_PENDING_BITS];
+DECLARE_PER_CPU(u8, pgcl143_in_gflush);
 static inline unsigned int pgcl143_pending_idx(unsigned long pfn)
 {
 	return (unsigned int)((pfn >> PAGE_MMUSHIFT) &

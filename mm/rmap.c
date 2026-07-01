@@ -1953,6 +1953,11 @@ unsigned long pgcl143_zero_ip[1 << PGCL143_PENDING_BITS];
 unsigned long pgcl143_zero_pfn[1 << PGCL143_PENDING_BITS];
 u8 pgcl143_zero_viafloor[1 << PGCL143_PENDING_BITS];
 
+/* Option B incarnation stamp (see internal.h). */
+unsigned long pgcl143_gather_owes[1 << PGCL143_PENDING_BITS];
+unsigned long pgcl143_gather_ip[1 << PGCL143_PENDING_BITS];
+DEFINE_PER_CPU(u8, pgcl143_in_gflush);
+
 /*
  * PGCL #143 add-edge namer (Tessera SingleRoot): at a cluster install the rmap
  * count ADDED must equal the sub-PTEs PRESENT (added==present -- CallBalance for
