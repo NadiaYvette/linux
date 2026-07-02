@@ -1026,6 +1026,27 @@ void folios_put_refs(struct folio_batch *folios, unsigned int *refs)
 				new_refs = old > (int)nr_refs ? old - (int)nr_refs : 0;
 			} while (!atomic_try_cmpxchg(&folio->_refcount, &old, new_refs));
 			/*
+			 * #143 STALE-PUT guard (Tessera StalePut.stale_put_no_free /
+			 * property2/coq/stale_put.v; the reclaim/lru-drain audit, task #20).
+			 * try_cmpxchg leaves `old` = the pre-subtract refcount.  old == 0
+			 * means the cluster was ALREADY at 0 -- already free on the buddy:
+			 * this is a stale / duplicate / over-counted put on a pfn that has
+			 * been freed.  Stock folio_ref_sub_and_test SUBTRACTS to -1 and
+			 * returns false here => it never frees on such a put.  The floor
+			 * above instead clamped new_refs to 0 and would fall through every
+			 * gate below to free the already-free cluster a SECOND time ->
+			 * PGCL143-DOUBLEFREE (the 26x/8x the detector reports; freelist
+			 * corruption / shared-page reuse -> Electron int3 & segfault).  The
+			 * floor MANUFACTURES the double-free the band-aid was meant to
+			 * prevent.  Match stock: never re-free a cluster already at 0.  A
+			 * legit last put has old == nr_refs > 0; a genuine cross-mm over-put
+			 * has old > 0 (the floor's intended free-once-at-0 still fires) --
+			 * ONLY old == 0 is the pure double-free, so this is a no-op on every
+			 * correct put (zero blast radius, leak-not-double-free).
+			 */
+			if (unlikely(old == 0))
+				continue;
+			/*
 			 * #143 DOUBLE-DROP detector (task #17, the reinc #40 residual): a
 			 * file/shmem folio the mmu_gather still OWES a deferred free for
 			 * (pgcl143_gather_owes stamp set) is being ref-dropped HERE by a

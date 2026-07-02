@@ -3720,6 +3720,31 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 		(si->flags & SWP_AREA_DISCARD) ? "s" : "",
 		(si->flags & SWP_PAGE_DISCARD) ? "c" : "");
 
+#if PAGE_MMUSHIFT
+	/*
+	 * task #21: pin the zram 16x.  si->pages (drives "Adding %uk") == maxpages-1
+	 * == read_swap_header's count.  Print it next to the AUTHORITATIVE device
+	 * size bdev_nr_bytes(): a correct block device has si->pages ~= (bytes >>
+	 * MMUPAGE_SHIFT); a 16x shows si->pages == 16 * that.  If bdev_nr_bytes is
+	 * itself 16x the intended capacity the fault is the zram disksize (setup),
+	 * not the swap slot accounting -- this line disambiguates the two.
+	 */
+	if (si->bdev)
+		pr_info("PGCL143-SWAPADD %s BLKDEV si->max=%u si->pages=%u nr_extents=%d span=%lluk bdev_bytes=%llu bdev_slots_mmupage=%llu bdev_slots_page=%llu ratio_pages_per_bdevslot=%llu\n",
+			name->name, si->max, si->pages, nr_extents,
+			K((unsigned long long)span),
+			(unsigned long long)bdev_nr_bytes(si->bdev),
+			(unsigned long long)(bdev_nr_bytes(si->bdev) >> MMUPAGE_SHIFT),
+			(unsigned long long)(bdev_nr_bytes(si->bdev) >> PAGE_SHIFT),
+			bdev_nr_bytes(si->bdev) >> MMUPAGE_SHIFT ?
+			  (unsigned long long)si->pages /
+			  (unsigned long long)(bdev_nr_bytes(si->bdev) >> MMUPAGE_SHIFT) : 0ULL);
+	else
+		pr_info("PGCL143-SWAPADD %s FILE si->max=%u si->pages=%u nr_extents=%d span=%lluk\n",
+			name->name, si->max, si->pages, nr_extents,
+			K((unsigned long long)span));
+#endif
+
 	mutex_unlock(&swapon_mutex);
 	atomic_inc(&proc_poll_event);
 	wake_up_interruptible(&proc_poll_wait);
