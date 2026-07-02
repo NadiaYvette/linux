@@ -1367,6 +1367,14 @@ __always_inline bool __free_pages_prepare(struct page *page,
 					pr_warn("PGCL143-DOUBLEFREE pfn=%#lx freed AGAIN without re-alloc; first-freed-by=%pS; 2nd freer:\n",
 						dfpfn,
 						(void *)pgcl143_df_firstip[di]);
+					/*
+					 * task #20: page_owner still holds the ALLOC owner + the
+					 * 1st-free stack here -- this detector runs early in
+					 * free_pages_prepare, before __reset_page_owner records THIS
+					 * (2nd) free -- so dump_page names the premature-free PATH
+					 * (not just its IP).  dump_stack() below = the 2nd freer.
+					 */
+					dump_page(page, "pgcl143 double-free (page_owner: alloc owner + 1st-free path)");
 					dump_stack();
 				}
 				/*

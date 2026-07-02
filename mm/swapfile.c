@@ -3403,6 +3403,21 @@ static unsigned long read_swap_header(struct swap_info_struct *si,
 	if (swap_header->info.nr_badpages > MAX_SWAP_BADPAGES)
 		return 0;
 
+#if PAGE_MMUSHIFT
+	/*
+	 * task #21: the zram 16x (PAGE_MMUCOUNT) swap over-count.  The disk swap
+	 * FILES report correctly; only the block device /dev/zram0 enabled 16x its
+	 * capacity.  Dump the slot-count drivers so the next boot shows where the
+	 * factor enters: i_size = device bytes; last_page = mkswap's slot count;
+	 * maxpages/swapfilepages = the final count.  A correct device satisfies
+	 * maxpages ~= (i_size >> MMUPAGE_SHIFT); a 16x device shows maxpages ==
+	 * 16 * (i_size >> MMUPAGE_SHIFT) == (i_size >> PAGE_SHIFT) << (2*PAGE_MMUSHIFT).
+	 */
+	pr_info("PGCL143-SWAPHDR %s i_size=%llu last_page=%lu maxpages=%lu swapfilepages=%lu MMUPAGE_SHIFT=%d PAGE_SHIFT=%d\n",
+		S_ISBLK(inode->i_mode) ? "BLKDEV" : "FILE",
+		(unsigned long long)i_size_read(inode), last_page, maxpages,
+		swapfilepages, MMUPAGE_SHIFT, PAGE_SHIFT);
+#endif
 	return maxpages;
 }
 

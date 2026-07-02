@@ -67,7 +67,7 @@ DECLARE_PER_CPU(u8, pgcl143_in_gflush);
  * free (0 == currently allocated); set at free_pages_prepare, cleared at
  * post_alloc_hook.  4MB BSS, diagnostic-only.
  */
-#define PGCL143_DF_BITS 19
+#define PGCL143_DF_BITS 20	/* 2^20 clusters = 64GB (the laptop's RAM); 19 missed half */
 extern unsigned long pgcl143_df_firstip[1UL << PGCL143_DF_BITS];
 /*
  * #143 task #20: DOUBLE-ALLOC companion.  pgcl143_df_seen[pfn] = the frame has been
