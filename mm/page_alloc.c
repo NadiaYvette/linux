@@ -1380,6 +1380,7 @@ __always_inline bool __free_pages_prepare(struct page *page,
 				return false;
 			}
 			pgcl143_df_firstip[di] = _RET_IP_;
+			pgcl143_df_seen[di] = 1;	/* task #20: frame has now been freed */
 		}
 	}
 #endif
@@ -1884,8 +1885,31 @@ inline void post_alloc_hook(struct page *page, unsigned int order,
 	if (likely(!order)) {
 		long di = pgcl143_df_idx(page_to_pfn(page));
 
-		if (di >= 0)
+		if (di >= 0) {
+			/*
+			 * #143 DOUBLE-ALLOC detector (task #20): this frame is being handed
+			 * out.  It SHOULD have been freed since its last alloc (df_firstip
+			 * != 0).  If df_firstip == 0 AND it was ever freed (df_seen) the
+			 * allocator is handing out a frame that is STILL IN USE by a prior
+			 * owner -- the cross-process double-alloc (systemd's folio_prealloc
+			 * frame handed to another mm) that feeds the non-gather double-free.
+			 * page_owner names the prior owner (alloc+free); dump_stack = the
+			 * allocator taking it a second time.  Ratelimited; enforce nothing
+			 * (diagnostic only -- the double-free enforce downstream stays the
+			 * safety net).
+			 */
+			if (unlikely(pgcl143_df_firstip[di] == 0 && pgcl143_df_seen[di])) {
+				static DEFINE_RATELIMIT_STATE(rs_da, HZ, 8);
+
+				if (__ratelimit(&rs_da)) {
+					pr_warn("PGCL143-DOUBLEALLOC pfn=%#lx handed out but NOT freed since its last alloc (in-use frame, prior owner via page_owner); allocator:\n",
+						page_to_pfn(page));
+					dump_page(page, "pgcl143 double-alloc: in-use frame re-handed-out");
+					dump_stack();
+				}
+			}
 			pgcl143_df_firstip[di] = 0;
+		}
 	}
 #endif
 

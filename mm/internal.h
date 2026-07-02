@@ -69,6 +69,13 @@ DECLARE_PER_CPU(u8, pgcl143_in_gflush);
  */
 #define PGCL143_DF_BITS 19
 extern unsigned long pgcl143_df_firstip[1UL << PGCL143_DF_BITS];
+/*
+ * #143 task #20: DOUBLE-ALLOC companion.  pgcl143_df_seen[pfn] = the frame has been
+ * freed at least once (set at free_pages_prepare), so a later post_alloc_hook that
+ * finds df_firstip == 0 (NOT freed since its last alloc) is a genuine double-alloc --
+ * the allocator handing out an in-use frame -- not a never-freed boot frame.
+ */
+extern u8 pgcl143_df_seen[1UL << PGCL143_DF_BITS];
 static inline long pgcl143_df_idx(unsigned long pfn)
 {
 	return (pfn < (1UL << PGCL143_DF_BITS)) ? (long)pfn : -1L;

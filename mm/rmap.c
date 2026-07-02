@@ -1960,6 +1960,8 @@ unsigned long pgcl143_freed[1 << PGCL143_PENDING_BITS];
 unsigned long pgcl143_free_ip[1 << PGCL143_PENDING_BITS];
 /* #143 task #19: full-coverage (direct cluster-pfn index) double-free detector. */
 unsigned long pgcl143_df_firstip[1UL << PGCL143_DF_BITS];
+/* #143 task #20: "freed at least once" bit, to filter never-freed boot frames. */
+u8 pgcl143_df_seen[1UL << PGCL143_DF_BITS];
 DEFINE_PER_CPU(u8, pgcl143_in_gflush);
 
 /*
