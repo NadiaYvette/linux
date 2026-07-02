@@ -3088,17 +3088,38 @@ void free_unref_folios(struct folio_batch *folios)
 			unsigned int gi = pgcl143_pending_idx(pfn);
 
 			if (pgcl143_gather_owes[gi] == pfn) {
-				pgcl143_gather_owes[gi] = 0;
 				if (!this_cpu_read(pgcl143_in_gflush)) {
+					/*
+					 * #143 REINCARN-GATE (enforcement at the common
+					 * batch-free chokepoint).  A NON-gather path -- most
+					 * often reclaim's vmscan free_unref_folios() which
+					 * bypasses the folios_put_refs gate, but also an
+					 * lru_add drain or a cross-mm aggregate over-put -- is
+					 * freeing a page the mmu_gather still OWES a deferred
+					 * put for.  The gather's deferred nr refs are phantom
+					 * (aggregate refcount reached 0 anyway), so freeing now
+					 * reincarnates the page and the gather's later put
+					 * double-frees it (list_add corruption in
+					 * free_frozen_page_commit -> pcp-lock wedge; the -dedup
+					 * laptop Oops).  RE-HOLD and skip this free, keeping the
+					 * owe SET; the owing gather's own discharge (in_gflush,
+					 * handled below -- it clears the owe first in
+					 * mmu_gather.c) then frees it exactly once.
+					 * Leak-on-never beats corruption.
+					 */
 					static DEFINE_RATELIMIT_STATE(rs_rc, HZ, 8);
 
 					if (__ratelimit(&rs_rc)) {
-						pr_warn("PGCL143-REINCARN pfn=%#lx freed while gather owes it; gather-deferred-by=%pS; freer:\n",
+						pr_warn("PGCL143-REINCARN-GATE re-held pfn=%#lx freed while gather owes it; gather-deferred-by=%pS; freer:\n",
 							pfn,
 							(void *)pgcl143_gather_ip[gi]);
 						dump_stack();
 					}
+					folio_ref_inc(folio);
+					continue;
 				}
+				/* owing gather's own discharge: let it free; clear owe. */
+				pgcl143_gather_owes[gi] = 0;
 			}
 		}
 #endif

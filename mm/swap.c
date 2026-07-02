@@ -1090,6 +1090,44 @@ void folios_put_refs(struct folio_batch *folios, unsigned int *refs)
 			if (new_refs)
 				continue;
 			/*
+			 * PGCL #143 GATHER-OWES gate (the QEMU-pinned reincarnation
+			 * root; enforcement twin of the PGCL143-REINCARN detector in
+			 * page_alloc.c and the DOUBLEDROP detector above).  The refcount
+			 * reached 0, but the mmu_gather still OWES a deferred put on this
+			 * cluster (pgcl143_gather_owes stamp set) and this drop is NOT
+			 * that gather's own discharge (!in_gflush) -- a concurrent
+			 * non-gather freer (the lru_add_drain from fadvise/reclaim, or a
+			 * cross-mm aggregate over-put) is racing the aggregate to 0 while
+			 * the owing gather has yet to run its deferred put.  Freeing now
+			 * lets the gather's later put double-free the reincarnated page
+			 * (list_add corruption in free_frozen_page_commit -> pcp-lock
+			 * wedge; the -dedup laptop boot's fatal Oops).  folio_mapped()
+			 * below MISSES this -- the racer already dropped the aggregate
+			 * mapcount to 0 -- which is why the gates that follow don't catch
+			 * it.  Re-hold; the owing gather's own discharge (in_gflush, so
+			 * NOT gated here; owe cleared right after in mmu_gather.c) frees
+			 * it once, correctly.  Leak-on-never beats corruption; keyed on
+			 * the gather stamp (cleared at discharge), so it re-holds only
+			 * across the flush window, not permanently like a mapcount gate.
+			 */
+			{
+				unsigned long gopfn = folio_pfn(folio);
+				unsigned int goi = pgcl143_pending_idx(gopfn);
+
+				if (unlikely(pgcl143_gather_owes[goi] == gopfn &&
+					     !this_cpu_read(pgcl143_in_gflush))) {
+					static DEFINE_RATELIMIT_STATE(rs_go, HZ, 4);
+
+					if (__ratelimit(&rs_go))
+						pr_warn("PGCL143-GATHEROWES-GATE: re-held pfn=%#lx freed to 0 by non-gather path while gather owes it (deferred-by=%pS nr_refs=%u)\n",
+							gopfn,
+							(void *)pgcl143_gather_ip[goi],
+							nr_refs);
+					folio_ref_inc(folio);
+					continue;
+				}
+			}
+			/*
 			 * PGCL #143 deferred-put gate (PROVEN: Tessera
 			 * property2/coq/rmap_defer.v no_free_while_referenced).  The
 			 * refcount reached 0, but folio_mapped() -- the kernel's own

@@ -400,13 +400,47 @@ void free_pages_and_swap_cache(struct encoded_page **pages, int nr)
 	folio_batch_init(&folios);
 	for (int i = 0; i < nr; i++) {
 		struct folio *folio = page_folio(encoded_page_ptr(pages[i]));
+		unsigned int this_refs = 1;
 
 		free_swap_cache(folio);
-		refs[folios.nr] = 1;
 		if (unlikely(encoded_page_flags(pages[i]) &
 			     ENCODED_PAGE_BIT_NR_PAGES_NEXT))
-			refs[folios.nr] = encoded_nr_pages(pages[++i]);
+			this_refs = encoded_nr_pages(pages[++i]);
 
+#if PAGE_MMUSHIFT
+		/*
+		 * #143: a gapped pgcl cluster is zapped as several contiguous
+		 * runs, each emitting its OWN encoded entry for the SAME cluster
+		 * folio (one struct page per cluster).  Putting the folio once
+		 * per entry double-frees it -- the 2nd folios_put_refs() below
+		 * operates on an already-freed page, re-adding it to the pcp
+		 * list -> freelist corruption (list_del/list_add report) ->
+		 * a CPU stuck in that report under the pcp lock -> every
+		 * vmstat_update worker spins in decay_pcp_high -> soft lockup
+		 * (the GUI-wedge blocker).  Coalesce: fold this run's refs into
+		 * the folio's existing batch slot so it is put EXACTLY ONCE with
+		 * the summed count -- freed once when ref-balanced; at worst a
+		 * benign leak if under-referenced, never a double-free.  The runs
+		 * of one gapped cluster are adjacent in the gather so they share
+		 * a batch; a rare batch-boundary straddle is still backstopped by
+		 * the __free_pages_prepare double-free guard.
+		 */
+		{
+			unsigned int j;
+			bool merged = false;
+
+			for (j = 0; j < folios.nr; j++) {
+				if (folios.folios[j] == folio) {
+					refs[j] += this_refs;
+					merged = true;
+					break;
+				}
+			}
+			if (merged)
+				continue;
+		}
+#endif
+		refs[folios.nr] = this_refs;
 		if (folio_batch_add(&folios, folio) == 0)
 			folios_put_refs(&folios, refs);
 	}
