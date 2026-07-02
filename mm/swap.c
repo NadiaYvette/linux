@@ -1049,9 +1049,23 @@ void folios_put_refs(struct folio_batch *folios, unsigned int *refs)
 					static DEFINE_RATELIMIT_STATE(rs_dd, HZ, 4);
 
 					if (__ratelimit(&rs_dd)) {
-						pr_warn("PGCL143-DOUBLEDROP: file/shmem folio pfn=%#lx ref-dropped to %d (floor %ld) by non-gather path while gather owes it (deferred-by=%pS); eager-dropper:\n",
-							ddpfn, new_refs,
+						/*
+						 * Route-2 COMPOSITION probe: old = pre-drop
+						 * refcount, nr_refs = this racer's drop, mc =
+						 * mapcount (in-flight mapping refs the gather still
+						 * owes show as refcount without mapcount once the
+						 * zap's floor removed the rmap edge).  Reconstruct:
+						 *   old ?= cacheFloor + owedDeferred + racerShare.
+						 * lru/swpc/order localise WHICH ref the racer drops
+						 * (a real lru_add batch ref vs a borrowed mapping ref).
+						 */
+						pr_warn("PGCL143-DOUBLEDROP: file/shmem folio pfn=%#lx old=%d nr_refs=%u -> %d (floor %ld) mc=%d lru=%d swpc=%d order=%u by non-gather path while gather owes it (deferred-by=%pS); eager-dropper:\n",
+							ddpfn, old, nr_refs, new_refs,
 							folio_nr_pages(folio),
+							folio_mapcount(folio),
+							folio_test_lru(folio),
+							folio_test_swapcache(folio),
+							folio_order(folio),
 							(void *)pgcl143_gather_ip[ddi]);
 						dump_stack();
 					}

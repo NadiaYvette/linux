@@ -55,6 +55,24 @@ extern unsigned long pgcl143_gather_ip[1 << PGCL143_PENDING_BITS];
 extern unsigned long pgcl143_freed[1 << PGCL143_PENDING_BITS];
 extern unsigned long pgcl143_free_ip[1 << PGCL143_PENDING_BITS];
 DECLARE_PER_CPU(u8, pgcl143_in_gflush);
+
+/*
+ * #143 FULL-COVERAGE double-free detector (task #19, the §14 residual).  The
+ * legacy detector above hashes `(pfn >> PAGE_MMUSHIFT) & MASK` -- a 16:1 alias
+ * (16 clusters per slot) that only SAMPLES double-frees (it named vfree/load_module
+ * 2x but missed the census).  This one is DIRECT-indexed by cluster pfn: one slot
+ * per 64KB frame, zero aliasing, so it names EVERY double-free's 1st + 2nd freer.
+ * 2^19 slots = 32GB coverage (laptop is 16GB = 2^18); a pfn above range is skipped
+ * (idx < 0), never misattributed.  pgcl143_df_firstip[pfn] = _RET_IP_ of the 1st
+ * free (0 == currently allocated); set at free_pages_prepare, cleared at
+ * post_alloc_hook.  4MB BSS, diagnostic-only.
+ */
+#define PGCL143_DF_BITS 19
+extern unsigned long pgcl143_df_firstip[1UL << PGCL143_DF_BITS];
+static inline long pgcl143_df_idx(unsigned long pfn)
+{
+	return (pfn < (1UL << PGCL143_DF_BITS)) ? (long)pfn : -1L;
+}
 static inline unsigned int pgcl143_pending_idx(unsigned long pfn)
 {
 	return (unsigned int)((pfn >> PAGE_MMUSHIFT) &

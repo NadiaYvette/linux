@@ -1939,6 +1939,16 @@ static __always_inline void zap_present_folio_ptes(struct mmu_gather *tlb,
 #if PAGE_MMUSHIFT
 	/* #143 FILE cache-ref over-put detector (Tessera FileCacheRef). */
 	pgcl143_file_overput_report(folio, nr, pgcl_ph_before);
+	/*
+	 * Route-2 ZAP-TIME composition probe: fires just BEFORE this zap defers
+	 * @nr mapping-ref puts, when the cached file folio already has rc <= nr
+	 * (so the deferred drop alone would reach the cache floor -- the map-side
+	 * under-count facet).  Paired with the DOUBLEDROP racer-time probe in
+	 * swap.c, this brackets which ref goes missing: rc<=nr HERE => under-add
+	 * on the map side; rc>nr here but DOUBLEDROP later => a genuine racer
+	 * double-drop in the deferred window.
+	 */
+	pgcl143_check_file_overput(folio, nr);
 #endif
 	if (unlikely(__tlb_remove_folio_pages(tlb, page, nr, delay_rmap))) {
 		*force_flush = true;

@@ -1343,41 +1343,43 @@ __always_inline bool __free_pages_prepare(struct page *page,
 
 #if PAGE_MMUSHIFT
 	/*
-	 * #143 GENERAL DOUBLE-FREE detector (task #17, the reinc #40/#41 residual):
-	 * stamp each pfn freed here (the common chokepoint for ALL free paths); the
-	 * stamp is cleared at post_alloc_hook.  A 2nd free before re-alloc is a
-	 * DOUBLE-FREE -> the page lands on the pcp free-list twice (list_del/add
-	 * corruption at free_frozen_page_commit / __rmqueue_pcplist) -> shared-lib
-	 * page reuse -> Electron int3 / segfault.  bad_page stays 0 (flags/mapping
-	 * clear on the 2nd free), so ONLY this names it.  dump_stack = the 2nd freer;
-	 * pgcl143_free_ip = the 1st free.  Unlike PGCL143-DOUBLEDROP this makes NO
-	 * mechanism assumption (not keyed on gather_owes).  order-0 only (pgcl
-	 * clusters); pfn-verified hash -> collisions only MISS, never false-positive.
+	 * #143 GENERAL DOUBLE-FREE detector (task #19, the §14 residual): stamp each
+	 * pfn freed here (the common chokepoint for ALL free paths); the stamp is
+	 * cleared at post_alloc_hook.  A 2nd free before re-alloc is a DOUBLE-FREE ->
+	 * the page lands on the pcp free-list twice (list_del/add corruption at
+	 * free_frozen_page_commit / __rmqueue_pcplist) -> shared-lib page reuse ->
+	 * Electron int3 / segfault.  bad_page stays 0 (flags/mapping clear on the 2nd
+	 * free), so ONLY this names it.  dump_stack = the 2nd freer;
+	 * pgcl143_df_firstip[pfn] = the 1st free.  Unlike PGCL143-DOUBLEDROP this makes
+	 * NO mechanism assumption (not keyed on gather_owes).  order-0 only (pgcl
+	 * clusters); DIRECT cluster-pfn index (not the old 16:1 hash) -> FULL coverage,
+	 * every double-freed frame named, zero alias miss and zero false-positive.
 	 */
 	if (likely(!order)) {
 		unsigned long dfpfn = page_to_pfn(page);
-		unsigned int dfi = pgcl143_pending_idx(dfpfn);
+		long di = pgcl143_df_idx(dfpfn);	/* DIRECT cluster-pfn index (task #19) */
 
-		if (unlikely(pgcl143_freed[dfi] == dfpfn)) {
-			static DEFINE_RATELIMIT_STATE(rs_df, HZ, 4);
+		if (di >= 0) {
+			if (unlikely(pgcl143_df_firstip[di])) {
+				static DEFINE_RATELIMIT_STATE(rs_df, HZ, 8);
 
-			if (__ratelimit(&rs_df)) {
-				pr_warn("PGCL143-DOUBLEFREE pfn=%#lx freed AGAIN without re-alloc; first-freed-by=%pS; 2nd freer:\n",
-					dfpfn, (void *)pgcl143_free_ip[dfi]);
-				dump_stack();
+				if (__ratelimit(&rs_df)) {
+					pr_warn("PGCL143-DOUBLEFREE pfn=%#lx freed AGAIN without re-alloc; first-freed-by=%pS; 2nd freer:\n",
+						dfpfn,
+						(void *)pgcl143_df_firstip[di]);
+					dump_stack();
+				}
+				/*
+				 * ENFORCE: the pfn is already on the free list from its 1st
+				 * free.  Skip this 2nd free so it is not added to the pcp list
+				 * twice -- return false (the callers' "bad page, don't free"
+				 * path).  The page stays on the list exactly once: leak-free,
+				 * corruption-free, mechanism-agnostic.  Direct indexing means
+				 * NO alias miss: every double-freed 64KB frame is named.
+				 */
+				return false;
 			}
-			/*
-			 * ENFORCE: the pfn is already on the free list from its 1st free
-			 * (root #42: the same cluster folio in >1 mmu_gather encoded entry,
-			 * gapped-cluster madvise zap).  Skip this 2nd free so it is not
-			 * added to the pcp list twice -- return false, the callers'
-			 * "bad page, don't free" path.  The page stays on the list exactly
-			 * once: leak-free, corruption-free, mechanism-agnostic.
-			 */
-			return false;
-		} else {
-			pgcl143_freed[dfi] = dfpfn;
-			pgcl143_free_ip[dfi] = _RET_IP_;
+			pgcl143_df_firstip[di] = _RET_IP_;
 		}
 	}
 #endif
@@ -1876,14 +1878,14 @@ inline void post_alloc_hook(struct page *page, unsigned int order,
 	set_page_private(page, 0);
 
 #if PAGE_MMUSHIFT
-	/* #143 double-free detector (task #17): this pfn is now (re)allocated -- clear
-	 * its freed-stamp so its next free is not misread as a double-free. */
+	/* #143 double-free detector (task #19): this pfn is now (re)allocated -- clear
+	 * its freed-stamp (direct cluster-pfn index) so its next free is not misread
+	 * as a double-free. */
 	if (likely(!order)) {
-		unsigned long dfpfn = page_to_pfn(page);
-		unsigned int dfi = pgcl143_pending_idx(dfpfn);
+		long di = pgcl143_df_idx(page_to_pfn(page));
 
-		if (pgcl143_freed[dfi] == dfpfn)
-			pgcl143_freed[dfi] = 0;
+		if (di >= 0)
+			pgcl143_df_firstip[di] = 0;
 	}
 #endif
 
