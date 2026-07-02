@@ -409,6 +409,17 @@ void free_pages_and_swap_cache(struct encoded_page **pages, int nr)
 
 #if PAGE_MMUSHIFT
 		/*
+		 * Route-2 PIN drop (Tessera GatherLedger.Ledger.discharge): the gather
+		 * took ONE dedicated folio_get per __tlb_remove_folio_pages_size call
+		 * (the pin that made owing <= refs across the deferred window).  This
+		 * loop runs ONCE per queued page entry (the NR_PAGES_NEXT count slot is
+		 * consumed above by ++i), so folding +1 into this entry's deferred count
+		 * drops exactly one pin per entry -- 1:1 with the defer-side get, whether
+		 * or not the dedupe below coalesces sibling runs of a gapped cluster
+		 * (each still contributes its +1).  Balanced: no leak, no double-free.
+		 */
+		this_refs += 1;
+		/*
 		 * #143: a gapped pgcl cluster is zapped as several contiguous
 		 * runs, each emitting its OWN encoded entry for the SAME cluster
 		 * folio (one struct page per cluster).  Putting the folio once

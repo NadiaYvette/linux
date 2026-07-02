@@ -241,6 +241,21 @@ static bool __tlb_remove_folio_pages_size(struct mmu_gather *tlb,
 		pgcl143_gather_owes[gi] = pfn;
 		pgcl143_gather_ip[gi] = _RET_IP_;
 	}
+	/*
+	 * Route-2 PIN (Tessera GatherLedger.Ledger.defer / owing_not_freed): this
+	 * gather takes its OWN dedicated ref on the cluster folio, so the folio's
+	 * refcount is >= (# gathers currently owing a deferred put) BY CONSTRUCTION.
+	 * No racer (lru_add_drain / COW put / shmem eviction) and no OTHER gather's
+	 * discharge can drop it to 0 while this gather still owes -- the reincarnation
+	 * (premature free -> reuse -> libcef.so int3; the later stale put -> the 68
+	 * folios_put_refs double-frees) is structurally impossible.  Cross-gather it
+	 * frees exactly once at the LAST owner's discharge (two_gathers_exactly_once).
+	 * Dropped 1:1 at discharge in free_pages_and_swap_cache (this_refs += 1): one
+	 * pin per queued entry == one folio_get per __tlb_remove_folio_pages_size call.
+	 * The folio is mapped here (refcount >= 1), so this get never resurrects a
+	 * freed frame -- it is NOT a re-hold-at-0.
+	 */
+	folio_get(page_folio(page));
 #endif
 
 #ifdef CONFIG_MMU_GATHER_PAGE_SIZE
