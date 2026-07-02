@@ -3351,6 +3351,21 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 				entry = pte_swp_mksoft_dirty(entry);
 			if (uffd_wp)
 				entry = pte_swp_mkuffd_wp(entry);
+#if PAGE_MMUSHIFT
+			/*
+			 * #143: carry this sub-PTE's PHYSICAL sub-index into its
+			 * migration entry.  A PMD mapping is linear (vsub==psub),
+			 * so the within-cluster sub-index (i % PAGE_MMUCOUNT) IS
+			 * the physical sub-frame.  Without this every entry carries
+			 * psub 0 and remove_migration_pte() restores all
+			 * PAGE_MMUCOUNT sub-PTEs of each cluster onto sub-frame 0 --
+			 * the shared-code overwrite fixed in try_to_migrate_one, of
+			 * which this freeze-split loop was the last un-fixed instance
+			 * (reached when a PMD-mapped anon THP is migrated/compacted).
+			 */
+			entry = pte_mksub(entry,
+				((unsigned long)(i % PAGE_MMUCOUNT)) << MMUPAGE_SHIFT);
+#endif
 			VM_WARN_ON(!pte_none(ptep_get(pte + i)));
 			set_pte_at(mm, addr, pte + i, entry);
 		}

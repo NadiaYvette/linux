@@ -1271,6 +1271,18 @@ static long move_present_ptes(struct mm_struct *mm,
 		src_folio->index = pgoff_mmu_to_page(linear_page_index(dst_vma, dst_addr));
 
 		orig_dst_pte = folio_mk_pte(src_folio, dst_vma->vm_page_prot);
+#if PAGE_MMUSHIFT
+		/*
+		 * #143: preserve the source sub-PTE's PHYSICAL sub-frame across
+		 * the move.  folio_mk_pte() addresses the cluster's sub-frame 0,
+		 * so without this a move of a sub-offset>0 anon page (or several
+		 * sub-PTEs of one cluster) would all be remapped onto sub-frame 0
+		 * -> wrong 4K served at the destination (the try_to_migrate_one
+		 * psub-collapse, in the UFFDIO_MOVE path).
+		 */
+		orig_dst_pte = pte_mksub(orig_dst_pte,
+					 pte_suboffset(orig_src_pte));
+#endif
 		/* Set soft dirty bit so userspace can notice the pte was moved */
 		if (pgtable_supports_soft_dirty())
 			orig_dst_pte = pte_mksoft_dirty(orig_dst_pte);

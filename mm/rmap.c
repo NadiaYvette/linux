@@ -2993,6 +2993,18 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 	unsigned long hsz = 0;
 
 #if PAGE_MMUSHIFT
+	/*
+	 * #143: per-sub-PTE physical sub-offsets, snapshotted BEFORE the
+	 * batched get_and_clear_ptes() folds a cluster's present run down to
+	 * one pte.  Each migration entry must carry its OWN sub-frame so
+	 * remove_migration_pte() restores every virtual sub-page to the right
+	 * physical sub-frame; carrying sub-PTE 0's psub to all (the pre-fix
+	 * single-carry) collapsed subs 1..nr-1 onto sub-frame 0 -> a migrated
+	 * cluster's later sub-pages served the wrong 4K of a shared read-only
+	 * code page (the #143 int3/invalid-opcode residual).
+	 */
+	unsigned long pgcl_psub[PAGE_MMUCOUNT];
+
 	pgcl143_set_rmsite(4);		/* #143: try_to_migrate removes tagged site 4 */
 #endif
 
@@ -3161,6 +3173,47 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 			end_addr = address + nr_pages * MMUPAGE_SIZE;
 			flush_cache_range(vma, address, end_addr);
 
+#if PAGE_MMUSHIFT
+			/*
+			 * #143: snapshot each present sub-PTE's physical
+			 * sub-offset before get_and_clear_ptes() below discards
+			 * the per-sub-PTE psub (it returns only sub-PTE 0's
+			 * value, merged with the run's dirty/young).  Consumed
+			 * per-entry by the migration-entry write loop.
+			 */
+			{
+				unsigned long k;
+				bool distinct = false;
+
+				for (k = 0; k < nr_pages; k++) {
+					pgcl_psub[k] =
+					    pte_suboffset(ptep_get(pvmw.pte + k));
+					if (pgcl_psub[k] != pgcl_psub[0])
+						distinct = true;
+				}
+				/*
+				 * #143 MIGRATE-PSUB probe (instrumentation): a
+				 * multi-sub-PTE cluster whose sub-frames differ is
+				 * exactly what the pre-fix single-carry corrupted
+				 * (subs 1..nr-1 restored onto sub-PTE 0's frame ->
+				 * shared read-only code overwrite / int3).  The
+				 * per-entry carry below now places these correctly;
+				 * a repro boot with this probe HOT and no Electron
+				 * int3 confirms the fix closed the residual.
+				 */
+				if (distinct) {
+					static DEFINE_RATELIMIT_STATE(rs_mp, HZ, 10);
+
+					if (__ratelimit(&rs_mp))
+						pr_warn("PGCL143-MIGRATE-PSUB cpfn=%#lx nr=%lu psub0=%#lx last=%#lx %s\n",
+							folio_pfn(folio), nr_pages,
+							pgcl_psub[0],
+							pgcl_psub[nr_pages - 1],
+							folio_test_anon(folio) ?
+								"anon" : "FILE");
+				}
+			}
+#endif
 			/* Nuke the page table entries. */
 			pteval = get_and_clear_ptes(mm, address, pvmw.pte, nr_pages);
 			/*
@@ -3293,15 +3346,15 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 					swp_pte = pte_swp_mksoft_dirty(swp_pte);
 				if (pte_uffd_wp(pteval))
 					swp_pte = pte_swp_mkuffd_wp(swp_pte);
-#if PAGE_MMUSHIFT
 				/*
-				 * #143: carry the physical sub-index (psub) in the
-				 * migration entry's reserved sub-offset bits, so
-				 * remove_migration_pte restores this PTE to the SAME
-				 * sub-frame -- not the virtual sub-index from the address.
+				 * #143: the physical sub-index (psub) is NOT baked
+				 * into the shared swp_pte here -- it is carried
+				 * PER sub-PTE in the write loop below (from the
+				 * pgcl_psub[] snapshot), so remove_migration_pte()
+				 * restores each virtual sub-page to its own physical
+				 * sub-frame.  A single batch-wide carry would map
+				 * subs 1..nr-1 to sub-frame 0.
 				 */
-				swp_pte = pte_mksub(swp_pte, pte_suboffset(pteval));
-#endif
 			} else {
 				swp_pte = swp_entry_to_pte(entry);
 				if (pte_swp_soft_dirty(pteval))
@@ -3314,18 +3367,30 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
 						hsz);
 			else
 				/*
-				 * Migration entries are non-present swap
-				 * PTEs; no PFN-stride semantic so set_ptes
-				 * cannot batch.  Loop one set_pte_at per
-				 * sub-page PTE — same migration entry for
-				 * every PTE within the kernel page (all
-				 * encode the same destination subpage under
-				 * PGCL since pte_pfn drops sub-page bits).
+				 * Migration entries are non-present swap PTEs;
+				 * no PFN-stride semantic, so set_ptes() cannot
+				 * batch -- one set_pte_at() per sub-PTE.  #143:
+				 * under PGCL each sub-PTE carries its OWN physical
+				 * sub-offset (pgcl_psub[i], snapshotted before the
+				 * batched clear) into its migration entry, so the
+				 * restore places every virtual sub-page on its true
+				 * sub-frame.  Writing sub 0's psub to all (the old
+				 * code) mis-placed subs 1..nr-1 onto sub-frame 0 ->
+				 * shared read-only code overwrite (#143 int3).  A
+				 * non-present pteval (device/already-migrating) has
+				 * no cluster psub to carry: write swp_pte as-is.
 				 */
-				for (i = 0; i < nr_pages; i++)
+				for (i = 0; i < nr_pages; i++) {
+					pte_t e = swp_pte;
+
+#if PAGE_MMUSHIFT
+					if (likely(pte_present(pteval)))
+						e = pte_mksub(swp_pte, pgcl_psub[i]);
+#endif
 					set_pte_at(mm,
 						address + (unsigned long)i * MMUPAGE_SIZE,
-						pvmw.pte + i, swp_pte);
+						pvmw.pte + i, e);
+				}
 			trace_set_migration_pte(address, pte_val(swp_pte),
 						folio_order(folio));
 			/*
