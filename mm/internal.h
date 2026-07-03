@@ -762,20 +762,31 @@ static inline bool pgcl143_floor_remove(struct folio *folio, struct page *page,
 	int ph = pgcl143_present_count(ptep, addr, kpfn);
 
 	/*
-	 * r10strip (task #20): the STATIC add side is provably balanced (3 audits +
-	 * do_anon), so the residual mapcount>refcount is a REMOVE-side over-discharge.
-	 * This floor skips the remove while `folio_mapcount <= present_here` -- that skip
-	 * is exactly what holds mapcount up and decouples it from refcount.  NAME every
-	 * such event (with the present-sub-PTE composition: stale/alias vs our cluster)
-	 * so the root is captured, but KEEP the skip -- actually stripping it re-enables
-	 * free-while-mapped (mapcount underflow -> folio_mapped gate stops firing -> the
-	 * r7choke cascade), which would crash the capture.  The report + refcount dump
-	 * is the ground truth; the map=[...] tells stale-alias from already-over-removed.
+	 * r12fix (task #8): the CONFIRMED root -- zap_present_ptes over-removes FILE-folio
+	 * _mapcount (r11probe ZAPREMOVE 481x, MAPUNDER 71x: folio_mapcount driven to 0-4
+	 * while 5-14 sub-PTEs are still genuinely present in THIS table).  Once mapcount
+	 * hits 0 with sub-PTEs present, folio_mapped() lies ("unmapped") -> the
+	 * free-while-mapped guard fails -> reuse -> int3 in shared libcef.so / WM crash /
+	 * deadlock.  The R20 invariant a faithful counter satisfies is folio_mapcount >=
+	 * present_here (memory.c pgcl143_present_count doc).  ENFORCE it here: this remove
+	 * would drive mapcount at/below the sub-PTEs still present, so DON'T remove; and if
+	 * a prior over-remove already drove it BELOW present_here, CORRECT it back up to the
+	 * local present truth so folio_mapped() stays honest while sub-PTEs map the cluster.
+	 * Leak-on-never (the folio frees once the LAST sub-PTE unmaps: present_here -> 0
+	 * then mc > 0 lets the remove through) beats free-while-mapped corruption.
 	 */
-	if (folio_mapcount(folio) <= ph) {
-		pgcl143_mapunder_report(folio, folio_mapcount(folio), ph,
-					ptep, addr, kpfn);
-		return false;		/* keep the floor (stable capture) */
+	{
+		int mc = folio_mapcount(folio);
+
+		if (mc <= ph) {
+			if (unlikely(mc < ph)) {
+				/* restore the over-removed undercount to present_here */
+				atomic_add(ph - mc, &folio->_mapcount);
+				pgcl143_mapunder_report(folio, mc, ph, ptep, addr,
+							kpfn);
+			}
+			return false;		/* enforce mapcount >= present_here */
+		}
 	}
 	this_cpu_write(pgcl143_via_floor, 1);
 	folio_remove_rmap_pte(folio, page, vma);
