@@ -1036,11 +1036,34 @@ void folios_put_refs(struct folio_batch *folios, unsigned int *refs)
 			 * (unmapped) leaves the 0-floor intact -> the last put still frees.
 			 */
 			int pgcl_mc = folio_mapcount(folio);
+			int pgcl_floor = pgcl_mc;
+
+			/*
+			 * r16owefloor (task #20, the reincarnation face): page_owner PROVED the
+			 * residual double-free is a folio the mmu_gather still OWES a deferred put,
+			 * over-dropped to 0 by a NON-gather path while UNMAPPED (mapcount 0, so the
+			 * r14 floor above lets it reach 0), freed to the buddy, reincarnated by
+			 * __vmalloc (e.g. security_read_state_kernel), then the gather's stale
+			 * deferred put here + vfree double-free the vmalloc page.  Extend the floor:
+			 * while the gather OWES this pfn and this is NOT the gather's own discharge
+			 * (!in_gflush), keep refcount >= 1 so the over-drop cannot free it -- the
+			 * owing gather's own discharge (in_gflush) then frees it exactly once.  The
+			 * robust, floor-folded form of the GATHEROWES gate (which missed the paths
+			 * page_owner caught).  Only when unmapped (mc < 1); a mapped folio is already
+			 * floored >= mapcount.  Tessera RefFloor.putFloorOwed_owed_not_freed.
+			 */
+			if (unlikely(pgcl_floor < 1 &&
+				     !this_cpu_read(pgcl143_in_gflush))) {
+				unsigned long ofpfn = folio_pfn(folio);
+
+				if (pgcl143_gather_owes[pgcl143_pending_idx(ofpfn)] == ofpfn)
+					pgcl_floor = 1;
+			}
 
 			do {
 				new_refs = old > (int)nr_refs ? old - (int)nr_refs : 0;
-				if (unlikely(pgcl_mc > 0 && new_refs < pgcl_mc))
-					new_refs = pgcl_mc;	/* refcount corrective floor */
+				if (unlikely(pgcl_floor > 0 && new_refs < pgcl_floor))
+					new_refs = pgcl_floor;	/* refcount corrective floor (mapcount + gather-owe) */
 			} while (!atomic_try_cmpxchg(&folio->_refcount, &old, new_refs));
 			/*
 			 * #143 GROUND-TRUTH over-put namer (r8diag, task #20).  The three
