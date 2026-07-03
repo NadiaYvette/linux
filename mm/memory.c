@@ -2039,6 +2039,11 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 		 */
 		if (nr > 1 || folio_test_large(folio)) {
 			int i;
+			int removed = (int)nr;	/* r19: refs to DEFER = mapcount edges actually
+						 * removed (floored), NOT nr.  Keeps the refcount
+						 * deferral in lockstep with the mapcount floor so
+						 * the gather never over-drops a still-referenced
+						 * folio (the OVERPUT deficit -> renderer SIGSEGV). */
 #if PAGE_MMUSHIFT
 			/* ground-truth present count BEFORE the clear below. */
 			int ph_before = folio_test_anon(folio) ? 0 :
@@ -2101,6 +2106,7 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 					pgcl143_mapunder_report(folio, lpmc, lph,
 								pte, addr,
 								pte_pfn(ptent));
+				removed = lrm;	/* r19: defer only the refs for the edges removed */
 			} else {
 				/*
 				 * R17 phase-1 FLOOR-AT-PRESENT (Tessera FloorAtPresent):
@@ -2111,11 +2117,14 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 				 * mapped gate is skipped; skipping the edge also skips its
 				 * coupled NR_*_MAPPED stat, so reclaim stats stay exact.
 				 */
-				for (i = 0; i < nr; i++)
+				removed = 0;
+				for (i = 0; i < nr; i++) {
 					if (!pgcl143_floor_remove(folio, page, vma,
 								  pte, addr,
 								  pte_pfn(ptent)))
 						break;
+					removed++;	/* r19: count edges actually removed */
+				}
 			}
 
 			/*
@@ -2140,9 +2149,22 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 			 */
 #if PAGE_MMUSHIFT
 			/* #143 FILE cache-ref over-put detector (Tessera FileCacheRef). */
-			pgcl143_file_overput_report(folio, nr, ph_before);
+			pgcl143_file_overput_report(folio, removed, ph_before);
 #endif
-			if (unlikely(__tlb_remove_folio_pages(tlb, page, nr,
+			/*
+			 * r19 SYMMETRIC REFCOUNT FLOOR (Tessera RefFloor.deferDrop): defer
+			 * `removed` refs -- the mapcount edges the floor ACTUALLY removed --
+			 * not the batch size nr.  The stock nr-defer dropped nr refs on a
+			 * folio the gather only owned `removed` of, over-dropping the
+			 * refcount by (nr - removed) into refs held by OTHER owners -> data
+			 * page freed-while-referenced (OVERPUT deficit, mapcount=0,
+			 * in_gflush=1 -> the renderer SIGSEGV).  Deferring `removed` keeps
+			 * refcount and mapcount in lockstep; removed==0 (floor kept every
+			 * edge) => nothing to free here, the refs drop when those sub-PTEs
+			 * truly unmap (leak-on-never, never a free-while-referenced UAF).
+			 */
+			if (removed > 0 &&
+			    unlikely(__tlb_remove_folio_pages(tlb, page, removed,
 							      false))) {
 				*force_flush = true;
 				*force_break = true;
