@@ -1998,11 +1998,36 @@ void pgcl143_mapunder_report(struct folio *folio, int mc, int ph, pte_t *ptep,
 		else { map[j] = 'x'; nalias++; }
 	}
 	map[PAGE_MMUCOUNT] = '\0';
-	pr_warn("PGCL143-MAPUNDER pfn=%#lx mapcount=%d present_here=%d (match=%d alias=%d) map=[%s] anon=%d file=%d swpc=%d refcount=%d; over-remover:\n",
-		folio_pfn(folio), mc, ph, nmatch, nalias, map,
-		folio_test_anon(folio),
-		(!folio_test_anon(folio) && folio->mapping) ? 1 : 0,
-		folio_test_swapcache(folio), folio_ref_count(folio));
+	{
+		/*
+		 * r17 (task #8/#20): NAME the over-removing pass.  The floor detects the
+		 * under-count POST-HOC (on the next zap of this cluster), so the
+		 * dump_stack below is only the CORRECTOR (zap) -- useless for the
+		 * culprit.  pgcl143_lastsite[] holds the site code of the pass that last
+		 * removed a mapcount edge for this cluster, and (for a FILE folio driven
+		 * to <=0) pgcl143_zero_ip[]/zero_viafloor[] hold that remover's _RET_IP_
+		 * and whether it came through the floor.  For a FILE folio the zap is
+		 * floored+immediate, so an UNFLOORED (viafloor=0) site 2/3/4 is the root
+		 * over-remover to floor next (r16 top showed kswapd0 thrash -> site 3).
+		 */
+		unsigned int mli = pgcl143_pending_idx(folio_pfn(folio));
+		int site = pgcl143_lastsite[mli];
+		bool zmatch = pgcl143_zero_pfn[mli] == folio_pfn(folio);
+		const char *sname = site == 1 ? "zap" :
+				    site == 2 ? "deferred-tlb-flush" :
+				    site == 3 ? "try_to_unmap/reclaim" :
+				    site == 4 ? "try_to_migrate" : "other";
+
+		pr_warn("PGCL143-MAPUNDER pfn=%#lx mapcount=%d present_here=%d (match=%d alias=%d) map=[%s] anon=%d file=%d swpc=%d refcount=%d last-remove-site=%d(%s) zero-driver=%pS viafloor=%d%s; corrector-stack:\n",
+			folio_pfn(folio), mc, ph, nmatch, nalias, map,
+			folio_test_anon(folio),
+			(!folio_test_anon(folio) && folio->mapping) ? 1 : 0,
+			folio_test_swapcache(folio), folio_ref_count(folio),
+			site, sname,
+			zmatch ? (void *)pgcl143_zero_ip[mli] : NULL,
+			zmatch ? pgcl143_zero_viafloor[mli] : -1,
+			zmatch ? "" : " (zero-slot aliased)");
+	}
 	dump_stack();
 }
 

@@ -1341,57 +1341,19 @@ __always_inline bool __free_pages_prepare(struct page *page,
 	pgcl143_qsig(page, order, 1);	/* pgcl143: signal QEMU TLB-scan free detector */
 	kmsan_free_page(page, order);
 
-#if PAGE_MMUSHIFT
 	/*
-	 * #143 GENERAL DOUBLE-FREE detector (task #19, the §14 residual): stamp each
-	 * pfn freed here (the common chokepoint for ALL free paths); the stamp is
-	 * cleared at post_alloc_hook.  A 2nd free before re-alloc is a DOUBLE-FREE ->
-	 * the page lands on the pcp free-list twice (list_del/add corruption at
-	 * free_frozen_page_commit / __rmqueue_pcplist) -> shared-lib page reuse ->
-	 * Electron int3 / segfault.  bad_page stays 0 (flags/mapping clear on the 2nd
-	 * free), so ONLY this names it.  dump_stack = the 2nd freer;
-	 * pgcl143_df_firstip[pfn] = the 1st free.  Unlike PGCL143-DOUBLEDROP this makes
-	 * NO mechanism assumption (not keyed on gather_owes).  order-0 only (pgcl
-	 * clusters); DIRECT cluster-pfn index (not the old 16:1 hash) -> FULL coverage,
-	 * every double-freed frame named, zero alias miss and zero false-positive.
+	 * r17: the task #19/#20 GENERAL DOUBLE-FREE detector was RETIRED here.
+	 * page_owner proved every fire was a FALSE POSITIVE on legitimate cross-
+	 * lifetime page reuse: a file-cache folio freed on unlink (truncate ->
+	 * folios_put_refs), the frame re-allocated by __vmalloc (frozen alloc,
+	 * post_alloc_hook), then freed normally by vfree -- alloc_ts > free_ts, so a
+	 * re-alloc DID occur between the two frees (the detector's stamp was not
+	 * cleared across the frozen/vmalloc alloc).  Its enforce (return false)
+	 * then SKIPPED the legitimate vfree, leaking ~43 module/SELinux pages per
+	 * boot.  The "reincarnation double-free" it seemed to show does not exist;
+	 * the real #143 corruption is the FILE-folio mapcount over-remove
+	 * (free-while-mapped), tracked at the rmap floor, not a double-free-to-buddy.
 	 */
-	if (likely(!order)) {
-		unsigned long dfpfn = page_to_pfn(page);
-		long di = pgcl143_df_idx(dfpfn);	/* DIRECT cluster-pfn index (task #19) */
-
-		if (di >= 0) {
-			if (unlikely(pgcl143_df_firstip[di])) {
-				static DEFINE_RATELIMIT_STATE(rs_df, HZ, 8);
-
-				if (__ratelimit(&rs_df)) {
-					pr_warn("PGCL143-DOUBLEFREE pfn=%#lx freed AGAIN without re-alloc; first-freed-by=%pS; 2nd freer:\n",
-						dfpfn,
-						(void *)pgcl143_df_firstip[di]);
-					/*
-					 * task #20: page_owner still holds the ALLOC owner + the
-					 * 1st-free stack here -- this detector runs early in
-					 * free_pages_prepare, before __reset_page_owner records THIS
-					 * (2nd) free -- so dump_page names the premature-free PATH
-					 * (not just its IP).  dump_stack() below = the 2nd freer.
-					 */
-					dump_page(page, "pgcl143 double-free (page_owner: alloc owner + 1st-free path)");
-					dump_stack();
-				}
-				/*
-				 * ENFORCE: the pfn is already on the free list from its 1st
-				 * free.  Skip this 2nd free so it is not added to the pcp list
-				 * twice -- return false (the callers' "bad page, don't free"
-				 * path).  The page stays on the list exactly once: leak-free,
-				 * corruption-free, mechanism-agnostic.  Direct indexing means
-				 * NO alias miss: every double-freed 64KB frame is named.
-				 */
-				return false;
-			}
-			pgcl143_df_firstip[di] = _RET_IP_;
-			pgcl143_df_seen[di] = 1;	/* task #20: frame has now been freed */
-		}
-	}
-#endif
 
 	if (memcg_kmem_online() && PageMemcgKmem(page))
 		__memcg_kmem_uncharge_page(page, order);
@@ -1886,40 +1848,11 @@ inline void post_alloc_hook(struct page *page, unsigned int order,
 
 	set_page_private(page, 0);
 
-#if PAGE_MMUSHIFT
-	/* #143 double-free detector (task #19): this pfn is now (re)allocated -- clear
-	 * its freed-stamp (direct cluster-pfn index) so its next free is not misread
-	 * as a double-free. */
-	if (likely(!order)) {
-		long di = pgcl143_df_idx(page_to_pfn(page));
-
-		if (di >= 0) {
-			/*
-			 * #143 DOUBLE-ALLOC detector (task #20): this frame is being handed
-			 * out.  It SHOULD have been freed since its last alloc (df_firstip
-			 * != 0).  If df_firstip == 0 AND it was ever freed (df_seen) the
-			 * allocator is handing out a frame that is STILL IN USE by a prior
-			 * owner -- the cross-process double-alloc (systemd's folio_prealloc
-			 * frame handed to another mm) that feeds the non-gather double-free.
-			 * page_owner names the prior owner (alloc+free); dump_stack = the
-			 * allocator taking it a second time.  Ratelimited; enforce nothing
-			 * (diagnostic only -- the double-free enforce downstream stays the
-			 * safety net).
-			 */
-			if (unlikely(pgcl143_df_firstip[di] == 0 && pgcl143_df_seen[di])) {
-				static DEFINE_RATELIMIT_STATE(rs_da, HZ, 8);
-
-				if (__ratelimit(&rs_da)) {
-					pr_warn("PGCL143-DOUBLEALLOC pfn=%#lx handed out but NOT freed since its last alloc (in-use frame, prior owner via page_owner); allocator:\n",
-						page_to_pfn(page));
-					dump_page(page, "pgcl143 double-alloc: in-use frame re-handed-out");
-					dump_stack();
-				}
-			}
-			pgcl143_df_firstip[di] = 0;
-		}
-	}
-#endif
+	/*
+	 * r17: companion clear for the retired task #19/#20 double-free detector
+	 * (see free_pages_prepare) removed.  The DOUBLEALLOC detector fired 0x and
+	 * the freed-stamp it cleared no longer exists.
+	 */
 
 	arch_alloc_page(page, order);
 	debug_pagealloc_map_pages(page, 1 << order);
