@@ -1343,6 +1343,44 @@ __always_inline bool __free_pages_prepare(struct page *page,
 
 #if PAGE_MMUSHIFT
 	/*
+	 * #143 REINCARN QUARANTINE at the UNIVERSAL free chokepoint (task #20; Tessera
+	 * Quarantine.universal_safe / property2/coq/quarantine.v).  The existing
+	 * PGCL143-REINCARN-GATE (free_unref_folios) refuses a premature free only on the
+	 * folio-batch path; vfree / tlb_remove_table_rcu / make_alloc_exact / rcu_do_batch
+	 * reach the buddy through __free_pages_prepare WITHOUT that gate, so an owed pfn
+	 * freed via those paths still reincarnates -- the r6floor boot's residual (44x
+	 * 2nd-freed by vfree during module load; int3 in shared libcef.so; FILE<->ANON rss
+	 * type-swap).  __free_pages_prepare is the ONE chokepoint EVERY free funnels through:
+	 * enforce the same guard here so every path is covered.  If a mmu_gather still OWES a
+	 * deferred put for this pfn and this is NOT that gather's own discharge (!in_gflush),
+	 * the aggregate refcount reached 0 despite the owed refs -- a premature free that
+	 * would reincarnate the pfn under the gather.  RE-HOLD and refuse (keep the owe set);
+	 * the owing gather's discharge (in_gflush -- it clears the owe first in mmu_gather.c)
+	 * then frees it exactly once.  Leak-on-never beats the reincarnation double-free.
+	 * order-0 only (pgcl clusters).  Tagged CHOKE (vs the folio-batch GATE) so the boot
+	 * log names exactly the off-path frees this universal coverage newly closes.
+	 */
+	if (likely(!order)) {
+		unsigned long qpfn = page_to_pfn(page);
+		unsigned int qi = pgcl143_pending_idx(qpfn);
+
+		if (unlikely(pgcl143_gather_owes[qi] == qpfn)) {
+			if (!this_cpu_read(pgcl143_in_gflush)) {
+				static DEFINE_RATELIMIT_STATE(rs_ch, HZ, 8);
+
+				if (__ratelimit(&rs_ch)) {
+					pr_warn("PGCL143-REINCARN-CHOKE re-held pfn=%#lx freed while gather owes it via a non-folio-batch path; gather-deferred-by=%pS; freer:\n",
+						qpfn, (void *)pgcl143_gather_ip[qi]);
+					dump_stack();
+				}
+				folio_ref_inc(folio);
+				return false;
+			}
+			/* the owing gather's own discharge: let it free; clear the owe. */
+			pgcl143_gather_owes[qi] = 0;
+		}
+	}
+	/*
 	 * #143 GENERAL DOUBLE-FREE detector (task #19, the §14 residual): stamp each
 	 * pfn freed here (the common chokepoint for ALL free paths); the stamp is
 	 * cleared at post_alloc_hook.  A 2nd free before re-alloc is a DOUBLE-FREE ->
