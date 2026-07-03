@@ -1061,32 +1061,9 @@ void folios_put_refs(struct folio_batch *folios, unsigned int *refs)
 			}
 
 			do {
-				int floor = pgcl_floor;
-
 				new_refs = old > (int)nr_refs ? old - (int)nr_refs : 0;
-				/*
-				 * r20 (task #20, the cross-gather double-drop): the r16 owe-floor
-				 * above EXCLUDES in_gflush, but a SHARED cluster owed by TWO gathers
-				 * has in_gflush=1 on BOTH -- neither is floored, so their combined
-				 * drop over-shoots (r19: the same pfn 0x52e01 dropped 7->0 then 0
-				 * again, the deficit eating OTHER owners' refs -> free-while-
-				 * referenced -> the Signal renderer SIGSEGV).  A provable over-drop
-				 * (old < nr_refs, the deferred count stale from a concurrent/cross-
-				 * gather drop) of a still-CACHED file/shmem folio (mapping!=NULL holds
-				 * a page-cache ref; all r19 OVERPUT were anon=0) must NOT free it:
-				 * floor at 1 (the cache ref) even on the gather's own discharge.  The
-				 * folio frees only when truly uncached (truncate/reclaim clears
-				 * mapping), never by a racing/stale gather over-drop.  Anon/swapcache
-				 * excluded (no cache ref -> the last put still frees).  Tessera
-				 * RefFloor.cacheFloor_cached_not_freed.
-				 */
-				if (unlikely(old < (int)nr_refs && floor < 1 &&
-					     !folio_test_anon(folio) &&
-					     !folio_test_swapcache(folio) &&
-					     folio->mapping))
-					floor = 1;
-				if (unlikely(floor > 0 && new_refs < floor))
-					new_refs = floor;	/* corrective floor (mapcount + gather-owe + cache-ref) */
+				if (unlikely(pgcl_floor > 0 && new_refs < pgcl_floor))
+					new_refs = pgcl_floor;	/* refcount corrective floor (mapcount + gather-owe) */
 			} while (!atomic_try_cmpxchg(&folio->_refcount, &old, new_refs));
 			/*
 			 * #143 GROUND-TRUTH over-put namer (r8diag, task #20).  The three
