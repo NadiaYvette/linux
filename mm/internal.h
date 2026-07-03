@@ -750,6 +750,10 @@ DECLARE_PER_CPU(u8, pgcl143_via_floor);
 /* r10strip: name the over-discharge the floor would have masked (defined in rmap.c). */
 void pgcl143_mapunder_report(struct folio *folio, int mc, int ph, pte_t *ptep,
 			     unsigned long addr, unsigned long kpfn);
+/* r11probe: per-zap mapcount edges-removed vs nr-cleared arithmetic (defined in rmap.c). */
+void pgcl143_zapremove_report(struct folio *folio, unsigned int nr, int mc_before,
+			      int mc_after, pte_t *ptep, unsigned long addr,
+			      unsigned long kpfn);
 
 static inline bool pgcl143_floor_remove(struct folio *folio, struct page *page,
 					struct vm_area_struct *vma, pte_t *ptep,

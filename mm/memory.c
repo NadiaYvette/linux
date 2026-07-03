@@ -1919,6 +1919,8 @@ static __always_inline void zap_present_folio_ptes(struct mmu_gather *tlb,
 
 	if (!delay_rmap) {
 #if PAGE_MMUSHIFT
+		int pgcl_mc_before = folio_mapcount(folio);	/* r11probe */
+
 		/*
 		 * R17 phase-1 floor-at-present: a small (clustered) folio's remove
 		 * fires only while it keeps _mapcount above the sub-PTEs still
@@ -1929,6 +1931,10 @@ static __always_inline void zap_present_folio_ptes(struct mmu_gather *tlb,
 					     pte_pfn(ptent));
 		else
 			folio_remove_rmap_ptes(folio, page, nr, vma);
+		/* r11probe: name a single zap that removed more mapcount than nr. */
+		pgcl143_zapremove_report(folio, nr, pgcl_mc_before,
+					 folio_mapcount(folio), pte, addr,
+					 pte_pfn(ptent));
 #else
 		folio_remove_rmap_ptes(folio, page, nr, vma);
 #endif

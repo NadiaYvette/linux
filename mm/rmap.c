@@ -2007,6 +2007,36 @@ void pgcl143_mapunder_report(struct folio *folio, int mc, int ph, pte_t *ptep,
 }
 
 /*
+ * r11probe (task #8): per-zap mapcount arithmetic.  Fires ONLY on a single-zap anomaly: this one
+ * zap removed MORE mapcount edges than the @nr PTEs it cleared (edges > nr -- a genuine
+ * per-zap over-remove), or drove mapcount NEGATIVE.  If MAPUNDER fires (over-removed BELOW the
+ * still-present count) but this never does, the over-remove is ACCUMULATED across zaps/mms, not a
+ * single bad zap.  Dumps edges-vs-nr-vs-present so the over-count arithmetic is explicit.
+ */
+void pgcl143_zapremove_report(struct folio *folio, unsigned int nr, int mc_before,
+			      int mc_after, pte_t *ptep, unsigned long addr,
+			      unsigned long kpfn)
+{
+	static DEFINE_RATELIMIT_STATE(rs_zr, HZ, 8);
+	int edges = mc_before - mc_after;
+	int ph;
+
+	if (likely(edges <= (int)nr && mc_after >= 0))
+		return;			/* balanced this zap (edges<=nr) and not negative */
+	if (!__ratelimit(&rs_zr))
+		return;
+	ph = pgcl143_present_count(ptep, addr, kpfn);
+	pr_warn("PGCL143-ZAPREMOVE pfn=%#lx nr_cleared=%u edges_removed=%d mc %d->%d present_after=%d refcount=%d anon=%d file=%d large=%d %s%s; zapper:\n",
+		folio_pfn(folio), nr, edges, mc_before, mc_after, ph,
+		folio_ref_count(folio), folio_test_anon(folio),
+		(!folio_test_anon(folio) && folio->mapping) ? 1 : 0,
+		folio_test_large(folio),
+		edges > (int)nr ? "EDGES>NR " : "",
+		mc_after < 0 ? "NEGATIVE " : "");
+	dump_stack();
+}
+
+/*
  * PGCL #143 add-edge namer (Tessera SingleRoot): at a cluster install the rmap
  * count ADDED must equal the sub-PTEs PRESENT (added==present -- CallBalance for
  * one install from the unmapped floor).  added < present is the single root
