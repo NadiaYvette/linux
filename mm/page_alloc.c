@@ -3110,6 +3110,36 @@ void free_unref_folios(struct folio_batch *folios)
 
 #if PAGE_MMUSHIFT
 		/*
+		 * r13refgate (task #8; Tessera FloorAtPresent.no_free_while_mapped): the
+		 * free-while-mapped CLOSER on the batch-free BYPASS path.  r12fix made
+		 * folio_mapcount honest (kept >= present_here by the corrective floor), so
+		 * folio_mapped() is now RELIABLE.  A still-MAPPED anon/file folio reaching
+		 * the buddy is the free-while-mapped that reuses shared code -> int3 / WM
+		 * crash / deadlock: the REFCOUNT over-drop (PGCL143-OVERPUT) drove it to 0
+		 * while sub-PTEs still map it, and this reclaim/batch path BYPASSES the
+		 * folios_put_refs folio_mapped gate (r12fix fixed the count that LIES; this
+		 * gates the count that FREES).  RE-HOLD and skip; freed once truly unmapped
+		 * (present_here -> 0 -> mapcount -> 0).  Restrict to user-mappable folios
+		 * (folio_test_anon || mapping) so vmalloc / slab / page-table pages -- which
+		 * use _mapcount differently -- are never touched.  order-0 (pgcl clusters).
+		 */
+		if (likely(!order) &&
+		    (folio_test_anon(folio) || folio->mapping) &&
+		    unlikely(folio_mapped(folio))) {
+			static DEFINE_RATELIMIT_STATE(rs_fm, HZ, 4);
+
+			if (__ratelimit(&rs_fm)) {
+				pr_warn("PGCL143-FREEMAPPED-GATE re-held pfn=%#lx freed while still mapped (mapcount=%d anon=%d file=%d order=%u); freer:\n",
+					pfn, folio_mapcount(folio),
+					folio_test_anon(folio),
+					(!folio_test_anon(folio) && folio->mapping) ? 1 : 0,
+					order);
+				dump_stack();
+			}
+			folio_ref_inc(folio);
+			continue;
+		}
+		/*
 		 * Option B INCARNATION CATCH: this pfn is being freed.  If a
 		 * mmu_gather still OWES a deferred free for it (owes slot names
 		 * this pfn) and this is NOT that gather's own flush, then the
