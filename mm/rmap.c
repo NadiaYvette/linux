@@ -1965,6 +1965,48 @@ u8 pgcl143_df_seen[1UL << PGCL143_DF_BITS];
 DEFINE_PER_CPU(u8, pgcl143_in_gflush);
 
 /*
+ * r10strip (task #20): name a REMOVE-side mapcount over-discharge that the floor USED to mask.
+ * Reached when the zap removes a mapcount edge that would drive folio_mapcount at/below
+ * present_here (the sub-PTEs of THIS cluster still present in this page table).  The static add
+ * side is provably balanced, so this is either (a) present_here inflated by STALE/ALIAS PTEs
+ * (a missing flush/clear left them present), or (b) mapcount already over-removed earlier.  The
+ * map=[...] composition discriminates: 'M' = a present sub-PTE matching this cluster (kpfn),
+ * 'x' = a present sub-PTE mapping a DIFFERENT pfn (alias/stale), '.' = absent, '-' = out of the
+ * pte-table half.  refcount is dumped alongside so mapcount-vs-refcount is visible at the source.
+ */
+void pgcl143_mapunder_report(struct folio *folio, int mc, int ph, pte_t *ptep,
+			     unsigned long addr, unsigned long kpfn)
+{
+	static DEFINE_RATELIMIT_STATE(rs_mu, HZ, 8);
+	unsigned int sub = (unsigned int)((addr >> MMUPAGE_SHIFT) & (PAGE_MMUCOUNT - 1));
+	long idx = (long)((addr >> MMUPAGE_SHIFT) & (PTRS_PER_PTE - 1));
+	long base_idx = idx - (long)sub;
+	pte_t *base = ptep - sub;
+	char map[PAGE_MMUCOUNT + 1];
+	int j, nmatch = 0, nalias = 0;
+
+	if (!__ratelimit(&rs_mu))
+		return;
+	for (j = 0; j < PAGE_MMUCOUNT; j++) {
+		long t = base_idx + j;
+		pte_t pj;
+
+		if (t < 0 || t >= PTRS_PER_PTE) { map[j] = '-'; continue; }
+		pj = ptep_get(base + j);
+		if (!pte_present(pj)) { map[j] = '.'; continue; }
+		if (pte_pfn(pj) == kpfn) { map[j] = 'M'; nmatch++; }
+		else { map[j] = 'x'; nalias++; }
+	}
+	map[PAGE_MMUCOUNT] = '\0';
+	pr_warn("PGCL143-MAPUNDER pfn=%#lx mapcount=%d present_here=%d (match=%d alias=%d) map=[%s] anon=%d file=%d swpc=%d refcount=%d; over-remover:\n",
+		folio_pfn(folio), mc, ph, nmatch, nalias, map,
+		folio_test_anon(folio),
+		(!folio_test_anon(folio) && folio->mapping) ? 1 : 0,
+		folio_test_swapcache(folio), folio_ref_count(folio));
+	dump_stack();
+}
+
+/*
  * PGCL #143 add-edge namer (Tessera SingleRoot): at a cluster install the rmap
  * count ADDED must equal the sub-PTEs PRESENT (added==present -- CallBalance for
  * one install from the unmapped floor).  added < present is the single root

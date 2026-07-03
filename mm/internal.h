@@ -747,14 +747,32 @@ static inline int pgcl143_present_count(pte_t *ptep, unsigned long addr,
  */
 DECLARE_PER_CPU(u8, pgcl143_via_floor);
 
+/* r10strip: name the over-discharge the floor would have masked (defined in rmap.c). */
+void pgcl143_mapunder_report(struct folio *folio, int mc, int ph, pte_t *ptep,
+			     unsigned long addr, unsigned long kpfn);
+
 static inline bool pgcl143_floor_remove(struct folio *folio, struct page *page,
 					struct vm_area_struct *vma, pte_t *ptep,
 					unsigned long addr, unsigned long kpfn)
 {
 	int ph = pgcl143_present_count(ptep, addr, kpfn);
 
-	if (folio_mapcount(folio) <= ph)
-		return false;		/* would underflow below present_here */
+	/*
+	 * r10strip (task #20): the STATIC add side is provably balanced (3 audits +
+	 * do_anon), so the residual mapcount>refcount is a REMOVE-side over-discharge.
+	 * This floor skips the remove while `folio_mapcount <= present_here` -- that skip
+	 * is exactly what holds mapcount up and decouples it from refcount.  NAME every
+	 * such event (with the present-sub-PTE composition: stale/alias vs our cluster)
+	 * so the root is captured, but KEEP the skip -- actually stripping it re-enables
+	 * free-while-mapped (mapcount underflow -> folio_mapped gate stops firing -> the
+	 * r7choke cascade), which would crash the capture.  The report + refcount dump
+	 * is the ground truth; the map=[...] tells stale-alias from already-over-removed.
+	 */
+	if (folio_mapcount(folio) <= ph) {
+		pgcl143_mapunder_report(folio, folio_mapcount(folio), ph,
+					ptep, addr, kpfn);
+		return false;		/* keep the floor (stable capture) */
+	}
 	this_cpu_write(pgcl143_via_floor, 1);
 	folio_remove_rmap_pte(folio, page, vma);
 	this_cpu_write(pgcl143_via_floor, 0);
