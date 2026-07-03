@@ -1944,24 +1944,22 @@ u8 pgcl143_lastsite[1 << PGCL143_PENDING_BITS];
 DEFINE_PER_CPU(u8, pgcl143_via_floor);
 
 /*
- * Option B QUIET CORRELATOR tables (per-pfn, indexed by pgcl143_pending_idx):
- * pgcl143_zero_ip = the caller (_RET_IP_) that last drove this file folio's
- * mapcount to <= 0; pgcl143_zero_viafloor = whether it came through the floor.
- * Printed ONLY at the rare UNDERCOUNT surfacing in the zap (mm/memory.c).
+ * Option B QUIET CORRELATOR tables (per-pfn, r18: DIRECT-indexed by
+ * pgcl143_pfn_idx -- was pgcl143_pending_idx, whose 16:1 hash aliased the
+ * driver IP 16/17 of the time in r17): pgcl143_zero_ip = the caller (_RET_IP_)
+ * that last drove this file/shmem folio's mapcount to <= 0; pgcl143_zero_viafloor
+ * = whether it came through the floor.  Printed at the UNDERCOUNT surfacing in
+ * the zap (mm/memory.c) to name the exact over-remover.
  */
-unsigned long pgcl143_zero_ip[1 << PGCL143_PENDING_BITS];
-unsigned long pgcl143_zero_pfn[1 << PGCL143_PENDING_BITS];
-u8 pgcl143_zero_viafloor[1 << PGCL143_PENDING_BITS];
+unsigned long pgcl143_zero_ip[1UL << PGCL143_PFN_BITS];
+unsigned long pgcl143_zero_pfn[1UL << PGCL143_PFN_BITS];
+u8 pgcl143_zero_viafloor[1UL << PGCL143_PFN_BITS];
 
 /* Option B incarnation stamp (see internal.h). */
 unsigned long pgcl143_gather_owes[1 << PGCL143_PENDING_BITS];
 unsigned long pgcl143_gather_ip[1 << PGCL143_PENDING_BITS];
 unsigned long pgcl143_freed[1 << PGCL143_PENDING_BITS];
 unsigned long pgcl143_free_ip[1 << PGCL143_PENDING_BITS];
-/* #143 task #19: full-coverage (direct cluster-pfn index) double-free detector. */
-unsigned long pgcl143_df_firstip[1UL << PGCL143_DF_BITS];
-/* #143 task #20: "freed at least once" bit, to filter never-freed boot frames. */
-u8 pgcl143_df_seen[1UL << PGCL143_DF_BITS];
 DEFINE_PER_CPU(u8, pgcl143_in_gflush);
 
 /*
@@ -2011,8 +2009,9 @@ void pgcl143_mapunder_report(struct folio *folio, int mc, int ph, pte_t *ptep,
 		 * over-remover to floor next (r16 top showed kswapd0 thrash -> site 3).
 		 */
 		unsigned int mli = pgcl143_pending_idx(folio_pfn(folio));
+		long zli = pgcl143_pfn_idx(folio_pfn(folio));	/* r18: direct, no alias */
 		int site = pgcl143_lastsite[mli];
-		bool zmatch = pgcl143_zero_pfn[mli] == folio_pfn(folio);
+		bool zmatch = zli >= 0 && pgcl143_zero_pfn[zli] == folio_pfn(folio);
 		const char *sname = site == 1 ? "zap" :
 				    site == 2 ? "deferred-tlb-flush" :
 				    site == 3 ? "try_to_unmap/reclaim" :
@@ -2024,9 +2023,9 @@ void pgcl143_mapunder_report(struct folio *folio, int mc, int ph, pte_t *ptep,
 			(!folio_test_anon(folio) && folio->mapping) ? 1 : 0,
 			folio_test_swapcache(folio), folio_ref_count(folio),
 			site, sname,
-			zmatch ? (void *)pgcl143_zero_ip[mli] : NULL,
-			zmatch ? pgcl143_zero_viafloor[mli] : -1,
-			zmatch ? "" : " (zero-slot aliased)");
+			zmatch ? (void *)pgcl143_zero_ip[zli] : NULL,
+			zmatch ? pgcl143_zero_viafloor[zli] : -1,
+			zmatch ? "" : " (zero-slot aliased/oor)");
 	}
 	dump_stack();
 }
@@ -2274,12 +2273,14 @@ static __always_inline void __folio_remove_rmap(struct folio *folio,
 			 */
 			if (!folio_test_anon(folio) && mc <= 0) {
 				unsigned long pfn = folio_pfn(folio);
-				unsigned int zi = pgcl143_pending_idx(pfn);
+				long zi = pgcl143_pfn_idx(pfn);	/* r18: direct index */
 
-				pgcl143_zero_ip[zi] = _RET_IP_;
-				pgcl143_zero_pfn[zi] = pfn;
-				pgcl143_zero_viafloor[zi] =
-					(u8)this_cpu_read(pgcl143_via_floor);
+				if (zi >= 0) {
+					pgcl143_zero_ip[zi] = _RET_IP_;
+					pgcl143_zero_pfn[zi] = pfn;
+					pgcl143_zero_viafloor[zi] =
+						(u8)this_cpu_read(pgcl143_via_floor);
+				}
 			}
 #else
 			nr = atomic_add_negative(-1, &folio->_mapcount);

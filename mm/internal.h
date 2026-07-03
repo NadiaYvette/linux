@@ -37,12 +37,30 @@ struct folio_batch;
  */
 #define PGCL143_PENDING_BITS 18
 extern atomic_t pgcl143_pending[1 << PGCL143_PENDING_BITS];
-/* Option B quiet correlator: per-pfn last file-mapcount-zeroing caller.
- * pgcl143_zero_pfn holds the folio_pfn that wrote the slot, so the surfacing
- * printer can verify the slot wasn't stolen by a hash-colliding pfn. */
-extern unsigned long pgcl143_zero_ip[1 << PGCL143_PENDING_BITS];
-extern unsigned long pgcl143_zero_pfn[1 << PGCL143_PENDING_BITS];
-extern u8 pgcl143_zero_viafloor[1 << PGCL143_PENDING_BITS];
+/*
+ * Generic DIRECT cluster-pfn index: one slot per 64KB frame, 2^20 = 64GB
+ * coverage (the laptop's RAM), zero aliasing.  A pfn above range is skipped
+ * (idx < 0), never misattributed.  (Was the task #19/#20 double-free detector's
+ * index; that detector was retired in r17 -- page_owner proved its fires were
+ * false positives on legit file-cache->vmalloc->vfree reuse -- so the index is
+ * reused by the r18 zero-driver correlator below.)
+ */
+#define PGCL143_PFN_BITS 20
+static inline long pgcl143_pfn_idx(unsigned long pfn)
+{
+	return (pfn < (1UL << PGCL143_PFN_BITS)) ? (long)pfn : -1L;
+}
+
+/* Quiet correlator: per-pfn last FILE/shmem-mapcount-zeroing caller.
+ * pgcl143_zero_pfn holds the folio_pfn that wrote the slot so the surfacing
+ * printer can verify the slot wasn't stolen by a colliding pfn.
+ *
+ * r18: DIRECT-indexed (pgcl143_pfn_idx) so MAPUNDER names the EXACT over-
+ * removing caller -- the old PENDING hash aliased the driver IP 16/17 of the
+ * time (r17), leaving only the coarse site known. */
+extern unsigned long pgcl143_zero_ip[1UL << PGCL143_PFN_BITS];
+extern unsigned long pgcl143_zero_pfn[1UL << PGCL143_PFN_BITS];
+extern u8 pgcl143_zero_viafloor[1UL << PGCL143_PFN_BITS];
 
 /* Option B INCARNATION STAMP: per-pfn, the pfn a mmu_gather owes a deferred
  * free for + the recording (zap) IP.  A NON-flush free of a page whose slot
@@ -55,31 +73,6 @@ extern unsigned long pgcl143_gather_ip[1 << PGCL143_PENDING_BITS];
 extern unsigned long pgcl143_freed[1 << PGCL143_PENDING_BITS];
 extern unsigned long pgcl143_free_ip[1 << PGCL143_PENDING_BITS];
 DECLARE_PER_CPU(u8, pgcl143_in_gflush);
-
-/*
- * #143 FULL-COVERAGE double-free detector (task #19, the §14 residual).  The
- * legacy detector above hashes `(pfn >> PAGE_MMUSHIFT) & MASK` -- a 16:1 alias
- * (16 clusters per slot) that only SAMPLES double-frees (it named vfree/load_module
- * 2x but missed the census).  This one is DIRECT-indexed by cluster pfn: one slot
- * per 64KB frame, zero aliasing, so it names EVERY double-free's 1st + 2nd freer.
- * 2^19 slots = 32GB coverage (laptop is 16GB = 2^18); a pfn above range is skipped
- * (idx < 0), never misattributed.  pgcl143_df_firstip[pfn] = _RET_IP_ of the 1st
- * free (0 == currently allocated); set at free_pages_prepare, cleared at
- * post_alloc_hook.  4MB BSS, diagnostic-only.
- */
-#define PGCL143_DF_BITS 20	/* 2^20 clusters = 64GB (the laptop's RAM); 19 missed half */
-extern unsigned long pgcl143_df_firstip[1UL << PGCL143_DF_BITS];
-/*
- * #143 task #20: DOUBLE-ALLOC companion.  pgcl143_df_seen[pfn] = the frame has been
- * freed at least once (set at free_pages_prepare), so a later post_alloc_hook that
- * finds df_firstip == 0 (NOT freed since its last alloc) is a genuine double-alloc --
- * the allocator handing out an in-use frame -- not a never-freed boot frame.
- */
-extern u8 pgcl143_df_seen[1UL << PGCL143_DF_BITS];
-static inline long pgcl143_df_idx(unsigned long pfn)
-{
-	return (pfn < (1UL << PGCL143_DF_BITS)) ? (long)pfn : -1L;
-}
 static inline unsigned int pgcl143_pending_idx(unsigned long pfn)
 {
 	return (unsigned int)((pfn >> PAGE_MMUSHIFT) &

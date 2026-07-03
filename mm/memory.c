@@ -2069,13 +2069,38 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 			if (folio_test_large(folio)) {
 				/*
 				 * Large folio (anon + file): MMUPAGE-uniform mapcount --
-				 * remove this batch's nr sub-PTEs from the cluster
-				 * page's _mapcount (pgcl_pte_batch groups by kpfn).
-				 * Straddle / partial / non-cluster-aligned all balance
-				 * naturally on the per-page counter, matching
-				 * set_pte_range's folio_add_rmap_subptes() add side.
+				 * remove this batch's nr sub-PTEs from the cluster page's
+				 * _mapcount (pgcl_pte_batch groups by kpfn).  Straddle /
+				 * partial / non-cluster-aligned all balance naturally on
+				 * the per-page counter, matching set_pte_range's
+				 * folio_add_rmap_subptes() add side.
+				 *
+				 * r18 FLOOR-AT-PRESENT (task #8, the pinned site-1 over-
+				 * remover): the bare atomic_sub(nr) in
+				 * folio_remove_rmap_subptes() drove a shared file/shmem
+				 * cluster page's _mapcount BELOW the sub-PTEs still
+				 * present in this table -> folio_mapped() lies -> the .cjs
+				 * code page freed while mapped (r17 MAPUNDER: all site-1
+				 * zap, file/shmem).  Clamp the removal so the cluster
+				 * page's _mapcount never drops below present_here; the
+				 * small-folio path (else) already floors per-edge.
+				 * Tessera FloorAtPresent.floorRemoveN_preserves.
 				 */
-				folio_remove_rmap_subptes(folio, page, nr, vma);
+				int lph = folio_test_anon(folio) ? 0 :
+					pgcl143_present_count(pte, addr,
+							      pte_pfn(ptent));
+				int lpmc = atomic_read(&page->_mapcount) + 1;
+				int lrm = lpmc > lph ?
+					min_t(int, (int)nr, lpmc - lph) : 0;
+
+				if (lrm > 0)
+					folio_remove_rmap_subptes(folio, page,
+								  lrm, vma);
+				if (unlikely(!folio_test_anon(folio) &&
+					     lpmc <= lph))
+					pgcl143_mapunder_report(folio, lpmc, lph,
+								pte, addr,
+								pte_pfn(ptent));
 			} else {
 				/*
 				 * R17 phase-1 FLOOR-AT-PRESENT (Tessera FloorAtPresent):
