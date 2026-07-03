@@ -1026,6 +1026,40 @@ void folios_put_refs(struct folio_batch *folios, unsigned int *refs)
 				new_refs = old > (int)nr_refs ? old - (int)nr_refs : 0;
 			} while (!atomic_try_cmpxchg(&folio->_refcount, &old, new_refs));
 			/*
+			 * #143 GROUND-TRUTH over-put namer (r8diag, task #20).  The three
+			 * refcount traces proved the residual is a DYNAMIC over-put -- a put
+			 * dropping MORE refs than the folio holds -- not a static add/remove
+			 * asymmetry, and not the old==0 stale put the floor guard targeted.
+			 * `old` is the pre-subtract refcount (try_cmpxchg leaves it); old <
+			 * nr_refs means THIS put over-drops by (nr_refs - old) -- exactly the
+			 * over-drop the floor above silently clamps to 0.  Name it
+			 * UNCONDITIONALLY (every over-put, any folio type, gather-owed or not)
+			 * so the boot log holds the exact over-dropping stack == the root we
+			 * could not find statically.  Report-only: the floor still clamped
+			 * (no refcount:-N underflow cascade -- the memory's naive strip caused
+			 * mass corruption).  Ratelimited; fires before the stale-put guard so
+			 * the old==0 extreme is named too.
+			 */
+			if (unlikely(old < (int)nr_refs)) {
+				static DEFINE_RATELIMIT_STATE(rs_op, HZ, 8);
+
+				if (__ratelimit(&rs_op)) {
+					unsigned long oppfn = folio_pfn(folio);
+
+					pr_warn("PGCL143-OVERPUT pfn=%#lx old=%d nr_refs=%u deficit=%d anon=%d file=%d swpc=%d lru=%d mapcount=%d order=%u gather_owes=%d in_gflush=%d; over-dropper:\n",
+						oppfn, old, nr_refs, (int)nr_refs - old,
+						folio_test_anon(folio),
+						(!folio_test_anon(folio) && folio->mapping) ? 1 : 0,
+						folio_test_swapcache(folio),
+						folio_test_lru(folio),
+						folio_mapcount(folio),
+						folio_order(folio),
+						pgcl143_gather_owes[pgcl143_pending_idx(oppfn)] == oppfn,
+						this_cpu_read(pgcl143_in_gflush));
+					dump_stack();
+				}
+			}
+			/*
 			 * #143 STALE-PUT guard (Tessera StalePut.stale_put_no_free /
 			 * property2/coq/stale_put.v; the reclaim/lru-drain audit, task #20).
 			 * try_cmpxchg leaves `old` = the pre-subtract refcount.  old == 0
