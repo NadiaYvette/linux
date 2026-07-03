@@ -1021,9 +1021,26 @@ void folios_put_refs(struct folio_batch *folios, unsigned int *refs)
 			 * byte-identical to folio_ref_sub_and_test.
 			 */
 			int old = folio_ref_count(folio), new_refs;
+			/*
+			 * r14reffloor (task #8, the data-side face): the SYMMETRIC twin of the
+			 * r12fix mapcount corrective floor.  r13refgate proved r12fix (honest
+			 * folio_mapcount) collapsed the CODE-page free-while-mapped, but the
+			 * REFCOUNT over-drop (PGCL143-OVERPUT) still frees DATA folios while
+			 * referenced -> anon env/argv reuse ("environments not passed") + the
+			 * Bad rss MM_ANONPAGES+1/MM_FILEPAGES-1 type-swap.  r12fix fixed the
+			 * count that LIES (mapcount); this fixes the count that FREES (refcount).
+			 * folio_mapcount is now HONEST (>= present_here), so it is a trustworthy
+			 * floor: never drop the refcount below the refs the live mappings hold,
+			 * so a still-referenced folio keeps refcount >= mapcount >= 1 and is never
+			 * freed (Tessera RefFloor.putFloorMc_free_only_unmapped).  mc==0
+			 * (unmapped) leaves the 0-floor intact -> the last put still frees.
+			 */
+			int pgcl_mc = folio_mapcount(folio);
 
 			do {
 				new_refs = old > (int)nr_refs ? old - (int)nr_refs : 0;
+				if (unlikely(pgcl_mc > 0 && new_refs < pgcl_mc))
+					new_refs = pgcl_mc;	/* refcount corrective floor */
 			} while (!atomic_try_cmpxchg(&folio->_refcount, &old, new_refs));
 			/*
 			 * #143 GROUND-TRUTH over-put namer (r8diag, task #20).  The three
