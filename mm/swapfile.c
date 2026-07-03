@@ -3133,6 +3133,19 @@ static void swap_stop(struct seq_file *swap, void *v)
 	mutex_unlock(&swapon_mutex);
 }
 
+/*
+ * task #21 (pgcl swap 16x over-report): si->pages / span / total_swap_pages count MMUPAGE (4KB)
+ * swap SLOTS (read_swap_header: swapfilepages = i_size >> MMUPAGE_SHIFT; folio_dup_swap: one ref
+ * per MMUPAGE slot), not PAGE (64KB) pages.  The generic K() = (x)<<(PAGE_SHIFT-10) reports them
+ * as 64KB pages -> every swap size (swapon --show, "Adding %uk") is PAGE_MMUCOUNT(=16)x too big
+ * (8GB zram0 shown as 128GB).  Report at the MMUPAGE granule instead.  Identity for non-pgcl.
+ */
+#if PAGE_MMUSHIFT
+#define SWAP_K(x) ((x) << (MMUPAGE_SHIFT - 10))
+#else
+#define SWAP_K(x) K(x)
+#endif
+
 static int swap_show(struct seq_file *swap, void *v)
 {
 	struct swap_info_struct *si = v;
@@ -3145,8 +3158,8 @@ static int swap_show(struct seq_file *swap, void *v)
 		return 0;
 	}
 
-	bytes = K(si->pages);
-	inuse = K(swap_usage_in_pages(si));
+	bytes = SWAP_K(si->pages);
+	inuse = SWAP_K(swap_usage_in_pages(si));
 
 	file = si->swap_file;
 	len = seq_file_path(swap, file, " \t\n\\");
@@ -3713,8 +3726,8 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 	enable_swap_info(si);
 
 	pr_info("Adding %uk swap on %s.  Priority:%d extents:%d across:%lluk %s%s%s%s\n",
-		K(si->pages), name->name, si->prio, nr_extents,
-		K((unsigned long long)span),
+		SWAP_K(si->pages), name->name, si->prio, nr_extents,
+		SWAP_K((unsigned long long)span),
 		(si->flags & SWP_SOLIDSTATE) ? "SS" : "",
 		(si->flags & SWP_DISCARDABLE) ? "D" : "",
 		(si->flags & SWP_AREA_DISCARD) ? "s" : "",
@@ -3796,8 +3809,14 @@ void si_swapinfo(struct sysinfo *val)
 		if ((si->flags & SWP_USED) && !(si->flags & SWP_WRITEOK))
 			nr_to_be_unused += swap_usage_in_pages(si);
 	}
-	val->freeswap = atomic_long_read(&nr_swap_pages) + nr_to_be_unused;
-	val->totalswap = total_swap_pages + nr_to_be_unused;
+	/*
+	 * task #21: nr_swap_pages / total_swap_pages count MMUPAGE (4KB) swap slots, but
+	 * sysinfo/meminfo consume val->{free,total}swap in PAGE (mem_unit=PAGE_SIZE=64KB)
+	 * units -> free(1) and SwapTotal show PAGE_MMUCOUNT(=16)x the true swap.  Fold the
+	 * MMUPAGE slots to PAGE units here (>> PAGE_MMUSHIFT; identity for non-pgcl).
+	 */
+	val->freeswap = (atomic_long_read(&nr_swap_pages) + nr_to_be_unused) >> PAGE_MMUSHIFT;
+	val->totalswap = (total_swap_pages + nr_to_be_unused) >> PAGE_MMUSHIFT;
 	spin_unlock(&swap_lock);
 }
 
